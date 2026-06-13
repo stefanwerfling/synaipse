@@ -188,3 +188,117 @@ describe('SynaipseService.updateNote', () => {
         expect(updated.content).not.toContain('old body');
     });
 });
+
+describe('SynaipseService.suggestLinks', () => {
+    it('suggests pairs with >=2 shared tags and no wikilink between them', async () => {
+        await writeNote(vaultDir, 'a.md', '---\ntitle: A\ntags: [auth, security]\n---\nfoo');
+        await writeNote(vaultDir, 'b.md', '---\ntitle: B\ntags: [auth, security]\n---\nbar');
+        await writeNote(vaultDir, 'c.md', '---\ntitle: C\ntags: [auth]\n---\nonly one shared');
+        await writeNote(vaultDir, 'd.md', '---\ntitle: D\ntags: [unrelated]\n---\nnope');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        const pair = suggestions.find((s) =>
+            (s.a === 'a.md' && s.b === 'b.md') || (s.a === 'b.md' && s.b === 'a.md')
+        );
+
+        expect(pair).toBeDefined();
+        expect(pair?.reasons).toContain('tag-overlap');
+        expect(pair?.sharedTags?.sort()).toEqual(['auth', 'security']);
+
+        const cPair = suggestions.find((s) => s.a === 'c.md' || s.b === 'c.md');
+        expect(cPair).toBeUndefined();
+
+        const dPair = suggestions.find((s) => s.a === 'd.md' || s.b === 'd.md');
+        expect(dPair).toBeUndefined();
+    });
+
+    it('excludes pairs already connected by a wikilink in either direction', async () => {
+        await writeNote(vaultDir, 'a.md', '---\ntitle: A\ntags: [auth, ts]\n---\nlinks to [[B]]');
+        await writeNote(vaultDir, 'b.md', '---\ntitle: B\ntags: [auth, ts]\n---\nno outgoing link');
+        await writeNote(vaultDir, 'c.md', '---\ntitle: C\ntags: [auth, ts]\n---\nlinks to [[A]]');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+
+        for (const s of suggestions) {
+            const involvesA = s.a === 'a.md' || s.b === 'a.md';
+            const involvesB = s.a === 'b.md' || s.b === 'b.md';
+            const involvesC = s.a === 'c.md' || s.b === 'c.md';
+
+            expect(involvesA && involvesB).toBe(false);
+            expect(involvesA && involvesC).toBe(false);
+        }
+
+        const bcPair = suggestions.find((s) =>
+            (s.a === 'b.md' && s.b === 'c.md') || (s.a === 'c.md' && s.b === 'b.md')
+        );
+        expect(bcPair).toBeDefined();
+    });
+
+    it('respects pathPrefix and excludes notes outside it', async () => {
+        await writeNote(vaultDir, 'inside/a.md', '---\ntitle: A\ntags: [auth, ts]\n---\nfoo');
+        await writeNote(vaultDir, 'inside/b.md', '---\ntitle: B\ntags: [auth, ts]\n---\nbar');
+        await writeNote(vaultDir, 'outside.md', '---\ntitle: C\ntags: [auth, ts]\n---\nelsewhere');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks({pathPrefix: 'inside/'});
+        expect(suggestions.length).toBe(1);
+        for (const s of suggestions) {
+            expect(s.a.startsWith('inside/')).toBe(true);
+            expect(s.b.startsWith('inside/')).toBe(true);
+        }
+    });
+
+    it('honours the limit option', async () => {
+        await writeNote(vaultDir, 'a.md', '---\ntitle: A\ntags: [x, y]\n---\nfoo');
+        await writeNote(vaultDir, 'b.md', '---\ntitle: B\ntags: [x, y]\n---\nbar');
+        await writeNote(vaultDir, 'c.md', '---\ntitle: C\ntags: [x, y]\n---\nbaz');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const all = await service.suggestLinks();
+        expect(all.length).toBeGreaterThanOrEqual(2);
+
+        const capped = await service.suggestLinks({limit: 1});
+        expect(capped.length).toBe(1);
+    });
+
+    it('returns empty for a vault with fewer than 2 notes', async () => {
+        await writeNote(vaultDir, 'only.md', '---\ntitle: Only\ntags: [a, b]\n---\nlonely');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        expect(suggestions).toEqual([]);
+    });
+
+    it('sorts suggestions by score descending', async () => {
+        await writeNote(vaultDir, 'a.md', '---\ntitle: A\ntags: [t1, t2, t3, t4]\n---\nbody');
+        await writeNote(vaultDir, 'b.md', '---\ntitle: B\ntags: [t1, t2, t3, t4]\n---\nshares 4 with A');
+        await writeNote(vaultDir, 'c.md', '---\ntitle: C\ntags: [t1, t2]\n---\nshares 2 with A');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        expect(suggestions.length).toBeGreaterThanOrEqual(2);
+
+        for (let i = 0; i < suggestions.length - 1; i++) {
+            const cur = suggestions[i];
+            const next = suggestions[i + 1];
+
+            if (cur !== undefined && next !== undefined) {
+                expect(cur.score).toBeGreaterThanOrEqual(next.score);
+            }
+        }
+    });
+});

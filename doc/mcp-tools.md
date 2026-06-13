@@ -16,6 +16,7 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | [`synaipse_outgoing_links`](#synaipse_outgoing_links) | Wikilinks contained in a note                          |
 | [`synaipse_link_note`](#synaipse_link_note)           | Append wikilinks under a section (idempotent)          |
 | [`synaipse_related`](#synaipse_related)               | Related-notes ranking (semantic + links + tags)        |
+| [`synaipse_suggest_links`](#synaipse_suggest_links)   | Missing-links finder — related pairs without a wikilink |
 | [`synaipse_graph`](#synaipse_graph)                   | Knowledge graph (nodes + edges)                        |
 | [`synaipse_recent`](#synaipse_recent)                 | Most recently modified notes                           |
 | [`synaipse_todos`](#synaipse_todos)                   | Open `- [ ]` items across the vault                    |
@@ -148,6 +149,39 @@ Idempotent — links that already exist are skipped.
 | `limit` | number? | `10`     |                                   |
 
 Combines semantic similarity, in/out wikilinks and shared tags into a ranked list with `reason`.
+
+---
+
+## `synaipse_suggest_links`
+
+| Arg          | Type     | Default | Notes                                  |
+|---|---|---|---|
+| `limit`      | number?  | `20`    | Max suggestions returned                |
+| `minScore`   | number?  | `0.65`  | Min semantic similarity in `[0,1]`. Tag-overlap suggestions are not filtered by this. |
+| `pathPrefix` | string?  | `""`    | Restrict scan to a folder              |
+
+Finds pairs of notes that look related — either via semantic similarity (vector index) or because they share ≥2 tags — but have **no wikilink** between them in either direction. Use this to discover holes in your knowledge graph and materialise them with `synaipse_link_note`.
+
+Returns:
+
+```json
+{
+  "suggestions": [
+    {
+      "a": "Memory/architecture/cluster.md",
+      "aTitle": "BackendCluster",
+      "b": "Memory/architecture/service-manager.md",
+      "bTitle": "ServiceManager",
+      "score": 0.82,
+      "reasons": ["semantic", "tag-overlap"],
+      "sharedTags": ["architecture", "cluster"]
+    }
+  ],
+  "count": 1
+}
+```
+
+Without an embeddings provider (`EMBEDDINGS_PROVIDER=none`), only tag-overlap suggestions are returned.
 
 ---
 

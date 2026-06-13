@@ -297,6 +297,33 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
     },
     {
         definition: {
+            name: 'synaipse_suggest_links',
+            description: 'Find pairs of notes that look related (semantic similarity or ≥2 shared tags) but have no wikilink between them. Returns ranked suggestions you can materialise with synaipse_link_note. Without an embeddings provider, only tag-overlap suggestions are returned.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    limit: {type: 'number', description: 'Max suggestions (default: 20)'},
+                    minScore: {type: 'number', description: 'Minimum semantic similarity in [0,1] (default: 0.65). Tag-overlap suggestions are not filtered by this.'},
+                    pathPrefix: {type: 'string', description: 'Restrict scan to a folder, e.g. "Memory/decisions/"'}
+                }
+            }
+        },
+        handle: async (args) => {
+            const limit = asNumber(args.limit, 20);
+            const minScore = typeof args.minScore === 'number' ? args.minScore : 0.65;
+            const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
+            const suggestions = await service.suggestLinks({limit, minScore, pathPrefix});
+            return {
+                response: ok({suggestions, count: suggestions.length}),
+                event: {
+                    kind: 'search',
+                    touched: [...new Set(suggestions.slice(0, 5).flatMap((s) => [s.a, s.b]))]
+                }
+            };
+        }
+    },
+    {
+        definition: {
             name: 'synaipse_todos',
             description: 'Collect open todos (- [ ]) across the vault. Optionally filter by path prefix or include completed items.',
             inputSchema: {

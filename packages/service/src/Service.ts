@@ -18,6 +18,22 @@ export interface RelatedNote {
     reasons: string[];
 }
 
+export interface LinkSuggestion {
+    a: NoteId;
+    aTitle: string;
+    b: NoteId;
+    bTitle: string;
+    score: number;
+    reasons: string[];
+    sharedTags?: string[];
+}
+
+export interface SuggestLinksOptions {
+    limit?: number;
+    minScore?: number;
+    pathPrefix?: string;
+}
+
 export interface TodoItem {
     noteId: NoteId;
     title: string;
@@ -336,6 +352,158 @@ export class SynaipseService {
                 };
             })
             .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+    }
+
+    public async suggestLinks(opts: SuggestLinksOptions = {}): Promise<LinkSuggestion[]> {
+        const limit = opts.limit ?? 20;
+        const minScore = opts.minScore ?? 0.65;
+        const prefix = opts.pathPrefix ?? '';
+
+        const allNotes = this.vault.list();
+        const scoped = prefix.length === 0
+            ? allNotes
+            : allNotes.filter((n) => n.id.startsWith(prefix));
+
+        if (scoped.length < 2) {
+            return [];
+        }
+
+        const titleToId = new Map<string, NoteId>();
+        for (const note of allNotes) {
+            titleToId.set(note.title, note.id);
+        }
+
+        const linkedSet = (note: Note): Set<NoteId> => {
+            const set = new Set<NoteId>([note.id]);
+
+            for (const link of note.wikilinks) {
+                const targetId = titleToId.get(link);
+
+                if (targetId !== undefined) {
+                    set.add(targetId);
+                }
+            }
+
+            for (const backlinkId of this.vault.backlinksOf(note.id)) {
+                set.add(backlinkId);
+            }
+
+            return set;
+        };
+
+        const suggestions = new Map<string, LinkSuggestion>();
+        const pairKey = (x: NoteId, y: NoteId): string => x < y ? `${x}|${y}` : `${y}|${x}`;
+
+        const recordPair = (
+            aId: NoteId,
+            bId: NoteId,
+            score: number,
+            reason: string,
+            sharedTags?: string[]
+        ): void => {
+            const a = this.vault.tryGet(aId);
+            const b = this.vault.tryGet(bId);
+
+            if (a === undefined || b === undefined) {
+                return;
+            }
+
+            const key = pairKey(aId, bId);
+            const existing = suggestions.get(key);
+
+            if (existing !== undefined) {
+                if (score > existing.score) {
+                    existing.score = score;
+                }
+
+                if (!existing.reasons.includes(reason)) {
+                    existing.reasons.push(reason);
+                }
+
+                if (sharedTags !== undefined && existing.sharedTags === undefined) {
+                    existing.sharedTags = sharedTags;
+                }
+
+                return;
+            }
+
+            suggestions.set(key, {
+                a: aId,
+                aTitle: a.title,
+                b: bId,
+                bTitle: b.title,
+                score,
+                reasons: [reason],
+                ...(sharedTags !== undefined ? {sharedTags} : {})
+            });
+        };
+
+        if (this.index !== null) {
+            for (const note of scoped) {
+                if (note.content.length === 0) {
+                    continue;
+                }
+
+                const linked = linkedSet(note);
+                const sample = note.content.slice(0, SEMANTIC_SAMPLE_CHARS);
+                const hits = await this.index.semanticSearch(sample, 20);
+                const seen = new Set<NoteId>();
+
+                for (const hit of hits) {
+                    if (seen.has(hit.noteId)) {
+                        continue;
+                    }
+
+                    seen.add(hit.noteId);
+
+                    if (linked.has(hit.noteId)) {
+                        continue;
+                    }
+
+                    if (hit.score < minScore) {
+                        continue;
+                    }
+
+                    if (prefix.length > 0 && !hit.noteId.startsWith(prefix)) {
+                        continue;
+                    }
+
+                    recordPair(note.id, hit.noteId, hit.score, 'semantic');
+                }
+            }
+        }
+
+        for (let i = 0; i < scoped.length; i++) {
+            const a = scoped[i];
+
+            if (a === undefined || a.tags.length < 2) {
+                continue;
+            }
+
+            const aLinked = linkedSet(a);
+            const aTagSet = new Set(a.tags);
+
+            for (let j = i + 1; j < scoped.length; j++) {
+                const b = scoped[j];
+
+                if (b === undefined || aLinked.has(b.id)) {
+                    continue;
+                }
+
+                const shared = b.tags.filter((t) => aTagSet.has(t));
+
+                if (shared.length < 2) {
+                    continue;
+                }
+
+                const score = Math.min(0.95, 0.5 + 0.1 * shared.length);
+                recordPair(a.id, b.id, score, 'tag-overlap', shared);
+            }
+        }
+
+        return [...suggestions.values()]
+            .sort((x, y) => y.score - x.score)
             .slice(0, limit);
     }
 

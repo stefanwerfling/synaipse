@@ -64,7 +64,7 @@ Index: [doc/README.md](doc/README.md).
 
 The repo ships a project-level [`.mcp.json`](.mcp.json). After `npm run build`, launch Claude Code from the repository root — the `synaipse` MCP server starts automatically over stdio and reads `.env`. See [doc/claude-code-setup.md](doc/claude-code-setup.md).
 
-Available tools: `synaipse_search`, `_read_note`, `_write_note`, `_update_note`, `_delete_note`, `_list_notes`, `_list_tags`, `_notes_by_tag`, `_backlinks`, `_outgoing_links`, `_link_note`, `_related`, `_graph`, `_recent`, `_todos`, `_log_session`. Full reference: [doc/mcp-tools.md](doc/mcp-tools.md).
+Available tools: `synaipse_search`, `_read_note`, `_write_note`, `_update_note`, `_delete_note`, `_list_notes`, `_list_tags`, `_notes_by_tag`, `_backlinks`, `_outgoing_links`, `_link_note`, `_related`, `_suggest_links`, `_graph`, `_recent`, `_todos`, `_log_session`. Full reference: [doc/mcp-tools.md](doc/mcp-tools.md).
 
 ## Stack
 
