@@ -76,8 +76,30 @@ export const api = {
         }
 
         return json(await fetch(url));
+    },
+    verifyHistory: async (): Promise<VerifyResult> => {
+        return json(await fetch('/api/health/verify'));
+    },
+    snapshotList: async (sha: string, treePath?: string): Promise<{sha: string; path: string; entries: SnapshotEntry[]}> => {
+        const url = new URL(`/api/snapshot/${encodeURIComponent(sha)}`, window.location.origin);
+
+        if (treePath !== undefined) {
+            url.searchParams.set('path', treePath);
+        }
+
+        return json(await fetch(url));
     }
 };
+
+export interface SnapshotEntry {
+    name: string;
+    type: 'file' | 'dir';
+    sha: string;
+}
+
+export type VerifyResult =
+    | {enabled: false}
+    | {enabled: true; checked: number; ok: boolean; corrupt: Array<{sha: string; reason: string}>};
 
 export interface HistoryEntry {
     sha: string;

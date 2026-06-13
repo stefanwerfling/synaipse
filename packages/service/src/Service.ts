@@ -1,7 +1,13 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
-import {Diff, type PersonInput} from 'ngit';
+import {Diff, type PersonInput, type VerifyReport} from 'ngit';
+
+export interface SnapshotEntry {
+    name: string;
+    type: 'file' | 'dir';
+    sha: string;
+}
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {fulltextSearch} from './Fulltext.js';
 import {HashCache} from './Cache.js';
@@ -310,6 +316,47 @@ export class SynaipseService {
 
     public async historyEnabled(): Promise<boolean> {
         return (await this.vault.getRepo()) !== null;
+    }
+
+    public async verifyHistory(): Promise<VerifyReport | null> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return null;
+        }
+
+        return repo.verify();
+    }
+
+    public async snapshotList(commitSha: string, treePath?: string): Promise<SnapshotEntry[]> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return [];
+        }
+
+        const snap = repo.at(commitSha);
+        const entries = await snap.list(treePath);
+        return entries.map((e) => ({name: e.name, type: e.type, sha: e.sha}));
+    }
+
+    public async snapshotWalk(commitSha: string, pathPrefix = ''): Promise<{path: string; sha: string}[]> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return [];
+        }
+
+        const snap = repo.at(commitSha);
+        const result: {path: string; sha: string}[] = [];
+
+        for await (const entry of snap.walk()) {
+            if (pathPrefix.length === 0 || entry.path.startsWith(pathPrefix)) {
+                result.push(entry);
+            }
+        }
+
+        return result;
     }
 
     private requireProject(op: string, override?: string | null): string {

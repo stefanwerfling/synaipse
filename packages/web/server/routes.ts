@@ -215,6 +215,63 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
         return;
     }
 
+    if (path === '/api/health/verify') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const report = await service.verifyHistory();
+
+        if (report === null) {
+            json(res, 200, {enabled: false});
+            return;
+        }
+
+        json(res, 200, {enabled: true, ...report});
+        return;
+    }
+
+    if (path.startsWith('/api/snapshot/')) {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const tail = decodeURIComponent(path.slice('/api/snapshot/'.length));
+
+        if (!/^[0-9a-f]{40}(?:\/.*)?$/.test(tail)) {
+            json(res, 400, {error: 'expected /api/snapshot/<40-char-sha>[/<sub>]'});
+            return;
+        }
+
+        const slashIdx = tail.indexOf('/');
+        const sha = slashIdx === -1 ? tail : tail.slice(0, slashIdx);
+        const op = slashIdx === -1 ? '' : tail.slice(slashIdx + 1);
+
+        try {
+            if (op === '' || op === 'list') {
+                const treePath = url.searchParams.get('path') ?? undefined;
+                const entries = await service.snapshotList(sha, treePath);
+                json(res, 200, {sha, path: treePath ?? '', entries});
+                return;
+            }
+
+            if (op === 'walk') {
+                const prefix = url.searchParams.get('prefix') ?? '';
+                const files = await service.snapshotWalk(sha, prefix);
+                json(res, 200, {sha, prefix, count: files.length, files});
+                return;
+            }
+
+            json(res, 404, {error: `unknown snapshot op: ${op}`});
+        } catch (error) {
+            json(res, 404, {error: String(error)});
+        }
+
+        return;
+    }
+
     if (path === '/api/info') {
         if (method !== 'GET') {
             methodNotAllowed(res);

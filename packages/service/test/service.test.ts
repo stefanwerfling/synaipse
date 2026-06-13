@@ -600,6 +600,58 @@ describe('SynaipseService project enforcement', () => {
         ]));
     });
 
+    it('verifyHistory returns ok for a healthy store', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: true, author: {name: 'T', email: 't@local'}}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+        await service.writeNote({path: 'a.md', content: 'body'});
+        await service.writeNote({path: 'b.md', content: 'body2'});
+
+        const report = await service.verifyHistory();
+        expect(report).not.toBeNull();
+        expect(report!.ok).toBe(true);
+        expect(report!.checked).toBeGreaterThan(0);
+    });
+
+    it('verifyHistory returns null when no .ngit exists', async () => {
+        service = new SynaipseService({
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: false, author: {name: 'T', email: 't@local'}}
+        });
+        await service.start();
+        expect(await service.verifyHistory()).toBeNull();
+    });
+
+    it('snapshotList browses the vault at a past commit', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: true, author: {name: 'T', email: 't@local'}}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        await service.writeNote({path: 'first.md', content: 'one'});
+        const repo = await service.getVault().getRepo();
+        const sha1 = await repo!.head();
+
+        await service.writeNote({path: 'sub/second.md', content: 'two'});
+
+        const root = await service.snapshotList(sha1!);
+        expect(root.map((e) => e.name).sort()).toEqual(['Memory']);
+
+        const memory = await service.snapshotList(sha1!, 'Memory/app-x');
+        expect(memory.map((e) => e.name).sort()).toEqual(['first.md']);
+
+        const headSha = (await repo!.head())!;
+        const memoryHead = await service.snapshotList(headSha, 'Memory/app-x');
+        expect(memoryHead.map((e) => e.name).sort()).toEqual(['first.md', 'sub']);
+    });
+
     it('per-call gitAuthor flows into the autocommit', async () => {
         const cfg = {
             ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),

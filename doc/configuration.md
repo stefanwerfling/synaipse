@@ -207,8 +207,16 @@ Disabling autocommit (`SYNAIPSE_GIT_AUTOCOMMIT=false`) stops writing new commits
 | `GET /api/notes/:id/history?limit=50` | `{entries: [{sha, message, author, parents}]}` |
 | `GET /api/notes/:id/version/:sha`     | `{content, sha}` — note content at a past commit |
 | `GET /api/notes/:id/diff?from=&to=`   | `{unified: "...diff text..."}` |
+| `GET /api/snapshot/:sha?path=…`       | `{sha, path, entries: [{name, type, sha}]}` — browse the vault as it was at a past commit |
+| `GET /api/snapshot/:sha/walk?prefix=…`| `{sha, prefix, count, files: [{path, sha}]}` — flat depth-first listing |
+| `GET /api/health/verify`              | `{enabled: true, checked, ok, corrupt: [{sha, reason}]}` or `{enabled: false}` — re-hashes every stored object |
 
-The web UI exposes these through a History button in the note viewer.
+The web UI exposes these through:
+
+- The **History** button in the note viewer (commit list + per-commit Diff/Snapshot tabs)
+- A **Verify** button in the history panel header that runs the fsck inline
+
+Claude can use the same endpoints via `synaipse_verify_history` and `synaipse_snapshot_list` MCP tools.
 
 ## Web UI
 

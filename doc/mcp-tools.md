@@ -5,6 +5,8 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | Tool | Purpose |
 |---|---|
 | [`synaipse_get_project`](#synaipse_get_project)       | Read the active project context                        |
+| [`synaipse_verify_history`](#synaipse_verify_history) | Re-hash every stored object — vault integrity check    |
+| [`synaipse_snapshot_list`](#synaipse_snapshot_list)   | List entries of the vault at a past commit             |
 | [`synaipse_search`](#synaipse_search)                 | Search notes (fulltext / semantic / hybrid)            |
 | [`synaipse_read_note`](#synaipse_read_note)           | Read a single note                                     |
 | [`synaipse_write_note`](#synaipse_write_note)         | Create or overwrite a note                             |
@@ -44,6 +46,34 @@ No arguments. Returns the project context configured via `SYNAIPSE_PROJECT`:
 When unset, `project` is `null`, `isSet` is `false`, and all write tools (`write_note`, `update_note`, `delete_note`, `link_note`, `log_session`) reject with a `ProjectScopeError`. Reads continue to work globally.
 
 See [configuration.md](configuration.md#project-scope) for details.
+
+---
+
+## `synaipse_verify_history`
+
+No arguments. Returns `{enabled: false}` when versioning is off, otherwise the ngit verify report:
+
+```json
+{
+  "enabled": true,
+  "checked": 142,
+  "ok": true,
+  "corrupt": []
+}
+```
+
+`corrupt[]` lists every object whose stored content no longer matches its sha (`{sha, reason}`). The store is healthy when this is empty.
+
+---
+
+## `synaipse_snapshot_list`
+
+| Arg  | Type    | Notes                                              |
+|---|---|---|
+| `sha`  | string  | 40-char commit sha                                 |
+| `path` | string? | Folder inside the snapshot (e.g. `Memory/decisions/`) |
+
+Returns `{sha, path, entries: [{name, type, sha}]}` where `type` is `file` or `dir`. Use to time-travel through the vault tree, drill into folders, or compare folder contents across two commits.
 
 ---
 

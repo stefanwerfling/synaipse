@@ -110,4 +110,36 @@ describe('Vault autocommit via ngit', () => {
         await vault.load();
         expect(await vault.getRepo()).toBeNull();
     });
+
+    it('repo.verify reports ok over a healthy store', async () => {
+        const vault = new Vault(vaultDir, {history: {autoCommit: true, author}});
+        await vault.load();
+        await vault.write({path: 'a.md', content: 'hello'});
+        await vault.write({path: 'b.md', content: 'world'});
+
+        const repo = await vault.getRepo();
+        const report = await repo!.verify();
+
+        expect(report.ok).toBe(true);
+        expect(report.checked).toBeGreaterThan(0);
+        expect(report.corrupt).toEqual([]);
+    });
+
+    it('repo.at(sha) lists the vault at a past commit', async () => {
+        const vault = new Vault(vaultDir, {history: {autoCommit: true, author}});
+        await vault.load();
+        await vault.write({path: 'first.md', content: 'one'});
+        const sha1 = await (await vault.getRepo())!.head();
+
+        await vault.write({path: 'second.md', content: 'two'});
+
+        const repo = await vault.getRepo();
+        const snap = repo!.at(sha1!);
+        const root = await snap.list();
+        expect(root.map((e) => e.name).sort()).toEqual(['first.md']);
+
+        const headSnap = repo!.at((await repo!.head())!);
+        const rootHead = await headSnap.list();
+        expect(rootHead.map((e) => e.name).sort()).toEqual(['first.md', 'second.md']);
+    });
 });
