@@ -34,6 +34,16 @@ export class Vault {
         this.historyConfig = opts.history ?? null;
     }
 
+    /** True when the history feature is configured for this vault — irrespective of whether the first commit has been made yet. The UI uses this to decide whether to surface the History button at all. */
+    public isHistoryConfigured(): boolean {
+        return this.historyConfig !== null;
+    }
+
+    /** True when writes will autocommit. */
+    public isAutoCommitEnabled(): boolean {
+        return this.historyConfig !== null && this.historyConfig.autoCommit;
+    }
+
     /** Returns the ngit Repo for read-only ops (history, show, diff). Returns null when history is disabled or the repo has not been initialised yet (no Synaipse commit has happened). */
     public async getRepo(): Promise<Repo | null> {
         if (this.historyConfig === null) {

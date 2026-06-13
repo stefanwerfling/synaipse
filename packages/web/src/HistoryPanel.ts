@@ -88,7 +88,7 @@ export class HistoryPanel {
 
             if (!report.enabled) {
                 this.verifyHost.appendChild(
-                    el('div', {class: 'history-verify-row off', text: 'history disabled — no .ngit/'})
+                    el('div', {class: 'history-verify-row off', text: 'no commits yet — edit a note via Synaipse to start versioning'})
                 );
                 return;
             }

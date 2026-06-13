@@ -314,7 +314,12 @@ export class SynaipseService {
         });
     }
 
+    /** True whenever the History UI should be available — feature is configured. The repo may not be initialised yet (no Synaipse-driven write has happened), in which case noteHistory/snapshot etc. just return empty results. */
     public async historyEnabled(): Promise<boolean> {
+        if (this.vault.isHistoryConfigured()) {
+            return true;
+        }
+
         return (await this.vault.getRepo()) !== null;
     }
 
