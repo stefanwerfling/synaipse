@@ -103,10 +103,13 @@ export class SynaipseService {
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
     public constructor(config: Config) {
+        const git = config.git ?? {
+            autoCommit: true,
+            author: {name: 'Synaipse', email: 'synaipse@local'}
+        };
+
         this.vault = new Vault(config.vaultPath, {
-            ...(config.git !== undefined
-                ? {history: {autoCommit: config.git.autoCommit, author: config.git.author}}
-                : {})
+            history: {autoCommit: git.autoCommit, author: git.author}
         });
         this.cache = new HashCache(config.indexCachePath);
         this.watcher = new VaultWatcher(config.vaultPath);

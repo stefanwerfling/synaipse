@@ -183,10 +183,11 @@ Claude can query the active project at any time via `synaipse_get_project`.
 
 ## Versioning (ngit)
 
-Synaipse autocommits every Synaipse-driven write to a [ngit](https://github.com/stefanwerfling/ngit) repo inside the vault — no system `git` binary required. External edits (Obsidian, manual `vim`, …) are **not** autocommitted: that's the user's hand, Synaipse stays out.
+**Autocommit is on by default** — Synaipse versions every Synaipse-driven write to a [ngit](https://github.com/stefanwerfling/ngit) repo inside the vault. No system `git` binary required, no opt-in step. External edits (Obsidian, manual `vim`, …) are **not** autocommitted: that's the user's hand, Synaipse stays out.
 
 ```env
-SYNAIPSE_GIT_AUTOCOMMIT=true                       # default
+# both lines are optional — these are the defaults
+SYNAIPSE_GIT_AUTOCOMMIT=true
 SYNAIPSE_GIT_AUTHOR=Synaipse <synaipse@local>
 ```
 
