@@ -86,7 +86,44 @@ Effects:
 | `log_session`           | writes into `Memory/my-app/sessions/YYYY-MM-DD.md`. |
 | reads (`search`, `list_notes`, `related`, `graph`, `stale`, `todos`, …) | unchanged — Claude can still discover knowledge across projects. |
 
-When `SYNAIPSE_PROJECT` is empty or missing, **all write tools fail** with a `ProjectScopeError`. Reads work as before.
+When `SYNAIPSE_PROJECT` is empty or missing, **all write tools fail** with a `ProjectScopeError` — unless the caller provides a project via HTTP (see below). Reads work as before.
+
+### Per-request project (HTTP only)
+
+When the MCP server runs in HTTP mode (`SYNAIPSE_MCP_TRANSPORT=http`), the project can also be supplied **per request**. Useful for one central Synaipse daemon serving many projects.
+
+Resolver priority for each tool call:
+
+1. URL path segment — `http://host:3030/mcp/<project>/...`
+2. HTTP header — `X-Synaipse-Project: <project>`
+3. Server default — `SYNAIPSE_PROJECT` env at startup
+
+Sample `.mcp.json` variants:
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp/my-app"
+    }
+  }
+}
+```
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp",
+      "headers": {"X-Synaipse-Project": "my-app"}
+    }
+  }
+}
+```
+
+Project names are restricted to `[A-Za-z0-9_.-]+` to prevent path traversal.
 
 For each project, ship a `.mcp.json` in the project repository pointing at the global vault and setting its own project name:
 

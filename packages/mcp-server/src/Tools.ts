@@ -19,6 +19,12 @@ export interface ToolOutcome {
     event?: ToolEventInfo;
 }
 
+export interface ToolContext {
+    project?: string | null;
+}
+
+const EMPTY_CTX: ToolContext = {};
+
 const ok = (data: unknown): ToolResponse => ({
     content: [{type: 'text', text: JSON.stringify(data, null, 2)}]
 });
@@ -49,8 +55,10 @@ const asSearchMode = (value: unknown): SearchMode => {
 
 export interface ToolHandler {
     definition: Tool;
-    handle: (args: Record<string, unknown>) => Promise<ToolOutcome>;
+    handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
+
+export {EMPTY_CTX};
 
 export const buildTools = (service: SynaipseService): ToolHandler[] => [
     {
@@ -59,8 +67,8 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
             description: 'Return the active project context. When set, write_note auto-prefixes paths to Memory/<project>/, injects a project/<name> tag and frontmatter.project; update/delete/link/log_session are restricted to Memory/<project>/. Useful for Claude to verify scope before acting.',
             inputSchema: {type: 'object', properties: {}}
         },
-        handle: async () => {
-            const name = service.getProject();
+        handle: async (_args, ctx) => {
+            const name = service.getProject(ctx?.project);
             return {
                 response: ok({
                     project: name,
@@ -131,13 +139,13 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['path', 'content']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const frontmatter = args.frontmatter as Record<string, unknown> | undefined;
             const note = await service.writeNote({
                 path: asString(args.path, 'path'),
                 content: asString(args.content, 'content'),
                 ...(frontmatter ? {frontmatter} : {})
-            });
+            }, ctx);
             return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
         }
     },
@@ -153,9 +161,9 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = asString(args.id, 'id');
-            await service.deleteNote(id);
+            await service.deleteNote(id, ctx);
             return {response: ok({deleted: true}), event: {kind: 'delete', touched: [id]}};
         }
     },
@@ -279,13 +287,13 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['summary']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const summary = asString(args.summary, 'summary');
             const references = Array.isArray(args.references)
                 ? args.references.filter((r): r is string => typeof r === 'string')
                 : [];
 
-            const sessionId = await service.appendSessionLog(summary, references);
+            const sessionId = await service.appendSessionLog(summary, references, ctx);
             return {
                 response: ok({sessionId, references, time: new Date().toISOString()}),
                 event: {kind: 'write', touched: [sessionId]}
@@ -405,13 +413,13 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['fromId', 'toTitles']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const fromId = asString(args.fromId, 'fromId');
             const toTitles = Array.isArray(args.toTitles)
                 ? args.toTitles.filter((t): t is string => typeof t === 'string')
                 : [];
             const section = typeof args.section === 'string' ? args.section : 'References';
-            const {note, added} = await service.linkNote(fromId, toTitles, section);
+            const {note, added} = await service.linkNote(fromId, toTitles, section, ctx);
             return {
                 response: ok({noteId: note.id, added, skipped: toTitles.filter((t) => !added.includes(t))}),
                 event: {kind: 'write', touched: [note.id]}
@@ -436,7 +444,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = asString(args.id, 'id');
             const patch: {content?: string; frontmatterPatch?: Record<string, unknown>} = {};
 
@@ -448,7 +456,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 patch.frontmatterPatch = args.frontmatterPatch as Record<string, unknown>;
             }
 
-            const note = await service.updateNote(id, patch);
+            const note = await service.updateNote(id, patch, ctx);
             return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
         }
     },

@@ -537,4 +537,55 @@ describe('SynaipseService project enforcement', () => {
         await expect(service.appendSessionLog('x', []))
             .rejects.toThrow(/project context/);
     });
+
+    it('per-call project override beats the constructor default', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'default'));
+        await service.start();
+
+        const note = await service.writeNote(
+            {path: 'foo.md', content: 'body'},
+            {project: 'override'}
+        );
+
+        expect(note.id).toBe('Memory/override/foo.md');
+        expect(note.frontmatter.project).toBe('override');
+    });
+
+    it('per-call override works without any constructor project', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const note = await service.writeNote(
+            {path: 'foo.md', content: 'body'},
+            {project: 'only-via-override'}
+        );
+
+        expect(note.id).toBe('Memory/only-via-override/foo.md');
+    });
+
+    it('getProject reflects the override', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'default'));
+        await service.start();
+
+        expect(service.getProject()).toBe('default');
+        expect(service.getProject('override')).toBe('override');
+    });
+
+    it('updateNote with override targets a different project scope', async () => {
+        await writeNote(vaultDir, 'Memory/override/foo.md', '---\ntitle: Foo\n---\nbody');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'default'));
+        await service.start();
+
+        await expect(service.updateNote('Memory/override/foo.md', {content: 'updated'}))
+            .rejects.toThrow(/outside project scope/);
+
+        const updated = await service.updateNote(
+            'Memory/override/foo.md',
+            {content: 'updated'},
+            {project: 'override'}
+        );
+
+        expect(updated.content).toContain('updated');
+    });
 });

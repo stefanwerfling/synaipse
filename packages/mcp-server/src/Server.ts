@@ -7,7 +7,8 @@ import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotoc
 import type {Config} from '@synaipse/core';
 import {SynaipseService} from '@synaipse/service';
 import {EventPublisher} from './EventPublisher.js';
-import {buildTools, type ToolHandler} from './Tools.js';
+import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
+import {resolveProjectFromRequest} from './Project.js';
 
 export type TransportMode = 'stdio' | 'http';
 
@@ -21,7 +22,8 @@ export interface StartServerOptions {
 const buildMcpServer = (
     config: Config,
     tools: ToolHandler[],
-    publisher: EventPublisher
+    publisher: EventPublisher,
+    ctx: ToolContext = {}
 ): Server => {
     const handlers = new Map(tools.map((t) => [t.definition.name, t.handle]));
 
@@ -42,7 +44,7 @@ const buildMcpServer = (
         }
 
         try {
-            const outcome = await handler((request.params.arguments ?? {}) as Record<string, unknown>);
+            const outcome = await handler((request.params.arguments ?? {}) as Record<string, unknown>, ctx);
 
             if (outcome.event !== undefined) {
                 publisher.publish({
@@ -86,7 +88,13 @@ export const startServer = async (config: Config, options: StartServerOptions): 
 
             void (async () => {
                 const transport = new StreamableHTTPServerTransport({} as never);
-                const server = buildMcpServer(config, tools, publisher);
+                const project = resolveProjectFromRequest({
+                    url: req.url,
+                    headers: req.headers,
+                    basePath: options.httpPath
+                });
+                const ctx: ToolContext = project !== undefined ? {project} : {};
+                const server = buildMcpServer(config, tools, publisher, ctx);
 
                 res.on('close', () => {
                     void transport.close();

@@ -66,6 +66,10 @@ export interface UpdateNoteInput {
     frontmatterPatch?: Frontmatter;
 }
 
+export interface ProjectOpts {
+    project?: string | null;
+}
+
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
 const SEMANTIC_SAMPLE_CHARS = 1500;
 
@@ -215,18 +219,21 @@ export class SynaipseService {
         return this.mergeHits(ft, sem, limit);
     }
 
-    public getProject(): string | null {
-        return this.project;
+    public getProject(override?: string | null): string | null {
+        return override ?? this.project;
     }
 
-    private requireProject(op: string): string {
-        if (this.project === null) {
+    private requireProject(op: string, override?: string | null): string {
+        const resolved = override ?? this.project;
+
+        if (resolved === null || resolved === '') {
             throw new ProjectScopeError(
-                `${op} requires a project context. Set SYNAIPSE_PROJECT in the MCP server env.`
+                `${op} requires a project context. Set SYNAIPSE_PROJECT in the MCP server env, ` +
+                `or pass it per-request via URL path /mcp/<project> or header X-Synaipse-Project.`
             );
         }
 
-        return this.project;
+        return resolved;
     }
 
     private projectFolder(project: string): string {
@@ -237,8 +244,8 @@ export class SynaipseService {
         return `project/${project}`;
     }
 
-    private assertInProject(id: NoteId, op: string): void {
-        const project = this.requireProject(op);
+    private assertInProject(id: NoteId, op: string, override?: string | null): void {
+        const project = this.requireProject(op, override);
         const prefix = this.projectFolder(project);
 
         if (!id.startsWith(prefix)) {
@@ -290,8 +297,8 @@ export class SynaipseService {
         return base;
     }
 
-    public async writeNote(input: NoteWriteInput): Promise<Note> {
-        const project = this.requireProject('write_note');
+    public async writeNote(input: NoteWriteInput, opts?: ProjectOpts): Promise<Note> {
+        const project = this.requireProject('write_note', opts?.project);
         const scoped: NoteWriteInput = {
             path: this.normaliseWritePath(input.path, project),
             content: input.content,
@@ -308,8 +315,8 @@ export class SynaipseService {
         return note;
     }
 
-    public async deleteNote(id: NoteId): Promise<void> {
-        this.assertInProject(id, 'delete_note');
+    public async deleteNote(id: NoteId, opts?: ProjectOpts): Promise<void> {
+        this.assertInProject(id, 'delete_note', opts?.project);
 
         await this.vault.delete(id);
 
@@ -320,8 +327,8 @@ export class SynaipseService {
         this.cache.delete(id);
     }
 
-    public async appendSessionLog(summary: string, references: string[]): Promise<NoteId> {
-        const project = this.requireProject('log_session');
+    public async appendSessionLog(summary: string, references: string[], opts?: ProjectOpts): Promise<NoteId> {
+        const project = this.requireProject('log_session', opts?.project);
         const now = new Date();
         const date = now.toISOString().slice(0, 10);
         const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -342,11 +349,10 @@ export class SynaipseService {
         const prevBody = (existing?.content ?? '').trimEnd();
         const body = prevBody.length === 0 ? newEntry : `${prevBody}\n\n${newEntry}`;
 
-        const note = await this.writeNote({
-            path: sessionPath,
-            content: body,
-            frontmatter: baseFrontmatter
-        });
+        const note = await this.writeNote(
+            {path: sessionPath, content: body, frontmatter: baseFrontmatter},
+            opts
+        );
 
         return note.id;
     }
@@ -721,8 +727,8 @@ export class SynaipseService {
         return result;
     }
 
-    public async linkNote(fromId: NoteId, toTitles: readonly string[], section = 'References'): Promise<{note: Note; added: string[]}> {
-        this.assertInProject(fromId, 'link_note');
+    public async linkNote(fromId: NoteId, toTitles: readonly string[], section = 'References', opts?: ProjectOpts): Promise<{note: Note; added: string[]}> {
+        this.assertInProject(fromId, 'link_note', opts?.project);
         const note = this.vault.get(fromId);
         const targets = toTitles.map((t) => t.trim()).filter((t) => t.length > 0);
 
@@ -784,28 +790,26 @@ export class SynaipseService {
             body = newLines.join('\n');
         }
 
-        const updated = await this.writeNote({
-            path: note.id,
-            content: body,
-            frontmatter: note.frontmatter
-        });
+        const updated = await this.writeNote(
+            {path: note.id, content: body, frontmatter: note.frontmatter},
+            opts
+        );
 
         return {note: updated, added};
     }
 
-    public async updateNote(id: NoteId, patch: UpdateNoteInput): Promise<Note> {
-        this.assertInProject(id, 'update_note');
+    public async updateNote(id: NoteId, patch: UpdateNoteInput, opts?: ProjectOpts): Promise<Note> {
+        this.assertInProject(id, 'update_note', opts?.project);
         const existing = this.vault.get(id);
         const nextContent = patch.content ?? existing.content;
         const nextFrontmatter = patch.frontmatterPatch === undefined
             ? existing.frontmatter
             : {...existing.frontmatter, ...patch.frontmatterPatch};
 
-        return this.writeNote({
-            path: existing.id,
-            content: nextContent,
-            frontmatter: nextFrontmatter
-        });
+        return this.writeNote(
+            {path: existing.id, content: nextContent, frontmatter: nextFrontmatter},
+            opts
+        );
     }
 
     private attachWatcher(): void {

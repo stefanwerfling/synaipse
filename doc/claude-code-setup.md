@@ -27,6 +27,45 @@ Steps:
 
 The MCP server reads configuration from `.env` next to `.mcp.json`, so `SYNAIPSE_VAULT_PATH`, `EMBEDDINGS_PROVIDER` etc. take effect.
 
+## HTTP transport (multi-project daemon)
+
+Run one central Synaipse HTTP server, point many projects at it. The project is resolved per request — via URL path or header.
+
+Start the daemon:
+
+```bash
+SYNAIPSE_MCP_TRANSPORT=http SYNAIPSE_MCP_PORT=3030 npm run mcp:http
+```
+
+In each project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp/my-app"
+    }
+  }
+}
+```
+
+Or via header (single base URL):
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp",
+      "headers": {"X-Synaipse-Project": "my-app"}
+    }
+  }
+}
+```
+
+Resolver priority: URL path > header > server's `SYNAIPSE_PROJECT` env > none (writes fail). See [configuration.md](configuration.md#per-request-project-http-only).
+
 ## Global MCP (alternative)
 
 If you want the same vault available from any directory, add to `~/.claude.json` (or use `claude mcp add`):
