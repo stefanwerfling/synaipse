@@ -1,7 +1,7 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
-import {diffUnified, type PersonInput} from 'ngit';
+import {Diff, type PersonInput} from 'ngit';
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {fulltextSearch} from './Fulltext.js';
 import {HashCache} from './Cache.js';
@@ -302,7 +302,7 @@ export class SynaipseService {
             repo.show(resolvedTo, id).then((b) => b.toString('utf8'))
         ]);
 
-        return diffUnified(before, after, {
+        return Diff.unified(before, after, {
             fromLabel: `${id} @ ${fromSha.slice(0, 7)}`,
             toLabel: `${id} @ ${resolvedTo.slice(0, 7)}`
         });
