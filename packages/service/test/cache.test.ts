@@ -72,4 +72,74 @@ describe('HashCache', () => {
         await cache.load();
         expect(cache.size()).toBe(0);
     });
+
+    it('touch increments accessCount and updates lastAccessed', async () => {
+        const cache = new HashCache(file, 0);
+        cache.set('n.md', {hash: 'h', mtime: 100});
+
+        cache.touch('n.md', undefined, 1_000);
+        cache.touch('n.md', undefined, 2_000);
+
+        const entry = cache.get('n.md');
+        expect(entry?.accessCount).toBe(2);
+        expect(entry?.lastAccessed).toBe(2_000);
+    });
+
+    it('touch auto-inserts a minimal entry when none exists', async () => {
+        const cache = new HashCache(file, 0);
+        cache.touch('fresh.md', {hash: 'h', mtime: 50}, 9_999);
+
+        const entry = cache.get('fresh.md');
+        expect(entry?.hash).toBe('h');
+        expect(entry?.mtime).toBe(50);
+        expect(entry?.accessCount).toBe(1);
+        expect(entry?.lastAccessed).toBe(9_999);
+    });
+
+    it('touch is a no-op when no seed and no existing entry', async () => {
+        const cache = new HashCache(file, 0);
+        cache.touch('missing.md');
+        expect(cache.has('missing.md')).toBe(false);
+    });
+
+    it('set preserves existing access metadata when hash/mtime change', async () => {
+        const cache = new HashCache(file, 0);
+        cache.set('n.md', {hash: 'h1', mtime: 1});
+        cache.touch('n.md', undefined, 5_000);
+        cache.touch('n.md', undefined, 6_000);
+
+        cache.set('n.md', {hash: 'h2', mtime: 2});
+
+        const entry = cache.get('n.md');
+        expect(entry?.hash).toBe('h2');
+        expect(entry?.mtime).toBe(2);
+        expect(entry?.accessCount).toBe(2);
+        expect(entry?.lastAccessed).toBe(6_000);
+    });
+
+    it('persists access metadata across reloads', async () => {
+        const a = new HashCache(file, 0);
+        a.set('n.md', {hash: 'h', mtime: 1});
+        a.touch('n.md', undefined, 1_234);
+        await a.flush();
+
+        const b = new HashCache(file, 0);
+        await b.load();
+
+        const entry = b.get('n.md');
+        expect(entry?.accessCount).toBe(1);
+        expect(entry?.lastAccessed).toBe(1_234);
+    });
+
+    it('loads legacy entries without access fields and treats counts as 0', async () => {
+        const {writeFile} = await import('node:fs/promises');
+        await writeFile(file, JSON.stringify({'old.md': {hash: 'h', mtime: 1}}), 'utf8');
+
+        const cache = new HashCache(file, 0);
+        await cache.load();
+
+        const entry = cache.get('old.md');
+        expect(entry?.accessCount).toBeUndefined();
+        expect(entry?.lastAccessed).toBeUndefined();
+    });
 });

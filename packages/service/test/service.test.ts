@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach, afterEach} from 'vitest';
-import {mkdtemp, rm, writeFile, mkdir, readFile} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile, mkdir, readFile, utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {SynaipseService} from '../src/Service.js';
@@ -300,5 +300,109 @@ describe('SynaipseService.suggestLinks', () => {
                 expect(cur.score).toBeGreaterThanOrEqual(next.score);
             }
         }
+    });
+});
+
+describe('SynaipseService.staleNotes', () => {
+    const ageFile = async (vault: string, relPath: string, daysAgo: number): Promise<void> => {
+        const abs = path.join(vault, relPath);
+        const when = new Date(Date.now() - daysAgo * 86_400_000);
+        await utimes(abs, when, when);
+    };
+
+    it('returns notes whose mtime is older than the threshold', async () => {
+        await writeNote(vaultDir, 'old.md', '---\ntitle: Old\n---\nbody');
+        await writeNote(vaultDir, 'new.md', '---\ntitle: New\n---\nbody');
+        await ageFile(vaultDir, 'old.md', 200);
+        await ageFile(vaultDir, 'new.md', 5);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const stale = service.staleNotes({olderThanDays: 90});
+        const ids = stale.map((s) => s.id);
+
+        expect(ids).toContain('old.md');
+        expect(ids).not.toContain('new.md');
+
+        const oldEntry = stale.find((s) => s.id === 'old.md');
+        expect(oldEntry?.ageDays).toBeGreaterThanOrEqual(199);
+        expect(oldEntry?.accessCount).toBe(0);
+    });
+
+    it('readNote bumps lastAccessed so an old note no longer counts as stale', async () => {
+        await writeNote(vaultDir, 'old.md', '---\ntitle: Old\n---\nbody');
+        await ageFile(vaultDir, 'old.md', 200);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        expect(service.staleNotes({olderThanDays: 90}).length).toBe(1);
+
+        service.readNote('old.md');
+
+        expect(service.staleNotes({olderThanDays: 90}).length).toBe(0);
+    });
+
+    it('search bumps lastAccessed for every hit', async () => {
+        await writeNote(vaultDir, 'old.md', '---\ntitle: Old\n---\nunique-token body');
+        await ageFile(vaultDir, 'old.md', 200);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        await service.search('unique-token', 'fulltext', 5);
+
+        expect(service.staleNotes({olderThanDays: 90}).length).toBe(0);
+    });
+
+    it('respects pathPrefix', async () => {
+        await writeNote(vaultDir, 'inside/a.md', '---\ntitle: A\n---\nbody');
+        await writeNote(vaultDir, 'outside.md', '---\ntitle: B\n---\nbody');
+        await ageFile(vaultDir, 'inside/a.md', 200);
+        await ageFile(vaultDir, 'outside.md', 200);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const stale = service.staleNotes({olderThanDays: 90, pathPrefix: 'inside/'});
+        const ids = stale.map((s) => s.id);
+
+        expect(ids).toContain('inside/a.md');
+        expect(ids).not.toContain('outside.md');
+    });
+
+    it('sorts by ageDays descending and honours limit', async () => {
+        await writeNote(vaultDir, 'a.md', '---\ntitle: A\n---\nbody');
+        await writeNote(vaultDir, 'b.md', '---\ntitle: B\n---\nbody');
+        await writeNote(vaultDir, 'c.md', '---\ntitle: C\n---\nbody');
+        await ageFile(vaultDir, 'a.md', 100);
+        await ageFile(vaultDir, 'b.md', 300);
+        await ageFile(vaultDir, 'c.md', 200);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const stale = service.staleNotes({olderThanDays: 90});
+        expect(stale.map((s) => s.id)).toEqual(['b.md', 'c.md', 'a.md']);
+
+        const capped = service.staleNotes({olderThanDays: 90, limit: 1});
+        expect(capped.length).toBe(1);
+        expect(capped[0]?.id).toBe('b.md');
+    });
+
+    it('uses max(mtime, lastAccessed) so a recently-accessed old note is fresh', async () => {
+        await writeNote(vaultDir, 'x.md', '---\ntitle: X\n---\nbody');
+        await ageFile(vaultDir, 'x.md', 200);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        service.readNote('x.md');
+
+        const all = service.staleNotes({olderThanDays: 0});
+        const entry = all.find((s) => s.id === 'x.md');
+        expect(entry?.lastAccessed).toBeDefined();
+        expect(entry?.accessCount).toBe(1);
     });
 });

@@ -19,6 +19,7 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | [`synaipse_suggest_links`](#synaipse_suggest_links)   | Missing-links finder — related pairs without a wikilink |
 | [`synaipse_graph`](#synaipse_graph)                   | Knowledge graph (nodes + edges)                        |
 | [`synaipse_recent`](#synaipse_recent)                 | Most recently modified notes                           |
+| [`synaipse_stale`](#synaipse_stale)                   | Notes that gathered dust — knowledge decay              |
 | [`synaipse_todos`](#synaipse_todos)                   | Open `- [ ]` items across the vault                    |
 | [`synaipse_log_session`](#synaipse_log_session)       | Append to today's session log                          |
 
@@ -196,6 +197,40 @@ No arguments. Returns `{nodes, edges}` for visualisation.
 | Arg     | Type    | Default |
 |---|---|---|
 | `limit` | number? | `20`    |
+
+---
+
+## `synaipse_stale`
+
+| Arg             | Type     | Default | Notes                                              |
+|---|---|---|---|
+| `olderThanDays` | number?  | `90`    | Threshold in days                                  |
+| `pathPrefix`    | string?  | `""`    | Restrict to a folder                               |
+| `limit`         | number?  | `100`   |                                                    |
+
+Finds notes that gather dust — neither written nor surfaced for `olderThanDays`. The age metric is `max(mtime, lastAccessed)` where `lastAccessed` is bumped whenever Synaipse reads the note via `read_note`, `search`, `related` or `backlinks`. Access counts are persisted in the index cache, so they survive restarts.
+
+Returns:
+
+```json
+{
+  "notes": [
+    {
+      "id": "Memory/research/old-idea.md",
+      "title": "Old Idea",
+      "tags": ["research"],
+      "mtime": 1700000000000,
+      "lastAccessed": 1700050000000,
+      "accessCount": 2,
+      "ageDays": 187
+    }
+  ],
+  "count": 1,
+  "olderThanDays": 90
+}
+```
+
+Sorted by `ageDays` descending — most stale first.
 
 ---
 

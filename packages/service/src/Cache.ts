@@ -5,6 +5,13 @@ import path from 'node:path';
 export interface CacheEntry {
     hash: string;
     mtime: number;
+    accessCount?: number;
+    lastAccessed?: number;
+}
+
+export interface TouchSeed {
+    hash: string;
+    mtime: number;
 }
 
 export class HashCache {
@@ -55,7 +62,40 @@ export class HashCache {
             return;
         }
 
-        this.data.set(id, entry);
+        const merged: CacheEntry = {...entry};
+
+        if (prev?.accessCount !== undefined) {
+            merged.accessCount = prev.accessCount;
+        }
+
+        if (prev?.lastAccessed !== undefined) {
+            merged.lastAccessed = prev.lastAccessed;
+        }
+
+        this.data.set(id, merged);
+        this.schedule();
+    }
+
+    public touch(id: string, seed?: TouchSeed, now: number = Date.now()): void {
+        const existing = this.data.get(id);
+
+        if (existing) {
+            existing.accessCount = (existing.accessCount ?? 0) + 1;
+            existing.lastAccessed = now;
+            this.schedule();
+            return;
+        }
+
+        if (!seed) {
+            return;
+        }
+
+        this.data.set(id, {
+            hash: seed.hash,
+            mtime: seed.mtime,
+            accessCount: 1,
+            lastAccessed: now
+        });
         this.schedule();
     }
 

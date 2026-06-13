@@ -34,6 +34,24 @@ export interface SuggestLinksOptions {
     pathPrefix?: string;
 }
 
+export interface StaleNote {
+    id: NoteId;
+    title: string;
+    tags: string[];
+    mtime: number;
+    lastAccessed?: number;
+    accessCount: number;
+    ageDays: number;
+}
+
+export interface StaleNotesOptions {
+    olderThanDays?: number;
+    pathPrefix?: string;
+    limit?: number;
+}
+
+const MS_PER_DAY = 86_400_000;
+
 export interface TodoItem {
     noteId: NoteId;
     title: string;
@@ -168,6 +186,16 @@ export class SynaipseService {
     }
 
     public async search(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
+        const hits = await this.runSearch(query, mode, limit);
+
+        for (const hit of hits) {
+            this.touchAccess(hit.noteId);
+        }
+
+        return hits;
+    }
+
+    private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
         if (mode === 'fulltext' || this.index === null) {
             return fulltextSearch(this.vault.list(), query, limit);
         }
@@ -236,7 +264,9 @@ export class SynaipseService {
     }
 
     public readNote(id: NoteId): Note {
-        return this.vault.get(id);
+        const note = this.vault.get(id);
+        this.touchAccess(note);
+        return note;
     }
 
     public listNotes(): Note[] {
@@ -248,7 +278,64 @@ export class SynaipseService {
     }
 
     public backlinks(id: NoteId): NoteId[] {
+        this.touchAccess(id);
         return this.vault.backlinksOf(id);
+    }
+
+    private touchAccess(noteOrId: Note | NoteId): void {
+        if (typeof noteOrId === 'string') {
+            const note = this.vault.tryGet(noteOrId);
+
+            if (note === undefined) {
+                return;
+            }
+
+            this.cache.touch(note.id, {hash: note.hash, mtime: note.mtime});
+            return;
+        }
+
+        this.cache.touch(noteOrId.id, {hash: noteOrId.hash, mtime: noteOrId.mtime});
+    }
+
+    public staleNotes(opts: StaleNotesOptions = {}, now: number = Date.now()): StaleNote[] {
+        const olderThanDays = opts.olderThanDays ?? 90;
+        const pathPrefix = opts.pathPrefix ?? '';
+        const limit = opts.limit ?? 100;
+        const thresholdMs = olderThanDays * MS_PER_DAY;
+
+        const result: StaleNote[] = [];
+
+        for (const note of this.vault.list()) {
+            if (pathPrefix.length > 0 && !note.id.startsWith(pathPrefix)) {
+                continue;
+            }
+
+            const entry = this.cache.get(note.id);
+            const lastAccessed = entry?.lastAccessed;
+            const accessCount = entry?.accessCount ?? 0;
+
+            const effective = lastAccessed !== undefined
+                ? Math.max(note.mtime, lastAccessed)
+                : note.mtime;
+
+            const ageMs = now - effective;
+
+            if (ageMs < thresholdMs) {
+                continue;
+            }
+
+            result.push({
+                id: note.id,
+                title: note.title,
+                tags: note.tags,
+                mtime: note.mtime,
+                ...(lastAccessed !== undefined ? {lastAccessed} : {}),
+                accessCount,
+                ageDays: Math.floor(ageMs / MS_PER_DAY)
+            });
+        }
+
+        return result.sort((a, b) => b.ageDays - a.ageDays).slice(0, limit);
     }
 
     public onVaultChange(listener: VaultChangeListener): () => void {
@@ -279,6 +366,8 @@ export class SynaipseService {
         if (note === undefined) {
             return [];
         }
+
+        this.touchAccess(note);
 
         const accumulator = new Map<NoteId, {score: number; reasons: Set<string>}>();
 

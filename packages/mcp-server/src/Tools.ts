@@ -346,6 +346,30 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
     },
     {
         definition: {
+            name: 'synaipse_stale',
+            description: 'List notes that have not been written or surfaced (read/searched/related/backlinks) for a long time. Use to find knowledge gathering dust — candidates for review, refresh, or deletion.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    olderThanDays: {type: 'number', description: 'Threshold in days (default: 90). A note is stale when max(mtime, lastAccessed) is older than this.'},
+                    pathPrefix: {type: 'string', description: 'Restrict to a folder, e.g. "Memory/research/"'},
+                    limit: {type: 'number', description: 'Max results (default: 100)'}
+                }
+            }
+        },
+        handle: async (args) => {
+            const olderThanDays = typeof args.olderThanDays === 'number' ? args.olderThanDays : 90;
+            const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
+            const limit = asNumber(args.limit, 100);
+            const notes = service.staleNotes({olderThanDays, pathPrefix, limit});
+            return {
+                response: ok({notes, count: notes.length, olderThanDays}),
+                event: {kind: 'list', touched: notes.slice(0, 5).map((n) => n.id)}
+            };
+        }
+    },
+    {
+        definition: {
             name: 'synaipse_link_note',
             description: 'Append wikilinks to a target note under a section heading (default: "References"). Idempotent — existing links are skipped. Use this to add cross-references without rewriting the whole note.',
             inputSchema: {
