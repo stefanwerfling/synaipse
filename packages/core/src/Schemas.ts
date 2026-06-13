@@ -1,12 +1,73 @@
-import {Vts, ExtractSchemaResultType} from 'vts';
+import {Vts, ExtractSchemaResultType, SchemaErrors} from 'vts';
 
-export const FrontmatterSchema = Vts.object({
-    title: Vts.optional(Vts.string()),
-    tags: Vts.optional(Vts.array(Vts.string())),
-    aliases: Vts.optional(Vts.array(Vts.string())),
-    created: Vts.optional(Vts.string()),
-    updated: Vts.optional(Vts.string())
-});
+export const NoteTypeSchema = Vts.or([
+    Vts.equal('note' as const),
+    Vts.equal('decision' as const),
+    Vts.equal('bug' as const),
+    Vts.equal('fact' as const),
+    Vts.equal('concept' as const),
+    Vts.equal('todo' as const),
+    Vts.equal('question' as const)
+]);
+
+export const FrontmatterSchema = Vts.object(
+    {
+        title: Vts.optional(Vts.string()),
+        tags: Vts.optional(Vts.array(Vts.string())),
+        aliases: Vts.optional(Vts.array(Vts.string())),
+        created: Vts.optional(Vts.string()),
+        updated: Vts.optional(Vts.string()),
+        type: Vts.optional(NoteTypeSchema),
+        why: Vts.optional(Vts.string()),
+        confidence: Vts.optional(Vts.number()),
+        sources: Vts.optional(Vts.array(Vts.string())),
+        supersedes: Vts.optional(Vts.array(Vts.string()))
+    },
+    {objectSchema: {ignoreAdditionalItems: true}}
+);
+
+export interface FrontmatterValidationResult {
+    ok: boolean;
+    errors: string[];
+}
+
+const flattenSchemaErrors = (errors: SchemaErrors, prefix = ''): string[] => {
+    const flat: string[] = [];
+
+    for (const entry of errors) {
+        if (typeof entry === 'string') {
+            flat.push(prefix === '' ? entry : `${prefix}: ${entry}`);
+            continue;
+        }
+
+        for (const [key, nested] of Object.entries(entry)) {
+            const nextPrefix = prefix === '' ? key : `${prefix}.${key}`;
+            flat.push(...flattenSchemaErrors(nested, nextPrefix));
+        }
+    }
+
+    return flat;
+};
+
+export const validateFrontmatter = (value: unknown): FrontmatterValidationResult => {
+    const schemaErrors: SchemaErrors = [];
+    const messages: string[] = [];
+
+    if (!FrontmatterSchema.validate(value, schemaErrors)) {
+        messages.push(...flattenSchemaErrors(schemaErrors));
+    }
+
+    if (value !== null && typeof value === 'object') {
+        const confidence = (value as Record<string, unknown>).confidence;
+
+        if (confidence !== undefined && typeof confidence === 'number'
+            && (confidence < 0 || confidence > 1)) {
+            messages.push(`confidence: must be between 0 and 1, got ${confidence}`);
+        }
+    }
+
+    return {ok: messages.length === 0, errors: messages};
+};
 
 export const NoteWriteInputSchema = Vts.object({
     path: Vts.string(),

@@ -1,7 +1,7 @@
 import {mkdir, readFile, stat, writeFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 import matter from 'gray-matter';
-import {NotFoundError, VaultError} from '@synaipse/core';
+import {NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
 import type {Note, NoteId, NoteWriteInput, Frontmatter} from '@synaipse/core';
 import {parseNote} from './Parser.js';
 import {walkMarkdown} from './Walker.js';
@@ -63,6 +63,16 @@ export class Vault {
     }
 
     public async write(input: NoteWriteInput): Promise<Note> {
+        if (input.frontmatter) {
+            const validation = validateFrontmatter(input.frontmatter);
+
+            if (!validation.ok) {
+                throw new VaultError(
+                    `Invalid frontmatter for ${input.path}: ${validation.errors.join('; ')}`
+                );
+            }
+        }
+
         const absolute = this.toAbsolute(input.path);
         await mkdir(path.dirname(absolute), {recursive: true});
 
@@ -128,6 +138,12 @@ export class Vault {
             raw,
             mtime: info.mtimeMs
         });
+
+        const validation = validateFrontmatter(note.frontmatter);
+
+        if (!validation.ok) {
+            console.warn(`[synaipse] invalid frontmatter in ${note.id}: ${validation.errors.join('; ')}`);
+        }
 
         this.notes.set(note.id, note);
     }

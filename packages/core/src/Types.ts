@@ -1,5 +1,24 @@
 export type NoteId = string;
 
+export type NoteType =
+    | 'note'
+    | 'decision'
+    | 'bug'
+    | 'fact'
+    | 'concept'
+    | 'todo'
+    | 'question';
+
+export const NOTE_TYPES: readonly NoteType[] = [
+    'note',
+    'decision',
+    'bug',
+    'fact',
+    'concept',
+    'todo',
+    'question'
+] as const;
+
 export interface Frontmatter {
     [key: string]: unknown;
     title?: string;
@@ -7,6 +26,11 @@ export interface Frontmatter {
     aliases?: string[];
     created?: string;
     updated?: string;
+    type?: NoteType;
+    why?: string;
+    confidence?: number;
+    sources?: string[];
+    supersedes?: string[];
 }
 
 export interface Note {

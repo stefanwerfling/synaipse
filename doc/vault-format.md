@@ -55,15 +55,49 @@ updated: 2026-06-13
 
 Recognised keys:
 
-| Key       | Type     | Effect |
+| Key          | Type      | Effect |
 |---|---|---|
-| `title`   | string   | Display name; falls back to first H1 or filename. |
-| `tags`    | string[] | Indexed; reachable via `synaipse_list_tags` / `_notes_by_tag`. |
-| `aliases` | string[] | Extra names that wikilinks resolve to. |
-| `created` | date     | Informational. |
-| `updated` | date     | Informational. |
+| `title`      | string    | Display name; falls back to first H1 or filename. |
+| `tags`       | string[]  | Indexed; reachable via `synaipse_list_tags` / `_notes_by_tag`. |
+| `aliases`    | string[]  | Extra names that wikilinks resolve to. |
+| `created`    | date      | Informational. |
+| `updated`    | date      | Informational. |
+| `type`       | enum      | One of `note`, `decision`, `bug`, `fact`, `concept`, `todo`, `question`. Defaults to `note`. |
+| `why`        | string    | Free-text rationale — *why* the note exists, *why* the decision was taken. |
+| `confidence` | number    | `0..1` — how certain the content is. Use < `0.5` for guesses, ≥ `0.9` for verified facts. |
+| `sources`    | string[]  | Provenance: wikilinks (`[[ADR-023]]`), commit refs (`commit:abc123`), URLs. |
+| `supersedes` | string[]  | Titles of notes that this one replaces. Use to track evolution (v1 → v2). |
 
-Any further keys are preserved as-is.
+Any further keys are preserved as-is — the schema is open.
+
+### Validation
+
+Frontmatter is validated when writing a note. Invalid types (`type: meeting`) or `confidence` outside `[0, 1]` are rejected with a `VaultError`. Existing notes with invalid frontmatter still load — a warning is logged but they remain available so you can fix them in place.
+
+### Example: a decision note using all fields
+
+```markdown
+---
+title: BackendCluster
+type: decision
+tags: [architecture, cluster]
+aliases: [Backend Cluster, Cluster v2]
+created: 2026-06-11
+updated: 2026-06-13
+why: "BackendApp became too large to evolve as a single process"
+confidence: 0.95
+sources:
+  - "[[ADR-023]]"
+  - "commit:abc123"
+  - "https://example.com/cluster-design"
+supersedes:
+  - BackendCluster v1
+---
+
+# BackendCluster
+
+Extracted cluster logic from [[BackendApp]] into a separate process group …
+```
 
 ## Wikilinks
 
