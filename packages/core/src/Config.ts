@@ -37,6 +37,16 @@ const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'none' =
     throw new ConfigError(`EMBEDDINGS_PROVIDER must be one of voyage|ollama|none, got: ${raw}`);
 };
 
+const parseGitAuthor = (raw: string): {name: string; email: string} => {
+    const match = raw.match(/^\s*(.+?)\s*<\s*(\S+@\S+)\s*>\s*$/);
+
+    if (match === null) {
+        throw new ConfigError(`SYNAIPSE_GIT_AUTHOR must be 'Name <email>', got: ${raw}`);
+    }
+
+    return {name: match[1]!, email: match[2]!};
+};
+
 export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config => {
     const provider = resolveProvider(env);
 
@@ -61,6 +71,10 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
     };
 
     const projectName = env.SYNAIPSE_PROJECT?.trim();
+    const gitAutoCommit = (env.SYNAIPSE_GIT_AUTOCOMMIT ?? 'true').toLowerCase();
+    const gitEnabled = gitAutoCommit !== 'false' && gitAutoCommit !== '0' && gitAutoCommit !== 'no';
+    const gitAuthorRaw = env.SYNAIPSE_GIT_AUTHOR ?? 'Synaipse <synaipse@local>';
+    const gitAuthor = parseGitAuthor(gitAuthorRaw);
 
     const raw: unknown = {
         ...base,
@@ -82,7 +96,8 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
             : {}),
         ...(projectName !== undefined && projectName.length > 0
             ? {project: {name: projectName}}
-            : {})
+            : {}),
+        git: {autoCommit: gitEnabled, author: gitAuthor}
     };
 
     const errors: SchemaErrors = [];

@@ -3,6 +3,7 @@ import {api, NoteSummary} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
 import {Editor} from './Editor.js';
+import {HistoryPanel} from './HistoryPanel.js';
 import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue, setCodec} from './Persistence.js';
@@ -145,6 +146,33 @@ export class NotesPanel {
 
     private viewerPreview: MarkdownPreview | null = null;
     private currentEditor: Editor | null = null;
+    private historyPanel: HistoryPanel | null = null;
+    private historyEnabled = false;
+
+    public setHistoryEnabled(enabled: boolean): void {
+        if (this.historyEnabled === enabled) return;
+        this.historyEnabled = enabled;
+        this.renderViewer();
+    }
+
+    private async toggleHistory(): Promise<void> {
+        if (this.historyPanel !== null) {
+            this.closeHistory();
+            return;
+        }
+
+        if (this.activeId === null) return;
+
+        this.historyPanel = new HistoryPanel({onClose: () => this.closeHistory()});
+        this.viewer.appendChild(this.historyPanel.element);
+        await this.historyPanel.load(this.activeId);
+    }
+
+    private closeHistory(): void {
+        if (this.historyPanel === null) return;
+        this.historyPanel.element.remove();
+        this.historyPanel = null;
+    }
 
     public constructor(private readonly opts: NotesPanelOptions) {
         this.element = el('div', {class: 'app'});
@@ -515,22 +543,35 @@ export class NotesPanel {
         this.disposeEditor();
         clear(this.viewer);
 
+        const actions: HTMLElement[] = [];
+
+        if (this.historyEnabled) {
+            actions.push(el('button', {
+                class: 'btn',
+                attrs: {type: 'button', title: 'Show change history'},
+                text: 'History',
+                on: {click: () => void this.toggleHistory()}
+            }));
+        }
+
+        actions.push(
+            el('button', {
+                class: 'btn',
+                attrs: {type: 'button'},
+                text: 'Edit',
+                on: {click: () => this.startEditing()}
+            }),
+            el('button', {
+                class: 'btn btn-danger',
+                attrs: {type: 'button'},
+                text: 'Delete',
+                on: {click: () => void this.handleDelete()}
+            })
+        );
+
         const head = el('div', {class: 'viewer-head'},
             el('h1', {text: this.active.title}),
-            el('div', {class: 'viewer-actions'},
-                el('button', {
-                    class: 'btn',
-                    attrs: {type: 'button'},
-                    text: 'Edit',
-                    on: {click: () => this.startEditing()}
-                }),
-                el('button', {
-                    class: 'btn btn-danger',
-                    attrs: {type: 'button'},
-                    text: 'Delete',
-                    on: {click: () => void this.handleDelete()}
-                })
-            )
+            el('div', {class: 'viewer-actions'}, ...actions)
         );
 
         this.viewer.appendChild(head);

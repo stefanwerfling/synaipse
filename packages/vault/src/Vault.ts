@@ -1,17 +1,72 @@
 import {mkdir, readFile, stat, writeFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 import matter from 'gray-matter';
+import {access} from 'node:fs/promises';
+import {constants as fsConstants} from 'node:fs';
+import {Repo, type PersonInput} from 'ngit';
 import {NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
 import type {Note, NoteId, NoteWriteInput, Frontmatter} from '@synaipse/core';
 import {parseNote} from './Parser.js';
 import {walkMarkdown} from './Walker.js';
 
+export interface VaultHistoryConfig {
+    autoCommit: boolean;
+    author: PersonInput;
+}
+
+export interface VaultOptions {
+    history?: VaultHistoryConfig;
+}
+
+export interface CommitContext {
+    message?: string;
+    author?: PersonInput;
+}
+
 export class Vault {
     private readonly notes = new Map<NoteId, Note>();
     private readonly backlinkIndex = new Map<string, Set<NoteId>>();
     private loaded = false;
+    private readonly historyConfig: VaultHistoryConfig | null;
+    private repo: Repo | null = null;
 
-    public constructor(public readonly root: string) {}
+    public constructor(public readonly root: string, opts: VaultOptions = {}) {
+        this.historyConfig = opts.history ?? null;
+    }
+
+    /** Returns the ngit Repo for read-only ops (history, show, diff). Returns null when history is disabled or the repo has not been initialised yet (no Synaipse commit has happened). */
+    public async getRepo(): Promise<Repo | null> {
+        if (this.historyConfig === null) {
+            return null;
+        }
+
+        if (this.repo !== null) {
+            return this.repo;
+        }
+
+        try {
+            await access(`${this.root}/.ngit/HEAD`, fsConstants.F_OK);
+        } catch {
+            return null;
+        }
+
+        this.repo = await Repo.open(this.root, {defaultAuthor: this.historyConfig.author});
+        return this.repo;
+    }
+
+    private async ensureRepoForCommit(): Promise<Repo | null> {
+        if (this.historyConfig === null || !this.historyConfig.autoCommit) {
+            return null;
+        }
+
+        if (this.repo === null) {
+            this.repo = await Repo.openOrInit(this.root, {
+                defaultAuthor: this.historyConfig.author
+            });
+        }
+
+        return this.repo;
+    }
 
     public async load(): Promise<void> {
         await this.ensureRoot();
@@ -62,7 +117,7 @@ export class Vault {
         return this.get(id);
     }
 
-    public async write(input: NoteWriteInput): Promise<Note> {
+    public async write(input: NoteWriteInput, ctx: CommitContext = {}): Promise<Note> {
         if (input.frontmatter) {
             const validation = validateFrontmatter(input.frontmatter);
 
@@ -82,14 +137,39 @@ export class Vault {
         await this.ingestFile(absolute);
         this.rebuildBacklinks();
 
-        return this.get(this.toId(absolute));
+        const id = this.toId(absolute);
+        await this.autoCommit(id, ctx, 'write');
+
+        return this.get(id);
     }
 
-    public async delete(id: NoteId): Promise<void> {
+    public async delete(id: NoteId, ctx: CommitContext = {}): Promise<void> {
         const absolute = this.toAbsolute(id);
         await rm(absolute, {force: true});
         this.notes.delete(id);
         this.rebuildBacklinks();
+        await this.autoCommit(id, ctx, 'delete');
+    }
+
+    private async autoCommit(id: NoteId, ctx: CommitContext, kind: 'write' | 'delete'): Promise<void> {
+        const repo = await this.ensureRepoForCommit();
+
+        if (repo === null) {
+            return;
+        }
+
+        const message = ctx.message ?? `synaipse: ${kind} ${id}`;
+        const author = ctx.author ?? this.historyConfig?.author;
+
+        try {
+            if (kind === 'write') {
+                await repo.commitFile(id, {message, ...(author ? {author} : {})});
+            } else {
+                await repo.deleteFile(id, {message, ...(author ? {author} : {})});
+            }
+        } catch (cause) {
+            process.stderr.write(`[synaipse] ${kind} commit failed for ${id}: ${String(cause)}\n`);
+        }
     }
 
     public backlinksOf(id: NoteId): NoteId[] {

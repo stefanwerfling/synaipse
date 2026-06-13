@@ -19,6 +19,7 @@
   "dependencies": {
     "@synaipse/core": "*",
     "@synaipse/vault": "*",
-    "@synaipse/vector": "*"
+    "@synaipse/vector": "*",
+    "ngit": "github:stefanwerfling/ngit"
   }
 }

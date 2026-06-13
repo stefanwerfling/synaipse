@@ -100,7 +100,66 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
     }
 
     if (path.startsWith('/api/notes/')) {
-        const id = decodeURIComponent(path.slice('/api/notes/'.length));
+        const tail = decodeURIComponent(path.slice('/api/notes/'.length));
+
+        const historyMatch = tail.match(/^(.+)\/history$/);
+
+        if (historyMatch !== null) {
+            if (method !== 'GET') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            const id = historyMatch[1] as string;
+            const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
+            const entries = await service.noteHistory(id, Number.isFinite(limit) ? limit : 50);
+            json(res, 200, {entries});
+            return;
+        }
+
+        const versionMatch = tail.match(/^(.+)\/version\/([0-9a-f]+)$/);
+
+        if (versionMatch !== null) {
+            if (method !== 'GET') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            try {
+                const content = await service.noteVersion(versionMatch[1] as string, versionMatch[2] as string);
+                json(res, 200, {content, sha: versionMatch[2]});
+            } catch (error) {
+                json(res, 404, {error: String(error)});
+            }
+            return;
+        }
+
+        const diffMatch = tail.match(/^(.+)\/diff$/);
+
+        if (diffMatch !== null) {
+            if (method !== 'GET') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            const from = url.searchParams.get('from');
+            const to = url.searchParams.get('to');
+
+            if (from === null) {
+                json(res, 400, {error: 'missing ?from='});
+                return;
+            }
+
+            try {
+                const unified = await service.noteDiff(diffMatch[1] as string, from, to ?? undefined);
+                json(res, 200, {unified});
+            } catch (error) {
+                json(res, 500, {error: String(error)});
+            }
+            return;
+        }
+
+        const id = tail;
 
         if (method === 'GET') {
             const note = service.getVault().tryGet(id);
@@ -165,7 +224,8 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
         json(res, 200, {
             semanticEnabled: service.hasSemanticIndex(),
             notesCount: service.listNotes().length,
-            project: service.getProject()
+            project: service.getProject(),
+            historyEnabled: await service.historyEnabled()
         });
         return;
     }

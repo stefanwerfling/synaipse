@@ -144,6 +144,34 @@ For each project, ship a `.mcp.json` in the project repository pointing at the g
 
 Claude can query the active project at any time via `synaipse_get_project`.
 
+## Versioning (ngit)
+
+Synaipse autocommits every Synaipse-driven write to a [ngit](https://github.com/stefanwerfling/ngit) repo inside the vault — no system `git` binary required. External edits (Obsidian, manual `vim`, …) are **not** autocommitted: that's the user's hand, Synaipse stays out.
+
+```env
+SYNAIPSE_GIT_AUTOCOMMIT=true                       # default
+SYNAIPSE_GIT_AUTHOR=Synaipse <synaipse@local>
+```
+
+The ngit on-disk layout is byte-compatible with real git's loose-object format. If you ever want a backup or want to push to GitHub:
+
+```bash
+mv vault/.ngit vault/.git
+cd vault && git log
+```
+
+Disabling autocommit (`SYNAIPSE_GIT_AUTOCOMMIT=false`) stops writing new commits but the history viewer still reads any existing `.ngit/`. Commit messages follow `synaipse(<project>): <tool> <noteId>` so you can see at a glance which Synaipse tool touched each file.
+
+### API surface
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/notes/:id/history?limit=50` | `{entries: [{sha, message, author, parents}]}` |
+| `GET /api/notes/:id/version/:sha`     | `{content, sha}` — note content at a past commit |
+| `GET /api/notes/:id/diff?from=&to=`   | `{unified: "...diff text..."}` |
+
+The web UI exposes these through a History button in the note viewer.
+
 ## Web UI
 
 ```env

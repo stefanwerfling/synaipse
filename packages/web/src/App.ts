@@ -272,6 +272,7 @@ export class App {
             const info = await api.getInfo();
             semanticEnabled = info.semanticEnabled;
             this.project = info.project;
+            this.notesPanel.setHistoryEnabled(info.historyEnabled);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }

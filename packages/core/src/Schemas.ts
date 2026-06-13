@@ -126,6 +126,13 @@ export const ConfigSchema = Vts.object({
     }),
     project: Vts.optional(Vts.object({
         name: Vts.string()
+    })),
+    git: Vts.optional(Vts.object({
+        autoCommit: Vts.boolean(),
+        author: Vts.object({
+            name: Vts.string(),
+            email: Vts.string()
+        })
     }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

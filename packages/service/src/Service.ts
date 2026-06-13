@@ -1,6 +1,7 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
+import {diffUnified} from 'ngit';
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {fulltextSearch} from './Fulltext.js';
 import {HashCache} from './Cache.js';
@@ -70,6 +71,20 @@ export interface ProjectOpts {
     project?: string | null;
 }
 
+export interface NoteHistoryEntry {
+    sha: string;
+    message: string;
+    author: {name: string; email: string; date: string};
+    parents: string[];
+}
+
+const isoDate = (timestamp: number): string => new Date(timestamp * 1000).toISOString();
+
+const buildCommitMessage = (tool: string, noteId: string, project: string | null): string => {
+    const scope = project === null ? 'synaipse' : `synaipse(${project})`;
+    return `${scope}: ${tool} ${noteId}`;
+};
+
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
 const SEMANTIC_SAMPLE_CHARS = 1500;
 
@@ -85,7 +100,11 @@ export class SynaipseService {
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
     public constructor(config: Config) {
-        this.vault = new Vault(config.vaultPath);
+        this.vault = new Vault(config.vaultPath, {
+            ...(config.git !== undefined
+                ? {history: {autoCommit: config.git.autoCommit, author: config.git.author}}
+                : {})
+        });
         this.cache = new HashCache(config.indexCachePath);
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
@@ -223,6 +242,65 @@ export class SynaipseService {
         return override ?? this.project;
     }
 
+    public async noteHistory(id: NoteId, limit = 50): Promise<NoteHistoryEntry[]> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return [];
+        }
+
+        const entries = await repo.log({path: id, limit});
+        return entries.map((e) => ({
+            sha: e.sha,
+            message: e.message.trim(),
+            author: {
+                name: e.author.name,
+                email: e.author.email,
+                date: isoDate(e.author.timestamp)
+            },
+            parents: e.parents
+        }));
+    }
+
+    public async noteVersion(id: NoteId, commitSha: string): Promise<string> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            throw new Error('history disabled — no .ngit found in vault');
+        }
+
+        const buf = await repo.show(commitSha, id);
+        return buf.toString('utf8');
+    }
+
+    public async noteDiff(id: NoteId, fromSha: string, toSha?: string): Promise<string> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return '';
+        }
+
+        const resolvedTo = toSha ?? (await repo.head());
+
+        if (resolvedTo === null) {
+            return '';
+        }
+
+        const [before, after] = await Promise.all([
+            repo.show(fromSha, id).then((b) => b.toString('utf8')),
+            repo.show(resolvedTo, id).then((b) => b.toString('utf8'))
+        ]);
+
+        return diffUnified(before, after, {
+            fromLabel: `${id} @ ${fromSha.slice(0, 7)}`,
+            toLabel: `${id} @ ${resolvedTo.slice(0, 7)}`
+        });
+    }
+
+    public async historyEnabled(): Promise<boolean> {
+        return (await this.vault.getRepo()) !== null;
+    }
+
     private requireProject(op: string, override?: string | null): string {
         const resolved = override ?? this.project;
 
@@ -297,7 +375,7 @@ export class SynaipseService {
         return base;
     }
 
-    public async writeNote(input: NoteWriteInput, opts?: ProjectOpts): Promise<Note> {
+    public async writeNote(input: NoteWriteInput, opts?: ProjectOpts, commitTool = 'write_note'): Promise<Note> {
         const project = this.requireProject('write_note', opts?.project);
         const scoped: NoteWriteInput = {
             path: this.normaliseWritePath(input.path, project),
@@ -305,7 +383,9 @@ export class SynaipseService {
             frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project)
         };
 
-        const note = await this.vault.write(scoped);
+        const note = await this.vault.write(scoped, {
+            message: buildCommitMessage(commitTool, scoped.path, project)
+        });
 
         if (this.index !== null) {
             await this.index.indexNote(note);
@@ -318,7 +398,8 @@ export class SynaipseService {
     public async deleteNote(id: NoteId, opts?: ProjectOpts): Promise<void> {
         this.assertInProject(id, 'delete_note', opts?.project);
 
-        await this.vault.delete(id);
+        const project = opts?.project ?? this.project;
+        await this.vault.delete(id, {message: buildCommitMessage('delete_note', id, project)});
 
         if (this.index !== null) {
             await this.index.deleteNote(id);
@@ -351,7 +432,8 @@ export class SynaipseService {
 
         const note = await this.writeNote(
             {path: sessionPath, content: body, frontmatter: baseFrontmatter},
-            opts
+            opts,
+            'log_session'
         );
 
         return note.id;
@@ -792,7 +874,8 @@ export class SynaipseService {
 
         const updated = await this.writeNote(
             {path: note.id, content: body, frontmatter: note.frontmatter},
-            opts
+            opts,
+            'link_note'
         );
 
         return {note: updated, added};
@@ -808,7 +891,8 @@ export class SynaipseService {
 
         return this.writeNote(
             {path: existing.id, content: nextContent, frontmatter: nextFrontmatter},
-            opts
+            opts,
+            'update_note'
         );
     }
 
