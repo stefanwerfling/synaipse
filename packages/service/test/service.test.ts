@@ -600,6 +600,40 @@ describe('SynaipseService project enforcement', () => {
         ]));
     });
 
+    it('noteHistory returns [] for a note that was never tracked in ngit', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: true, author: {name: 'T', email: 't@local'}}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        // seed one Synaipse-driven write so .ngit/ exists
+        await service.writeNote({path: 'tracked.md', content: 'tracked'});
+
+        // ask for the history of a different note that was never committed
+        const history = await service.noteHistory('Memory/app-x/never-committed.md');
+        expect(history).toEqual([]);
+    });
+
+    it('noteDiff returns empty string when path is missing in either side', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: true, author: {name: 'T', email: 't@local'}}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        await service.writeNote({path: 'tracked.md', content: 'v1'});
+        const headSha = (await service.getVault().getRepo())!;
+        const sha = await headSha.head();
+
+        const diff = await service.noteDiff('Memory/app-x/never-committed.md', sha!, sha!);
+        expect(diff).toBe('');
+    });
+
     it('verifyHistory returns ok for a healthy store', async () => {
         const cfg = {
             ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),

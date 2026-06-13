@@ -1,7 +1,7 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
-import {Diff, type PersonInput, type VerifyReport} from 'ngit';
+import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 
 export interface SnapshotEntry {
     name: string;
@@ -91,6 +91,14 @@ const isoDate = (timestamp: number): string => new Date(timestamp * 1000).toISOS
 const buildCommitMessage = (tool: string, noteId: string, project: string | null): string => {
     const scope = project === null ? 'synaipse' : `synaipse(${project})`;
     return `${scope}: ${tool} ${noteId}`;
+};
+
+const isPathNotFound = (err: unknown): boolean => {
+    if (err instanceof PathNotFoundError) {
+        return true;
+    }
+
+    return err instanceof Error && err.name === 'PathNotFoundError';
 };
 
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
@@ -266,7 +274,17 @@ export class SynaipseService {
             return [];
         }
 
-        const entries = await repo.log({path: id, limit});
+        let entries;
+
+        try {
+            entries = await repo.log({path: id, limit});
+        } catch (cause) {
+            if (isPathNotFound(cause)) {
+                return [];
+            }
+            throw cause;
+        }
+
         return entries.map((e) => ({
             sha: e.sha,
             message: e.message.trim(),
@@ -303,15 +321,22 @@ export class SynaipseService {
             return '';
         }
 
-        const [before, after] = await Promise.all([
-            repo.show(fromSha, id).then((b) => b.toString('utf8')),
-            repo.show(resolvedTo, id).then((b) => b.toString('utf8'))
-        ]);
+        try {
+            const [before, after] = await Promise.all([
+                repo.show(fromSha, id).then((b) => b.toString('utf8')),
+                repo.show(resolvedTo, id).then((b) => b.toString('utf8'))
+            ]);
 
-        return Diff.unified(before, after, {
-            fromLabel: `${id} @ ${fromSha.slice(0, 7)}`,
-            toLabel: `${id} @ ${resolvedTo.slice(0, 7)}`
-        });
+            return Diff.unified(before, after, {
+                fromLabel: `${id} @ ${fromSha.slice(0, 7)}`,
+                toLabel: `${id} @ ${resolvedTo.slice(0, 7)}`
+            });
+        } catch (cause) {
+            if (isPathNotFound(cause)) {
+                return '';
+            }
+            throw cause;
+        }
     }
 
     /** True whenever the History UI should be available — feature is configured. The repo may not be initialised yet (no Synaipse-driven write has happened), in which case noteHistory/snapshot etc. just return empty results. */
