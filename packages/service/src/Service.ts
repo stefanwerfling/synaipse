@@ -1,4 +1,5 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
+import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {fulltextSearch} from './Fulltext.js';
@@ -75,6 +76,7 @@ export class SynaipseService {
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly cache: HashCache;
+    private readonly project: string | null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -82,6 +84,7 @@ export class SynaipseService {
         this.vault = new Vault(config.vaultPath);
         this.cache = new HashCache(config.indexCachePath);
         this.watcher = new VaultWatcher(config.vaultPath);
+        this.project = config.project?.name ?? null;
 
         const embedder = createEmbedder(config);
 
@@ -212,8 +215,90 @@ export class SynaipseService {
         return this.mergeHits(ft, sem, limit);
     }
 
+    public getProject(): string | null {
+        return this.project;
+    }
+
+    private requireProject(op: string): string {
+        if (this.project === null) {
+            throw new ProjectScopeError(
+                `${op} requires a project context. Set SYNAIPSE_PROJECT in the MCP server env.`
+            );
+        }
+
+        return this.project;
+    }
+
+    private projectFolder(project: string): string {
+        return `Memory/${project}/`;
+    }
+
+    private projectTag(project: string): string {
+        return `project/${project}`;
+    }
+
+    private assertInProject(id: NoteId, op: string): void {
+        const project = this.requireProject(op);
+        const prefix = this.projectFolder(project);
+
+        if (!id.startsWith(prefix)) {
+            throw new ProjectScopeError(
+                `${op} blocked: ${id} is outside project scope (${project}). Project notes live under ${prefix}.`
+            );
+        }
+    }
+
+    private normaliseWritePath(rawPath: string, project: string): string {
+        const trimmed = rawPath.replace(/^\/+/, '');
+
+        if (trimmed.length === 0) {
+            throw new ProjectScopeError('write path is empty');
+        }
+
+        const projectPrefix = this.projectFolder(project);
+
+        if (trimmed.startsWith(projectPrefix)) {
+            return trimmed;
+        }
+
+        if (trimmed.startsWith('Memory/')) {
+            const rest = trimmed.slice('Memory/'.length);
+            const firstSlash = rest.indexOf('/');
+
+            if (firstSlash > 0) {
+                return `${projectPrefix}${rest.slice(firstSlash + 1)}`;
+            }
+
+            return `${projectPrefix}${rest}`;
+        }
+
+        return `${projectPrefix}${trimmed}`;
+    }
+
+    private applyProjectToFrontmatter(frontmatter: Frontmatter | undefined, project: string): Frontmatter {
+        const base: Frontmatter = frontmatter ? {...frontmatter} : {};
+        const projectTag = this.projectTag(project);
+        const existingTags = Array.isArray(base.tags)
+            ? base.tags.filter((t): t is string => typeof t === 'string')
+            : [];
+
+        base.project = project;
+        base.tags = existingTags.includes(projectTag)
+            ? existingTags
+            : [...existingTags, projectTag];
+
+        return base;
+    }
+
     public async writeNote(input: NoteWriteInput): Promise<Note> {
-        const note = await this.vault.write(input);
+        const project = this.requireProject('write_note');
+        const scoped: NoteWriteInput = {
+            path: this.normaliseWritePath(input.path, project),
+            content: input.content,
+            frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project)
+        };
+
+        const note = await this.vault.write(scoped);
 
         if (this.index !== null) {
             await this.index.indexNote(note);
@@ -224,6 +309,8 @@ export class SynaipseService {
     }
 
     public async deleteNote(id: NoteId): Promise<void> {
+        this.assertInProject(id, 'delete_note');
+
         await this.vault.delete(id);
 
         if (this.index !== null) {
@@ -234,11 +321,12 @@ export class SynaipseService {
     }
 
     public async appendSessionLog(summary: string, references: string[]): Promise<NoteId> {
+        const project = this.requireProject('log_session');
         const now = new Date();
         const date = now.toISOString().slice(0, 10);
         const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-        const sessionPath = `Memory/sessions/${date}.md`;
+        const sessionPath = `${this.projectFolder(project)}sessions/${date}.md`;
         const existing = this.vault.tryGet(sessionPath);
 
         const baseFrontmatter = existing !== undefined
@@ -634,6 +722,7 @@ export class SynaipseService {
     }
 
     public async linkNote(fromId: NoteId, toTitles: readonly string[], section = 'References'): Promise<{note: Note; added: string[]}> {
+        this.assertInProject(fromId, 'link_note');
         const note = this.vault.get(fromId);
         const targets = toTitles.map((t) => t.trim()).filter((t) => t.length > 0);
 
@@ -705,6 +794,7 @@ export class SynaipseService {
     }
 
     public async updateNote(id: NoteId, patch: UpdateNoteInput): Promise<Note> {
+        this.assertInProject(id, 'update_note');
         const existing = this.vault.get(id);
         const nextContent = patch.content ?? existing.content;
         const nextFrontmatter = patch.frontmatterPatch === undefined

@@ -55,6 +55,25 @@ export interface ToolHandler {
 export const buildTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
+            name: 'synaipse_get_project',
+            description: 'Return the active project context. When set, write_note auto-prefixes paths to Memory/<project>/, injects a project/<name> tag and frontmatter.project; update/delete/link/log_session are restricted to Memory/<project>/. Useful for Claude to verify scope before acting.',
+            inputSchema: {type: 'object', properties: {}}
+        },
+        handle: async () => {
+            const name = service.getProject();
+            return {
+                response: ok({
+                    project: name,
+                    isSet: name !== null,
+                    folder: name === null ? null : `Memory/${name}/`,
+                    tag: name === null ? null : `project/${name}`
+                }),
+                event: {kind: 'list', touched: []}
+            };
+        }
+    },
+    {
+        definition: {
             name: 'synaipse_search',
             description: 'Search the Synaipse knowledge base. Modes: fulltext (keywords), semantic (meaning), hybrid (both). Use semantic for concept questions, fulltext for exact terms, hybrid by default.',
             inputSchema: {

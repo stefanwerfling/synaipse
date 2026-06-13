@@ -31,6 +31,7 @@ export interface Frontmatter {
     confidence?: number;
     sources?: string[];
     supersedes?: string[];
+    project?: string;
 }
 
 export interface Note {

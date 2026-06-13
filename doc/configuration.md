@@ -66,6 +66,47 @@ MCP_SERVER_VERSION=0.1.0
 
 These end up in the MCP server handshake metadata.
 
+## Project scope
+
+```env
+SYNAIPSE_PROJECT=my-app
+```
+
+When set, Synaipse pins this MCP session to a single project inside the vault. Designed for shared multi-project vaults (e.g. `~/Synaipse/vault` with `Memory/app-a/`, `Memory/app-b/`, …).
+
+Effects:
+
+| Tool | Behaviour with `SYNAIPSE_PROJECT=my-app` |
+|---|---|
+| `write_note(path)`      | path is auto-prefixed to `Memory/my-app/…`. A wrong project prefix is rewritten silently. |
+| writes (any kind)       | frontmatter gets `project: my-app` injected, tags get `project/my-app` (idempotent). |
+| `update_note(id)`       | rejected if `id` is outside `Memory/my-app/`. |
+| `delete_note(id)`       | same. |
+| `link_note(fromId, …)`  | same — only the source is scoped, link targets can cross projects. |
+| `log_session`           | writes into `Memory/my-app/sessions/YYYY-MM-DD.md`. |
+| reads (`search`, `list_notes`, `related`, `graph`, `stale`, `todos`, …) | unchanged — Claude can still discover knowledge across projects. |
+
+When `SYNAIPSE_PROJECT` is empty or missing, **all write tools fail** with a `ProjectScopeError`. Reads work as before.
+
+For each project, ship a `.mcp.json` in the project repository pointing at the global vault and setting its own project name:
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "command": "node",
+      "args": ["/abs/path/synaipse/packages/mcp-server/dist/Index.js"],
+      "env": {
+        "SYNAIPSE_VAULT_PATH": "/home/me/Synaipse/vault",
+        "SYNAIPSE_PROJECT": "my-app"
+      }
+    }
+  }
+}
+```
+
+Claude can query the active project at any time via `synaipse_get_project`.
+
 ## Web UI
 
 ```env

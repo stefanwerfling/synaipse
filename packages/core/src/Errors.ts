@@ -9,3 +9,4 @@ export class ConfigError extends SynaipseError {}
 export class VaultError extends SynaipseError {}
 export class VectorError extends SynaipseError {}
 export class NotFoundError extends SynaipseError {}
+export class ProjectScopeError extends SynaipseError {}

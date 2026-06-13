@@ -60,6 +60,8 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
         }
     };
 
+    const projectName = env.SYNAIPSE_PROJECT?.trim();
+
     const raw: unknown = {
         ...base,
         ...(provider === 'voyage'
@@ -77,6 +79,9 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
                     model: env.OLLAMA_MODEL ?? 'nomic-embed-text'
                 }
             }
+            : {}),
+        ...(projectName !== undefined && projectName.length > 0
+            ? {project: {name: projectName}}
             : {})
     };
 

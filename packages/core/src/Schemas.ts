@@ -21,7 +21,8 @@ export const FrontmatterSchema = Vts.object(
         why: Vts.optional(Vts.string()),
         confidence: Vts.optional(Vts.number()),
         sources: Vts.optional(Vts.array(Vts.string())),
-        supersedes: Vts.optional(Vts.array(Vts.string()))
+        supersedes: Vts.optional(Vts.array(Vts.string())),
+        project: Vts.optional(Vts.string())
     },
     {objectSchema: {ignoreAdditionalItems: true}}
 );
@@ -122,6 +123,9 @@ export const ConfigSchema = Vts.object({
     }),
     web: Vts.object({
         port: Vts.number()
-    })
+    }),
+    project: Vts.optional(Vts.object({
+        name: Vts.string()
+    }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

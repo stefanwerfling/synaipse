@@ -13,6 +13,11 @@ const buildConfig = (vaultPath: string, indexCachePath: string) => ({
     web: {port: 0}
 });
 
+const buildProjectConfig = (vaultPath: string, indexCachePath: string, project = 'test') => ({
+    ...buildConfig(vaultPath, indexCachePath),
+    project: {name: project}
+});
+
 const writeNote = async (root: string, relPath: string, body: string): Promise<void> => {
     const absolute = path.join(root, relPath);
     await mkdir(path.dirname(absolute), {recursive: true});
@@ -107,82 +112,82 @@ describe('SynaipseService.todos', () => {
 
 describe('SynaipseService.linkNote', () => {
     it('appends a new References section when missing', async () => {
-        await writeNote(vaultDir, 'src.md', '---\ntitle: Source\n---\nbody text');
-        await writeNote(vaultDir, 'tgt.md', '---\ntitle: Target\n---\nother');
+        await writeNote(vaultDir, 'Memory/test/src.md', '---\ntitle: Source\n---\nbody text');
+        await writeNote(vaultDir, 'Memory/test/tgt.md', '---\ntitle: Target\n---\nother');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        const {added} = await service.linkNote('src.md', ['Target']);
+        const {added} = await service.linkNote('Memory/test/src.md', ['Target']);
         expect(added).toEqual(['Target']);
 
-        const content = await readFile(path.join(vaultDir, 'src.md'), 'utf8');
+        const content = await readFile(path.join(vaultDir, 'Memory/test/src.md'), 'utf8');
         expect(content).toMatch(/## References/);
         expect(content).toMatch(/\[\[Target\]\]/);
     });
 
     it('is idempotent for existing wikilinks', async () => {
-        await writeNote(vaultDir, 'src.md', '---\ntitle: Source\n---\nbody\n\n## References\n\n- [[Target]]\n');
-        await writeNote(vaultDir, 'tgt.md', '---\ntitle: Target\n---\nother');
+        await writeNote(vaultDir, 'Memory/test/src.md', '---\ntitle: Source\n---\nbody\n\n## References\n\n- [[Target]]\n');
+        await writeNote(vaultDir, 'Memory/test/tgt.md', '---\ntitle: Target\n---\nother');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        const {added} = await service.linkNote('src.md', ['Target']);
+        const {added} = await service.linkNote('Memory/test/src.md', ['Target']);
         expect(added).toEqual([]);
     });
 
     it('inserts into existing section without duplicates', async () => {
-        await writeNote(vaultDir, 'src.md', '---\ntitle: Source\n---\nbody\n\n## References\n\n- [[Existing]]\n');
+        await writeNote(vaultDir, 'Memory/test/src.md', '---\ntitle: Source\n---\nbody\n\n## References\n\n- [[Existing]]\n');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        const {added} = await service.linkNote('src.md', ['Existing', 'New']);
+        const {added} = await service.linkNote('Memory/test/src.md', ['Existing', 'New']);
         expect(added).toEqual(['New']);
 
-        const content = await readFile(path.join(vaultDir, 'src.md'), 'utf8');
+        const content = await readFile(path.join(vaultDir, 'Memory/test/src.md'), 'utf8');
         expect((content.match(/\[\[Existing\]\]/g) ?? []).length).toBe(1);
         expect(content).toMatch(/\[\[New\]\]/);
     });
 
     it('supports custom section name', async () => {
-        await writeNote(vaultDir, 'src.md', '---\ntitle: Source\n---\nbody');
+        await writeNote(vaultDir, 'Memory/test/src.md', '---\ntitle: Source\n---\nbody');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        await service.linkNote('src.md', ['Other'], 'See also');
+        await service.linkNote('Memory/test/src.md', ['Other'], 'See also');
 
-        const content = await readFile(path.join(vaultDir, 'src.md'), 'utf8');
+        const content = await readFile(path.join(vaultDir, 'Memory/test/src.md'), 'utf8');
         expect(content).toMatch(/## See also/);
     });
 });
 
 describe('SynaipseService.updateNote', () => {
     it('shallow-merges frontmatter without touching content', async () => {
-        await writeNote(vaultDir, 'n.md', '---\ntitle: Original\ntags: [old]\n---\noriginal body');
+        await writeNote(vaultDir, 'Memory/test/n.md', '---\ntitle: Original\ntags: [old]\n---\noriginal body');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        const updated = await service.updateNote('n.md', {
+        const updated = await service.updateNote('Memory/test/n.md', {
             frontmatterPatch: {tags: ['new'], status: 'draft'}
         });
 
         expect(updated.frontmatter.title).toBe('Original');
-        expect(updated.frontmatter.tags).toEqual(['new']);
+        expect(updated.frontmatter.tags).toEqual(expect.arrayContaining(['new', 'project/test']));
         expect(updated.frontmatter['status']).toBe('draft');
         expect(updated.content).toContain('original body');
     });
 
     it('updates content while keeping frontmatter', async () => {
-        await writeNote(vaultDir, 'n.md', '---\ntitle: Stay\n---\nold body');
+        await writeNote(vaultDir, 'Memory/test/n.md', '---\ntitle: Stay\n---\nold body');
 
-        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile));
         await service.start();
 
-        const updated = await service.updateNote('n.md', {content: 'new body'});
+        const updated = await service.updateNote('Memory/test/n.md', {content: 'new body'});
         expect(updated.frontmatter.title).toBe('Stay');
         expect(updated.content).toContain('new body');
         expect(updated.content).not.toContain('old body');
@@ -404,5 +409,132 @@ describe('SynaipseService.staleNotes', () => {
         const entry = all.find((s) => s.id === 'x.md');
         expect(entry?.lastAccessed).toBeDefined();
         expect(entry?.accessCount).toBe(1);
+    });
+});
+
+describe('SynaipseService project enforcement', () => {
+    it('getProject returns null when none configured', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+        expect(service.getProject()).toBeNull();
+    });
+
+    it('getProject returns the configured name', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+        expect(service.getProject()).toBe('app-x');
+    });
+
+    it('writeNote auto-prefixes a plain path to Memory/<project>/', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const note = await service.writeNote({
+            path: 'decisions/auth.md',
+            content: 'body'
+        });
+
+        expect(note.id).toBe('Memory/app-x/decisions/auth.md');
+    });
+
+    it('writeNote rewrites a wrong project prefix', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const note = await service.writeNote({
+            path: 'Memory/other/decisions/auth.md',
+            content: 'body'
+        });
+
+        expect(note.id).toBe('Memory/app-x/decisions/auth.md');
+    });
+
+    it('writeNote keeps an already-correct project path', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const note = await service.writeNote({
+            path: 'Memory/app-x/notes/foo.md',
+            content: 'body'
+        });
+
+        expect(note.id).toBe('Memory/app-x/notes/foo.md');
+    });
+
+    it('writeNote injects project frontmatter and idempotent tag', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const first = await service.writeNote({
+            path: 'notes/foo.md',
+            content: 'body',
+            frontmatter: {title: 'Foo', tags: ['custom']}
+        });
+
+        expect(first.frontmatter.project).toBe('app-x');
+        expect(first.frontmatter.tags).toEqual(expect.arrayContaining(['custom', 'project/app-x']));
+
+        const second = await service.writeNote({
+            path: 'notes/foo.md',
+            content: 'body',
+            frontmatter: {title: 'Foo', tags: ['custom', 'project/app-x']}
+        });
+
+        const tags = second.frontmatter.tags ?? [];
+        expect(tags.filter((t) => t === 'project/app-x').length).toBe(1);
+    });
+
+    it('writeNote without a project throws ProjectScopeError', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        await expect(service.writeNote({path: 'foo.md', content: 'x'}))
+            .rejects.toThrow(/project context/);
+    });
+
+    it('updateNote rejects a note outside project scope', async () => {
+        await writeNote(vaultDir, 'Memory/other/foo.md', '---\ntitle: Foo\n---\nbody');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await expect(service.updateNote('Memory/other/foo.md', {content: 'hack'}))
+            .rejects.toThrow(/outside project scope/);
+    });
+
+    it('deleteNote rejects a note outside project scope', async () => {
+        await writeNote(vaultDir, 'Memory/other/foo.md', '---\ntitle: Foo\n---\nbody');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await expect(service.deleteNote('Memory/other/foo.md'))
+            .rejects.toThrow(/outside project scope/);
+    });
+
+    it('linkNote rejects a source outside project scope', async () => {
+        await writeNote(vaultDir, 'Memory/other/src.md', '---\ntitle: Source\n---\nbody');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await expect(service.linkNote('Memory/other/src.md', ['Target']))
+            .rejects.toThrow(/outside project scope/);
+    });
+
+    it('appendSessionLog writes into Memory/<project>/sessions/', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const id = await service.appendSessionLog('worked on auth', []);
+        expect(id.startsWith('Memory/app-x/sessions/')).toBe(true);
+    });
+
+    it('appendSessionLog without a project throws', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        await expect(service.appendSessionLog('x', []))
+            .rejects.toThrow(/project context/);
     });
 });

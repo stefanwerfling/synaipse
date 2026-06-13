@@ -4,6 +4,7 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 
 | Tool | Purpose |
 |---|---|
+| [`synaipse_get_project`](#synaipse_get_project)       | Read the active project context                        |
 | [`synaipse_search`](#synaipse_search)                 | Search notes (fulltext / semantic / hybrid)            |
 | [`synaipse_read_note`](#synaipse_read_note)           | Read a single note                                     |
 | [`synaipse_write_note`](#synaipse_write_note)         | Create or overwrite a note                             |
@@ -24,6 +25,25 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | [`synaipse_log_session`](#synaipse_log_session)       | Append to today's session log                          |
 
 The canonical schema lives in [`packages/mcp-server/src/Tools.ts`](../packages/mcp-server/src/Tools.ts).
+
+---
+
+## `synaipse_get_project`
+
+No arguments. Returns the project context configured via `SYNAIPSE_PROJECT`:
+
+```json
+{
+  "project": "my-app",
+  "isSet": true,
+  "folder": "Memory/my-app/",
+  "tag": "project/my-app"
+}
+```
+
+When unset, `project` is `null`, `isSet` is `false`, and all write tools (`write_note`, `update_note`, `delete_note`, `link_note`, `log_session`) reject with a `ProjectScopeError`. Reads continue to work globally.
+
+See [configuration.md](configuration.md#project-scope) for details.
 
 ---
 
