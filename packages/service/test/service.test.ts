@@ -571,6 +571,61 @@ describe('SynaipseService project enforcement', () => {
         expect(service.getProject('override')).toBe('override');
     });
 
+    it('writeNote injects per-call extraTags into frontmatter', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const note = await service.writeNote(
+            {path: 'foo.md', content: 'body', frontmatter: {tags: ['user']}},
+            {extraTags: ['team/backend', 'kind/service']}
+        );
+
+        expect(note.frontmatter.tags).toEqual(expect.arrayContaining([
+            'user', 'project/app-x', 'team/backend', 'kind/service'
+        ]));
+    });
+
+    it('writeNote uses config extraTags when no per-call override is given', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            project: {name: 'app-x', extraTags: ['team/from-config']}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        const note = await service.writeNote({path: 'foo.md', content: 'body'});
+        expect(note.frontmatter.tags).toEqual(expect.arrayContaining([
+            'project/app-x', 'team/from-config'
+        ]));
+    });
+
+    it('per-call gitAuthor flows into the autocommit', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {
+                autoCommit: true,
+                author: {name: 'Default', email: 'default@local'}
+            }
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        await service.writeNote(
+            {path: 'foo.md', content: 'body'},
+            {gitAuthor: {name: 'Alice', email: 'alice@example.com'}}
+        );
+
+        const repo = await service.getVault().getRepo();
+        expect(repo).not.toBeNull();
+
+        const log = await repo!.log({});
+        const head = log[0];
+        expect(head?.author.name).toBe('Alice');
+        expect(head?.author.email).toBe('alice@example.com');
+    });
+
     it('updateNote with override targets a different project scope', async () => {
         await writeNote(vaultDir, 'Memory/override/foo.md', '---\ntitle: Foo\n---\nbody');
 

@@ -37,14 +37,26 @@ const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'none' =
     throw new ConfigError(`EMBEDDINGS_PROVIDER must be one of voyage|ollama|none, got: ${raw}`);
 };
 
-const parseGitAuthor = (raw: string): {name: string; email: string} => {
+export const parseGitAuthor = (raw: string): {name: string; email: string} => {
     const match = raw.match(/^\s*(.+?)\s*<\s*(\S+@\S+)\s*>\s*$/);
 
     if (match === null) {
-        throw new ConfigError(`SYNAIPSE_GIT_AUTHOR must be 'Name <email>', got: ${raw}`);
+        throw new ConfigError(`Author must be 'Name <email>', got: ${raw}`);
     }
 
     return {name: match[1]!, email: match[2]!};
+};
+
+const PROJECT_TAG_RE = /^[A-Za-z0-9_./:-]+$/;
+
+export const parseProjectTags = (raw: string | undefined): string[] => {
+    if (raw === undefined || raw.trim().length === 0) {
+        return [];
+    }
+
+    return raw.split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0 && PROJECT_TAG_RE.test(t));
 };
 
 export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config => {
@@ -95,7 +107,14 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
             }
             : {}),
         ...(projectName !== undefined && projectName.length > 0
-            ? {project: {name: projectName}}
+            ? {
+                project: {
+                    name: projectName,
+                    ...(parseProjectTags(env.SYNAIPSE_PROJECT_TAGS).length > 0
+                        ? {extraTags: parseProjectTags(env.SYNAIPSE_PROJECT_TAGS)}
+                        : {})
+                }
+            }
             : {}),
         git: {autoCommit: gitEnabled, author: gitAuthor}
     };

@@ -21,6 +21,8 @@ export interface ToolOutcome {
 
 export interface ToolContext {
     project?: string | null;
+    gitAuthor?: {name: string; email: string};
+    extraTags?: readonly string[];
 }
 
 const EMPTY_CTX: ToolContext = {};
@@ -69,12 +71,15 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
         },
         handle: async (_args, ctx) => {
             const name = service.getProject(ctx?.project);
+            const extraTags = ctx?.extraTags ?? service.getConfigExtraTags();
             return {
                 response: ok({
                     project: name,
                     isSet: name !== null,
                     folder: name === null ? null : `Memory/${name}/`,
-                    tag: name === null ? null : `project/${name}`
+                    tag: name === null ? null : `project/${name}`,
+                    extraTags,
+                    gitAuthor: ctx?.gitAuthor ?? null
                 }),
                 event: {kind: 'list', touched: []}
             };

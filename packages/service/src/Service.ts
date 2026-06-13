@@ -1,7 +1,7 @@
 import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
-import {diffUnified} from 'ngit';
+import {diffUnified, type PersonInput} from 'ngit';
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {fulltextSearch} from './Fulltext.js';
 import {HashCache} from './Cache.js';
@@ -69,6 +69,8 @@ export interface UpdateNoteInput {
 
 export interface ProjectOpts {
     project?: string | null;
+    gitAuthor?: PersonInput;
+    extraTags?: readonly string[];
 }
 
 export interface NoteHistoryEntry {
@@ -96,6 +98,7 @@ export class SynaipseService {
     private readonly watcher: VaultWatcher;
     private readonly cache: HashCache;
     private readonly project: string | null;
+    private readonly configProjectExtraTags: readonly string[];
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -108,6 +111,7 @@ export class SynaipseService {
         this.cache = new HashCache(config.indexCachePath);
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
+        this.configProjectExtraTags = config.project?.extraTags ?? [];
 
         const embedder = createEmbedder(config);
 
@@ -242,6 +246,10 @@ export class SynaipseService {
         return override ?? this.project;
     }
 
+    public getConfigExtraTags(): readonly string[] {
+        return this.configProjectExtraTags;
+    }
+
     public async noteHistory(id: NoteId, limit = 50): Promise<NoteHistoryEntry[]> {
         const repo = await this.vault.getRepo();
 
@@ -360,31 +368,48 @@ export class SynaipseService {
         return `${projectPrefix}${trimmed}`;
     }
 
-    private applyProjectToFrontmatter(frontmatter: Frontmatter | undefined, project: string): Frontmatter {
+    private applyProjectToFrontmatter(
+        frontmatter: Frontmatter | undefined,
+        project: string,
+        extraTags: readonly string[] = []
+    ): Frontmatter {
         const base: Frontmatter = frontmatter ? {...frontmatter} : {};
         const projectTag = this.projectTag(project);
         const existingTags = Array.isArray(base.tags)
             ? base.tags.filter((t): t is string => typeof t === 'string')
             : [];
 
+        const merged = [...existingTags];
+
+        for (const tag of [projectTag, ...extraTags]) {
+            if (!merged.includes(tag)) {
+                merged.push(tag);
+            }
+        }
+
         base.project = project;
-        base.tags = existingTags.includes(projectTag)
-            ? existingTags
-            : [...existingTags, projectTag];
+        base.tags = merged;
 
         return base;
     }
 
+    private resolveExtraTags(perCall: readonly string[] | undefined): readonly string[] {
+        return perCall ?? this.configProjectExtraTags;
+    }
+
     public async writeNote(input: NoteWriteInput, opts?: ProjectOpts, commitTool = 'write_note'): Promise<Note> {
         const project = this.requireProject('write_note', opts?.project);
+        const extraTags = this.resolveExtraTags(opts?.extraTags);
+
         const scoped: NoteWriteInput = {
             path: this.normaliseWritePath(input.path, project),
             content: input.content,
-            frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project)
+            frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project, extraTags)
         };
 
         const note = await this.vault.write(scoped, {
-            message: buildCommitMessage(commitTool, scoped.path, project)
+            message: buildCommitMessage(commitTool, scoped.path, project),
+            ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
         });
 
         if (this.index !== null) {
@@ -399,7 +424,10 @@ export class SynaipseService {
         this.assertInProject(id, 'delete_note', opts?.project);
 
         const project = opts?.project ?? this.project;
-        await this.vault.delete(id, {message: buildCommitMessage('delete_note', id, project)});
+        await this.vault.delete(id, {
+            message: buildCommitMessage('delete_note', id, project),
+            ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
+        });
 
         if (this.index !== null) {
             await this.index.deleteNote(id);

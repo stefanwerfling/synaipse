@@ -8,7 +8,7 @@ import type {Config} from '@synaipse/core';
 import {SynaipseService} from '@synaipse/service';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
-import {resolveProjectFromRequest} from './Project.js';
+import {resolveContextFromRequest} from './Project.js';
 
 export type TransportMode = 'stdio' | 'http';
 
@@ -88,12 +88,11 @@ export const startServer = async (config: Config, options: StartServerOptions): 
 
             void (async () => {
                 const transport = new StreamableHTTPServerTransport({} as never);
-                const project = resolveProjectFromRequest({
+                const ctx: ToolContext = resolveContextFromRequest({
                     url: req.url,
                     headers: req.headers,
                     basePath: options.httpPath
                 });
-                const ctx: ToolContext = project !== undefined ? {project} : {};
                 const server = buildMcpServer(config, tools, publisher, ctx);
 
                 res.on('close', () => {

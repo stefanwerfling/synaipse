@@ -125,6 +125,43 @@ Sample `.mcp.json` variants:
 
 Project names are restricted to `[A-Za-z0-9_.-]+` to prevent path traversal.
 
+### Per-request author and extra tags (HTTP only)
+
+The same per-request mechanism carries two more pieces of context for multi-tenant HTTP daemons:
+
+| Header | Maps to | Effect |
+|---|---|---|
+| `X-Synaipse-Author` | `Name <email>` | Used as the git commit author for every write triggered by this MCP session — different developers on the same daemon get attributed correctly |
+| `X-Synaipse-Project-Tags` | comma-separated | Extra tags auto-injected on every Synaipse write, on top of `project/<name>` (e.g. `team/backend,kind/service`) |
+
+Stdio equivalents are the ENV `SYNAIPSE_GIT_AUTHOR` (already used for the daemon-wide commit identity) and `SYNAIPSE_PROJECT_TAGS`.
+
+Resolver priority for each tool call:
+
+| Field | URL path | HTTP header | ENV | Default |
+|---|---|---|---|---|
+| project    | `/mcp/<project>` | `X-Synaipse-Project`      | `SYNAIPSE_PROJECT`       | — (writes fail) |
+| gitAuthor  | —                | `X-Synaipse-Author`       | `SYNAIPSE_GIT_AUTHOR`    | `Synaipse <synaipse@local>` |
+| extraTags  | —                | `X-Synaipse-Project-Tags` | `SYNAIPSE_PROJECT_TAGS`  | `[]` |
+
+Full example for a shared HTTP daemon:
+
+```json
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp",
+      "headers": {
+        "X-Synaipse-Project":      "swipemeister",
+        "X-Synaipse-Author":       "Stefan Werfling <stefan@example.com>",
+        "X-Synaipse-Project-Tags": "team/backend,kind/service"
+      }
+    }
+  }
+}
+```
+
 For each project, ship a `.mcp.json` in the project repository pointing at the global vault and setting its own project name:
 
 ```json

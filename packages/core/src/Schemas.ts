@@ -125,7 +125,8 @@ export const ConfigSchema = Vts.object({
         port: Vts.number()
     }),
     project: Vts.optional(Vts.object({
-        name: Vts.string()
+        name: Vts.string(),
+        extraTags: Vts.optional(Vts.array(Vts.string()))
     })),
     git: Vts.optional(Vts.object({
         autoCommit: Vts.boolean(),

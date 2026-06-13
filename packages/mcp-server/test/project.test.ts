@@ -1,5 +1,12 @@
 import {describe, it, expect} from 'vitest';
-import {projectFromUrlPath, projectFromHeader, resolveProjectFromRequest} from '../src/Project.js';
+import {
+    projectFromUrlPath,
+    projectFromHeader,
+    resolveProjectFromRequest,
+    authorFromHeader,
+    extraTagsFromHeader,
+    resolveContextFromRequest
+} from '../src/Project.js';
 
 describe('projectFromUrlPath', () => {
     it('extracts the project segment after the base path', () => {
@@ -86,5 +93,78 @@ describe('resolveProjectFromRequest', () => {
             basePath: '/mcp'
         });
         expect(project).toBeUndefined();
+    });
+});
+
+describe('authorFromHeader', () => {
+    it('parses a "Name <email>" header', () => {
+        const author = authorFromHeader({'x-synaipse-author': 'Alice <alice@example.com>'});
+        expect(author).toEqual({name: 'Alice', email: 'alice@example.com'});
+    });
+
+    it('returns undefined for missing or empty header', () => {
+        expect(authorFromHeader({})).toBeUndefined();
+        expect(authorFromHeader({'x-synaipse-author': '   '})).toBeUndefined();
+    });
+
+    it('returns undefined for malformed header instead of throwing', () => {
+        expect(authorFromHeader({'x-synaipse-author': 'no-angle-brackets'})).toBeUndefined();
+    });
+
+    it('uses the first value when the header is repeated', () => {
+        expect(authorFromHeader({
+            'x-synaipse-author': ['First <a@b>', 'Second <c@d>']
+        })).toEqual({name: 'First', email: 'a@b'});
+    });
+});
+
+describe('extraTagsFromHeader', () => {
+    it('parses a comma-separated list', () => {
+        expect(extraTagsFromHeader({
+            'x-synaipse-project-tags': 'team/backend, kind/service'
+        })).toEqual(['team/backend', 'kind/service']);
+    });
+
+    it('returns undefined for missing or empty header', () => {
+        expect(extraTagsFromHeader({})).toBeUndefined();
+        expect(extraTagsFromHeader({'x-synaipse-project-tags': ''})).toBeUndefined();
+    });
+
+    it('drops invalid tag characters silently', () => {
+        expect(extraTagsFromHeader({
+            'x-synaipse-project-tags': 'ok, bad space, also-ok'
+        })).toEqual(['ok', 'also-ok']);
+    });
+
+    it('returns undefined when all tags are filtered out', () => {
+        expect(extraTagsFromHeader({
+            'x-synaipse-project-tags': '   ,   '
+        })).toBeUndefined();
+    });
+});
+
+describe('resolveContextFromRequest', () => {
+    it('merges project from URL with author and tags from headers', () => {
+        const ctx = resolveContextFromRequest({
+            url: '/mcp/from-path',
+            headers: {
+                'x-synaipse-author': 'Bob <bob@example.com>',
+                'x-synaipse-project-tags': 'team/db,kind/store'
+            },
+            basePath: '/mcp'
+        });
+
+        expect(ctx.project).toBe('from-path');
+        expect(ctx.gitAuthor).toEqual({name: 'Bob', email: 'bob@example.com'});
+        expect(ctx.extraTags).toEqual(['team/db', 'kind/store']);
+    });
+
+    it('returns an empty object when no resolvable signal exists', () => {
+        const ctx = resolveContextFromRequest({
+            url: '/mcp',
+            headers: {},
+            basePath: '/mcp'
+        });
+        expect(ctx).toEqual({});
     });
 });

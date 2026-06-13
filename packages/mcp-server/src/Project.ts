@@ -1,4 +1,5 @@
 import type {IncomingHttpHeaders} from 'node:http';
+import {parseGitAuthor, parseProjectTags} from '@synaipse/core';
 
 const PROJECT_RE = /^[A-Za-z0-9_.-]+$/;
 
@@ -72,4 +73,70 @@ export const resolveProjectFromRequest = (input: ResolveProjectInput): string | 
     }
 
     return undefined;
+};
+
+const headerString = (headers: IncomingHttpHeaders, key: string): string | undefined => {
+    const raw = headers[key];
+
+    if (Array.isArray(raw)) {
+        return raw[0];
+    }
+
+    return raw;
+};
+
+export const authorFromHeader = (headers: IncomingHttpHeaders): {name: string; email: string} | undefined => {
+    const raw = headerString(headers, 'x-synaipse-author');
+
+    if (raw === undefined || raw.trim().length === 0) {
+        return undefined;
+    }
+
+    try {
+        return parseGitAuthor(raw);
+    } catch {
+        return undefined;
+    }
+};
+
+export const extraTagsFromHeader = (headers: IncomingHttpHeaders): string[] | undefined => {
+    const raw = headerString(headers, 'x-synaipse-project-tags');
+
+    if (raw === undefined || raw.trim().length === 0) {
+        return undefined;
+    }
+
+    const parsed = parseProjectTags(raw);
+    return parsed.length === 0 ? undefined : parsed;
+};
+
+export interface RequestContext {
+    project?: string;
+    gitAuthor?: {name: string; email: string};
+    extraTags?: string[];
+}
+
+export const resolveContextFromRequest = (input: ResolveProjectInput): RequestContext => {
+    const ctx: RequestContext = {};
+    const project = resolveProjectFromRequest(input);
+
+    if (project !== undefined) {
+        ctx.project = project;
+    }
+
+    if (input.headers !== undefined) {
+        const author = authorFromHeader(input.headers);
+
+        if (author !== undefined) {
+            ctx.gitAuthor = author;
+        }
+
+        const tags = extraTagsFromHeader(input.headers);
+
+        if (tags !== undefined) {
+            ctx.extraTags = tags;
+        }
+    }
+
+    return ctx;
 };
