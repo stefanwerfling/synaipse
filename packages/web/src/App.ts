@@ -29,6 +29,7 @@ export class App {
     private tab: Tab = 'notes';
     private notes: NoteSummary[] = [];
     private graph: Graph | null = null;
+    private project: string | null = null;
 
     private notesPanel: NotesPanel;
     private tagBar: TagBar | null = null;
@@ -270,6 +271,7 @@ export class App {
         try {
             const info = await api.getInfo();
             semanticEnabled = info.semanticEnabled;
+            this.project = info.project;
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }
@@ -476,7 +478,8 @@ export class App {
             showHeat: this.showHeat.get(),
             showRoomGrid: this.showRoomGrid.get(),
             showCluster: this.showCluster.get(),
-            threeD: this.threeD.get()
+            threeD: this.threeD.get(),
+            project: this.project
         };
 
         if (this.tagBar === null) {

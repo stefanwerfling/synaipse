@@ -56,7 +56,7 @@ export const api = {
     getGraph: async (): Promise<Graph> => {
         return json(await fetch('/api/graph'));
     },
-    getInfo: async (): Promise<{semanticEnabled: boolean; notesCount: number}> => {
+    getInfo: async (): Promise<{semanticEnabled: boolean; notesCount: number; project: string | null}> => {
         return json(await fetch('/api/info'));
     }
 };

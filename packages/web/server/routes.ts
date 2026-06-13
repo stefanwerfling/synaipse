@@ -164,7 +164,8 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
 
         json(res, 200, {
             semanticEnabled: service.hasSemanticIndex(),
-            notesCount: service.listNotes().length
+            notesCount: service.listNotes().length,
+            project: service.getProject()
         });
         return;
     }
