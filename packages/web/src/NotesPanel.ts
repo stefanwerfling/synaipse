@@ -1,5 +1,6 @@
 import type {Note} from '@synaipse/core';
 import {api, NoteSummary} from './Api.js';
+import {tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
 import {Editor} from './Editor.js';
 import {clipSnippet} from './HoverCard.js';
@@ -292,7 +293,12 @@ export class NotesPanel {
                     const chipHost = el('div', {class: 'note-list-tags'});
 
                     for (const tag of n.tags.slice(0, 3)) {
-                        chipHost.appendChild(el('span', {class: 'note-list-tag', text: tag}));
+                        const color = tagColor(tag);
+                        chipHost.appendChild(el('span', {
+                            class: 'note-list-tag',
+                            text: tag,
+                            style: {borderColor: color, color}
+                        }));
                     }
 
                     if (n.tags.length > 3) {
@@ -533,7 +539,14 @@ export class NotesPanel {
             const tagHost = el('div', {class: 'viewer-tags'});
 
             for (const tag of this.active.tags) {
-                tagHost.appendChild(el('span', {class: 'viewer-tag', text: tag}));
+                const color = tagColor(tag);
+                tagHost.appendChild(el('span', {
+                    class: 'viewer-tag',
+                    style: {borderColor: color, color}
+                },
+                    el('span', {class: 'viewer-tag-swatch', style: {background: color}}),
+                    el('span', {class: 'viewer-tag-label', text: tag})
+                ));
             }
 
             this.viewer.appendChild(tagHost);

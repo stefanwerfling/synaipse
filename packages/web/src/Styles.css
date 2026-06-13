@@ -555,14 +555,16 @@ body {
 .note-list-tag {
     font-size: 10px;
     color: var(--text-2);
-    background: var(--bg-2);
-    padding: 1px 6px;
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    padding: 0 6px;
     border-radius: var(--r-pill);
     font-weight: 500;
+    line-height: 1.5;
 }
 
 .note-list li.active .note-list-tag {
-    background: var(--bg-1);
+    background: rgba(0, 0, 0, 0.18);
 }
 
 .note-list-tag-more {
@@ -633,13 +635,28 @@ body {
 }
 
 .viewer-tag {
-    background: var(--bg-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
     color: var(--text-1);
     border: 1px solid var(--border);
     padding: 2px 10px;
     border-radius: var(--r-pill);
     font-size: 11px;
     font-weight: 500;
+    line-height: 1.5;
+}
+
+.viewer-tag-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.viewer-tag-label {
+    color: inherit;
 }
 
 .viewer-empty {
