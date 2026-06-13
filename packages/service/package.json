@@ -1,0 +1,24 @@
+{
+  "name": "@synaipse/service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synaipse service layer (vault + vector orchestration)",
+  "type": "module",
+  "main": "./dist/Index.js",
+  "types": "./dist/Index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/Index.d.ts",
+      "import": "./dist/Index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "dependencies": {
+    "@synaipse/core": "*",
+    "@synaipse/vault": "*",
+    "@synaipse/vector": "*"
+  }
+}

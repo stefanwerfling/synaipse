@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "synaipse": {
+      "command": "node",
+      "args": ["--enable-source-maps", "./packages/mcp-server/dist/Index.js"],
+      "env": {}
+    }
+  }
+}

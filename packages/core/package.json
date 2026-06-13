@@ -1,0 +1,30 @@
+{
+  "name": "@synaipse/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared types and VTS schemas for Synaipse",
+  "type": "module",
+  "main": "./dist/Index.js",
+  "types": "./dist/Index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/Index.d.ts",
+      "import": "./dist/Index.js"
+    },
+    "./schemas": {
+      "types": "./dist/Schemas.d.ts",
+      "import": "./dist/Schemas.js"
+    },
+    "./config": {
+      "types": "./dist/Config.d.ts",
+      "import": "./dist/Config.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "dependencies": {
+    "vts": "github:OpenSourcePKG/vts"
+  }
+}

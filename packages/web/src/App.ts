@@ -1,0 +1,528 @@
+import type {Graph} from '@synaipse/core';
+import {ActivityLog} from './ActivityLog.js';
+import {api, NoteSummary} from './Api.js';
+import {clear, el} from './Dom.js';
+import {EventStream, SynaipseEvent} from './Events.js';
+import type {GraphRenderer} from './GraphRenderer.js';
+import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
+import logoSvg from './Logo.svg?raw';
+import {NotesPanel} from './NotesPanel.js';
+import {PersistentValue, setCodec} from './Persistence.js';
+import {Search} from './Search.js';
+import {TagBar, TagEntry} from './TagBar.js';
+
+const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
+const STORAGE_HIDE_ISOLATED = 'synaipse.graph.hideIsolated';
+const STORAGE_SHOW_HULLS = 'synaipse.graph.showHulls';
+const STORAGE_SHOW_HEAT = 'synaipse.graph.showHeat';
+const STORAGE_HEAT_STATE = 'synaipse.graph.heatState';
+const STORAGE_SHOW_ROOM_GRID = 'synaipse.graph.showRoomGrid';
+const STORAGE_SHOW_CLUSTER = 'synaipse.graph.showCluster';
+const STORAGE_THREE_D = 'synaipse.graph.threeD';
+const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
+const HEAT_TICK_MS = 15_000;
+
+type Tab = 'notes' | 'graph';
+
+export class App {
+    public readonly element: HTMLElement;
+    private tab: Tab = 'notes';
+    private notes: NoteSummary[] = [];
+    private graph: Graph | null = null;
+
+    private notesPanel: NotesPanel;
+    private tagBar: TagBar | null = null;
+    private graphView: GraphRenderer | null = null;
+    private graphViewMode: '2d' | '3d' | null = null;
+    private search: Search | null = null;
+    private activityLog: ActivityLog;
+    private events: EventStream;
+    private topbar!: HTMLElement;
+
+    private body: HTMLElement;
+    private graphWrap: HTMLElement;
+    private notesTabBtn!: HTMLButtonElement;
+    private graphTabBtn!: HTMLButtonElement;
+    private activityBtn!: HTMLButtonElement;
+    private activityBadge!: HTMLElement;
+
+    private selectedTags: PersistentValue<ReadonlySet<string>>;
+    private hideIsolated: PersistentValue<boolean>;
+    private showHulls: PersistentValue<boolean>;
+    private showHeat: PersistentValue<boolean>;
+    private heatState: PersistentValue<HeatState>;
+    private showRoomGrid: PersistentValue<boolean>;
+    private showCluster: PersistentValue<boolean>;
+    private threeD: PersistentValue<boolean>;
+    private heatTickTimer: number | null = null;
+    private heatRaf: number | null = null;
+    private reloadTimer: number | null = null;
+
+    public constructor() {
+        this.selectedTags = new PersistentValue<ReadonlySet<string>>(
+            STORAGE_SELECTED_TAGS,
+            EMPTY_TAG_SET,
+            setCodec
+        );
+        this.hideIsolated = new PersistentValue<boolean>(STORAGE_HIDE_ISOLATED, false);
+        this.showHulls = new PersistentValue<boolean>(STORAGE_SHOW_HULLS, false);
+        this.showHeat = new PersistentValue<boolean>(STORAGE_SHOW_HEAT, false);
+        this.heatState = new PersistentValue<HeatState>(STORAGE_HEAT_STATE, {});
+        this.showRoomGrid = new PersistentValue<boolean>(STORAGE_SHOW_ROOM_GRID, false);
+        this.showCluster = new PersistentValue<boolean>(STORAGE_SHOW_CLUSTER, false);
+        this.threeD = new PersistentValue<boolean>(STORAGE_THREE_D, false);
+
+        this.notesPanel = new NotesPanel({
+            onNotesChanged: () => {
+                this.graph = null;
+                this.loadNotes();
+            }
+        });
+
+        this.body = el('div', {style: {display: 'contents'}});
+        this.graphWrap = el('div', {class: 'graph-wrap'});
+        this.topbar = this.buildTopbar();
+
+        this.activityLog = new ActivityLog({
+            resolveTitle: (noteId) => this.notes.find((n) => n.id === noteId)?.title,
+            onClick: (event) => {
+                const target = event.touched[0];
+
+                if (target !== undefined) {
+                    this.notesPanel.openNote(target);
+                    void this.switchTab('notes');
+                }
+            },
+            onUnreadChange: (count) => this.setActivityBadge(count)
+        });
+
+        this.events = new EventStream();
+        this.events.subscribe((event) => this.handleMcpEvent(event));
+
+        this.element = el('div', {class: 'root'}, this.topbar, this.body, this.activityLog.element);
+
+        this.selectedTags.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.hideIsolated.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.showHulls.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.threeD.subscribe(() => {
+            if (this.tab === 'graph') {
+                void this.renderGraphTab();
+                this.renderTagBar();
+            }
+        });
+
+        this.showHeat.subscribe(() => {
+            this.scheduleHeatApply();
+
+            if (this.tab === 'graph') {
+                this.renderTagBar();
+            }
+        });
+
+        this.showRoomGrid.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.showCluster.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.showNotes();
+    }
+
+    private scheduleHeatApply(): void {
+        if (this.heatRaf !== null) {
+            return;
+        }
+
+        this.heatRaf = requestAnimationFrame(() => {
+            this.heatRaf = null;
+
+            if (this.graphView === null) {
+                return;
+            }
+
+            const map = currentHeatMap(this.heatState.get(), Date.now());
+            this.graphView.applyHeat(map);
+        });
+    }
+
+    private bumpHeat(noteIds: readonly string[], ts: number): void {
+        if (noteIds.length === 0) {
+            return;
+        }
+
+        this.heatState.update((state) => {
+            const next = {...state};
+
+            for (const id of noteIds) {
+                next[id] = bumpedScore(next[id], ts, 1);
+            }
+
+            return next;
+        });
+
+        this.scheduleHeatApply();
+    }
+
+    public async mount(host: HTMLElement): Promise<void> {
+        host.appendChild(this.element);
+        this.events.start();
+        this.heatTickTimer = window.setInterval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
+        await Promise.all([this.loadNotes(), this.installSearch()]);
+    }
+
+    private lastEventNode: {id: string; ts: number} | null = null;
+    private readonly trailWindowMs = 5000;
+
+    private handleMcpEvent(event: SynaipseEvent): void {
+        this.activityLog.push(event);
+
+        if (event.kind === 'write' || event.kind === 'delete') {
+            this.scheduleVaultReload();
+        }
+
+        if (event.touched.length === 0) {
+            return;
+        }
+
+        const firstId = event.touched[0];
+
+        if (this.graphView !== null) {
+            this.graphView.pulse(event.touched, event.kind);
+
+            if (firstId !== undefined
+                && this.lastEventNode !== null
+                && this.lastEventNode.id !== firstId
+                && event.ts - this.lastEventNode.ts < this.trailWindowMs) {
+                this.graphView.trail(this.lastEventNode.id, firstId, event.kind);
+            }
+
+            if (firstId !== undefined) {
+                this.graphView.focus(firstId);
+            }
+        }
+
+        if (firstId !== undefined) {
+            this.lastEventNode = {id: firstId, ts: event.ts};
+        }
+
+        this.bumpHeat(event.touched, event.ts);
+    }
+
+    private scheduleVaultReload(): void {
+        if (this.reloadTimer !== null) {
+            return;
+        }
+
+        this.reloadTimer = window.setTimeout(() => {
+            this.reloadTimer = null;
+            void this.reloadVault();
+        }, 250);
+    }
+
+    private async reloadVault(): Promise<void> {
+        await this.loadNotes();
+
+        if (this.tab !== 'graph') {
+            this.graph = null;
+            return;
+        }
+
+        try {
+            this.graph = await api.getGraph();
+        } catch (error) {
+            console.error('failed to refresh graph', error);
+            return;
+        }
+
+        this.applyGraphFilter();
+        this.renderTagBar();
+    }
+
+    private async installSearch(): Promise<void> {
+        let semanticEnabled = false;
+
+        try {
+            const info = await api.getInfo();
+            semanticEnabled = info.semanticEnabled;
+        } catch {
+            // info endpoint failed — degrade silently to fulltext-only mode
+        }
+
+        this.search = new Search({
+            semanticEnabled,
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            },
+            onTopHitChanged: (noteId) => {
+                if (noteId !== null && this.graphView !== null) {
+                    this.graphView.concentrate(noteId);
+                }
+            }
+        });
+
+        this.topbar.appendChild(this.search.element);
+    }
+
+    private buildTopbar(): HTMLElement {
+        this.notesTabBtn = el('button', {
+            class: 'tab active',
+            attrs: {type: 'button'},
+            text: 'Notes',
+            on: {click: () => void this.switchTab('notes')}
+        }) as HTMLButtonElement;
+
+        this.graphTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button'},
+            text: 'Graph',
+            on: {click: () => void this.switchTab('graph')}
+        }) as HTMLButtonElement;
+
+        const brand = el('div', {class: 'brand'});
+        const logo = el('span', {class: 'brand-logo'});
+        logo.innerHTML = logoSvg;
+        brand.appendChild(logo);
+        brand.appendChild(el('span', {class: 'brand-text', text: 'Synaipse'}));
+
+        this.activityBadge = el('span', {class: 'activity-btn-badge', style: {display: 'none'}, text: '0'});
+        this.activityBtn = el('button', {
+            class: 'activity-btn',
+            attrs: {type: 'button', title: 'Activity log', 'aria-label': 'Toggle activity log'},
+            on: {click: () => this.activityLog.toggle()}
+        },
+            el('span', {class: 'activity-btn-icon', text: '●'}),
+            el('span', {class: 'activity-btn-label', text: 'Activity'}),
+            this.activityBadge
+        ) as HTMLButtonElement;
+
+        return el('header', {class: 'topbar'},
+            brand,
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn),
+            el('div', {class: 'topbar-spacer'}),
+            this.activityBtn
+        );
+    }
+
+    private setActivityBadge(count: number): void {
+        if (count > 0) {
+            this.activityBadge.style.display = '';
+            this.activityBadge.textContent = count > 9 ? '9+' : String(count);
+            this.activityBtn.classList.add('has-unread');
+        } else {
+            this.activityBadge.style.display = 'none';
+            this.activityBtn.classList.remove('has-unread');
+        }
+    }
+
+    private async switchTab(tab: Tab): Promise<void> {
+        if (this.tab === tab) {
+            return;
+        }
+
+        this.tab = tab;
+        this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
+        this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
+
+        if (tab === 'notes') {
+            this.showNotes();
+            return;
+        }
+
+        await this.showGraph();
+    }
+
+    private async loadNotes(): Promise<void> {
+        try {
+            this.notes = await api.listNotes();
+            this.notesPanel.setNotes(this.notes);
+        } catch (error) {
+            console.error('failed to load notes', error);
+        }
+    }
+
+    private showNotes(): void {
+        clear(this.body);
+        this.body.appendChild(this.notesPanel.element);
+    }
+
+    private async showGraph(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.graphWrap);
+
+        if (this.graph === null) {
+            clear(this.graphWrap);
+            this.graphWrap.appendChild(el('p', {class: 'loading', text: 'loading graph…'}));
+
+            try {
+                this.graph = await api.getGraph();
+            } catch (error) {
+                console.error('failed to load graph', error);
+                return;
+            }
+        }
+
+        await this.renderGraphTab();
+    }
+
+    private async renderGraphTab(): Promise<void> {
+        clear(this.graphWrap);
+
+        if (this.graph === null) {
+            return;
+        }
+
+        this.renderTagBar();
+
+        const wantMode: '2d' | '3d' = this.threeD.get() ? '3d' : '2d';
+
+        if (this.graphView !== null) {
+            this.graphView.destroy();
+            this.graphView = null;
+        }
+
+        const state = {
+            data: this.graph,
+            selectedTags: this.selectedTags.get(),
+            hideIsolated: this.hideIsolated.get(),
+            showHulls: this.showHulls.get(),
+            showHeat: this.showHeat.get(),
+            showRoomGrid: this.showRoomGrid.get(),
+            showCluster: this.showCluster.get()
+        };
+
+        const callbacks = {
+            onSelectNote: (noteId: string) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            }
+        };
+
+        if (wantMode === '3d') {
+            const {GraphView3D} = await import('./Graph3D.js');
+            this.graphView = new GraphView3D(state, callbacks);
+        } else {
+            const {GraphView} = await import('./Graph.js');
+            this.graphView = new GraphView(state, callbacks);
+        }
+
+        this.graphViewMode = wantMode;
+        this.graphWrap.appendChild(this.graphView.element);
+        this.graphView.mount();
+        this.scheduleHeatApply();
+    }
+
+    private renderTagBar(): void {
+        if (this.graph === null) {
+            return;
+        }
+
+        const entries = this.computeTagEntries();
+
+        const callbacks = {
+            onToggleTag: (tag: string) => {
+                this.selectedTags.update((prev) => {
+                    const next = new Set(prev);
+
+                    if (next.has(tag)) {
+                        next.delete(tag);
+                    } else {
+                        next.add(tag);
+                    }
+
+                    return next;
+                });
+            },
+            onClear: () => this.selectedTags.set(new Set()),
+            onToggleIsolated: () => this.hideIsolated.update((v) => !v),
+            onToggleHulls: () => this.showHulls.update((v) => !v),
+            onToggleHeat: () => this.showHeat.update((v) => !v),
+            onToggleRoomGrid: () => this.showRoomGrid.update((v) => !v),
+            onToggleCluster: () => this.showCluster.update((v) => !v),
+            onToggle3D: () => this.threeD.update((v) => !v)
+        };
+
+        const state = {
+            tags: entries,
+            selected: this.selectedTags.get(),
+            hideIsolated: this.hideIsolated.get(),
+            showHulls: this.showHulls.get(),
+            showHeat: this.showHeat.get(),
+            showRoomGrid: this.showRoomGrid.get(),
+            showCluster: this.showCluster.get(),
+            threeD: this.threeD.get()
+        };
+
+        if (this.tagBar === null) {
+            this.tagBar = new TagBar(state, callbacks);
+            this.graphWrap.prepend(this.tagBar.element);
+            return;
+        }
+
+        this.tagBar.update(state);
+
+        if (!this.tagBar.element.isConnected) {
+            this.graphWrap.prepend(this.tagBar.element);
+        }
+    }
+
+    private applyGraphFilter(): void {
+        if (this.graphView === null || this.graph === null) {
+            return;
+        }
+
+        this.graphView.update({
+            data: this.graph,
+            selectedTags: this.selectedTags.get(),
+            hideIsolated: this.hideIsolated.get(),
+            showHulls: this.showHulls.get(),
+            showHeat: this.showHeat.get(),
+            showRoomGrid: this.showRoomGrid.get(),
+            showCluster: this.showCluster.get()
+        });
+        this.scheduleHeatApply();
+    }
+
+    private computeTagEntries(): TagEntry[] {
+        if (this.graph === null) {
+            return [];
+        }
+
+        const counts = new Map<string, number>();
+        for (const node of this.graph.nodes) {
+            for (const t of node.tags) {
+                counts.set(t, (counts.get(t) ?? 0) + 1);
+            }
+        }
+
+        return [...counts.entries()]
+            .map(([tag, count]) => ({tag, count}))
+            .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    }
+}
