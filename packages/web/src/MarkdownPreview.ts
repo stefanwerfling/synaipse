@@ -1,7 +1,29 @@
 import {marked} from 'marked';
+import {markedHighlight} from 'marked-highlight';
+import hljs from 'highlight.js/lib/common';
 import {clear, el} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
+
+let highlightConfigured = false;
+
+const configureHighlight = (): void => {
+    if (highlightConfigured) {
+        return;
+    }
+
+    marked.use(markedHighlight({
+        langPrefix: 'hljs language-',
+        highlight: (code, lang) => {
+            const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
+            return hljs.highlight(code, {language, ignoreIllegals: true}).value;
+        }
+    }));
+
+    highlightConfigured = true;
+};
+
+configureHighlight();
 
 export interface NoteSnippet {
     title: string;

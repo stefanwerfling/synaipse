@@ -907,6 +907,12 @@ body {
     font-size: 13px;
 }
 
+.md-preview pre code.hljs {
+    background: transparent;
+    padding: 0;
+    display: block;
+}
+
 .md-preview ul,
 .md-preview ol {
     padding-left: 1.5em;

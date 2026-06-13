@@ -21,7 +21,9 @@
     "3d-force-graph": "^1.74.0",
     "cytoscape": "^3.30.4",
     "dotenv": "^16.4.7",
+    "highlight.js": "^11.11.1",
     "marked": "^15.0.4",
+    "marked-highlight": "^2.2.4",
     "three": "^0.171.0"
   },
   "devDependencies": {
