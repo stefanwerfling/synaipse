@@ -18,6 +18,7 @@ export interface GitHubStarsOptions {
 
 const DEFAULT_PATH_PREFIX = 'Crawler/github/starred';
 const DEFAULT_README_MAX = 3000;
+const INDEX_TITLE = 'GitHub Starred Repos';
 
 const slugify = (s: string): string => s
     .toLowerCase()
@@ -112,7 +113,7 @@ const buildBody = (repo: GitHubRepo, readme: string | null, readmeMax: number): 
         lines.push(`> ${repo.description}`, '');
     }
 
-    lines.push(`[${repo.html_url}](${repo.html_url})`, '');
+    lines.push(`Indexed in [[${INDEX_TITLE}]] · [${repo.html_url}](${repo.html_url})`, '');
 
     lines.push('## Stats', '');
     lines.push(`- ⭐ **${repo.stargazers_count}** stars · 🍴 ${repo.forks_count} forks · 🐛 ${repo.open_issues_count} open issues`);
@@ -177,7 +178,7 @@ const buildIndex = (repos: GitHubRepo[], crawledAt: string): {body: string; fron
 
     const lines: string[] = [];
 
-    lines.push('# GitHub starred repositories', '');
+    lines.push(`# ${INDEX_TITLE}`, '');
     lines.push(`${repos.length} repositories crawled on ${crawledAt}.`, '');
 
     lines.push('## By language', '');
@@ -210,7 +211,7 @@ const buildIndex = (repos: GitHubRepo[], crawledAt: string): {body: string; fron
     return {
         body: lines.join('\n'),
         frontmatter: {
-            title: 'GitHub Starred Repos',
+            title: INDEX_TITLE,
             type: 'external',
             tags: ['crawler', 'github', 'index'],
             source: 'github-stars',

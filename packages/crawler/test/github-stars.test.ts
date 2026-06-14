@@ -97,6 +97,8 @@ describe('GitHubStarsCrawler', () => {
         ]));
         expect(note!.content).toContain('world-greeting library');
         expect(note!.content).toContain('⭐ **1234**');
+        expect(note!.content).toContain('Indexed in [[GitHub Starred Repos]]');
+        expect(note!.wikilinks).toContain('GitHub Starred Repos');
 
         const index = vault.tryGet('Crawler/github/starred/_index.md');
         expect(index).toBeDefined();
