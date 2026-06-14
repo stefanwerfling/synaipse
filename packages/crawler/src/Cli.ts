@@ -4,9 +4,10 @@ import {fileURLToPath} from 'node:url';
 import {config as dotenvConfig} from 'dotenv';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '..', '..', '..', '..');
+// here = packages/crawler/dist → up 3 = repo root
+const repoRoot = path.resolve(here, '..', '..', '..');
 process.chdir(repoRoot);
-dotenvConfig();
+dotenvConfig({path: path.join(repoRoot, '.env')});
 
 const {loadConfigFromEnv} = await import('@synaipse/core');
 const {Vault} = await import('@synaipse/vault');
