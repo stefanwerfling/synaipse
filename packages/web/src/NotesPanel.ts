@@ -45,9 +45,24 @@ const recencyBucket = (mtime: number, now: number): typeof RECENT_BUCKETS[number
     return 'Earlier';
 };
 
-const folderOf = (id: string): string => {
+const MAX_FOLDER_DEPTH = 2;
+
+const folderOf = (id: string): {key: string; label: string} => {
     const slash = id.lastIndexOf('/');
-    return slash === -1 ? ROOT_FOLDER_LABEL : id.slice(0, slash);
+
+    if (slash === -1) {
+        return {key: ROOT_FOLDER_LABEL, label: ROOT_FOLDER_LABEL};
+    }
+
+    const folder = id.slice(0, slash);
+    const parts = folder.split('/');
+
+    if (parts.length <= MAX_FOLDER_DEPTH) {
+        return {key: folder, label: folder};
+    }
+
+    const collapsed = parts.slice(0, MAX_FOLDER_DEPTH).join('/');
+    return {key: collapsed, label: `${collapsed}/…`};
 };
 
 const buildGroups = (notes: NoteSummary[], mode: GroupMode, now: number): NoteGroup[] => {
@@ -66,8 +81,8 @@ const buildGroups = (notes: NoteSummary[], mode: GroupMode, now: number): NoteGr
 
     if (mode === 'folder') {
         for (const note of notes) {
-            const folder = folderOf(note.id);
-            ensure(folder, folder).notes.push(note);
+            const {key, label} = folderOf(note.id);
+            ensure(key, label).notes.push(note);
         }
 
         return [...map.values()].sort((a, b) => {
