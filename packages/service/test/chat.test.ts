@@ -109,6 +109,42 @@ describe('runChat', () => {
         expect(last?.kind).toBe('error');
     });
 
+    it('threads history into the Ollama messages array between system and final user turn', async () => {
+        const captured: unknown[] = [];
+
+        const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+            captured.push(init?.body !== undefined ? JSON.parse(init.body as string) : null);
+            const encoder = new TextEncoder();
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode(JSON.stringify({done: true}) + '\n'));
+                    controller.close();
+                }
+            });
+            return new Response(stream, {status: 200, headers: {'content-type': 'application/x-ndjson'}});
+        }) as typeof fetch;
+
+        await collect(runChat({
+            search: async () => [],
+            readNote: () => undefined,
+            provider: {url: 'http://x', model: 'm', fetch: fakeFetch}
+        }, {
+            question: 'follow-up?',
+            history: [
+                {role: 'user', content: 'first?'},
+                {role: 'assistant', content: 'first answer.'}
+            ]
+        }));
+
+        const body = captured[0] as {messages: Array<{role: string; content: string}>};
+        expect(body.messages.length).toBe(4);
+        expect(body.messages[0]?.role).toBe('system');
+        expect(body.messages[1]).toEqual({role: 'user', content: 'first?'});
+        expect(body.messages[2]).toEqual({role: 'assistant', content: 'first answer.'});
+        expect(body.messages[3]?.role).toBe('user');
+        expect(body.messages[3]?.content).toContain('follow-up?');
+    });
+
     it('handles partial JSON chunks across stream boundaries', async () => {
         const full = JSON.stringify({message: {role: 'assistant', content: 'concat'}});
         const split1 = full.slice(0, 10);

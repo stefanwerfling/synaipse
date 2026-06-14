@@ -1234,6 +1234,50 @@ body {
     cursor: not-allowed;
 }
 
+.chat-head-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.chat-clear {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-3);
+    padding: 2px 10px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.chat-clear:hover {
+    color: var(--red);
+    border-color: var(--red);
+}
+
+.chat-stop {
+    align-self: flex-end;
+    background: var(--red);
+    border: none;
+    color: var(--bg-0);
+    padding: 8px 16px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--t-fast);
+}
+
+.chat-stop:hover {
+    background: #fa8c8c;
+}
+
+.chat-stop[hidden],
+.chat-send[hidden] {
+    display: none;
+}
+
 .palette-wrap {
     position: fixed;
     inset: 0;

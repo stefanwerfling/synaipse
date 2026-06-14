@@ -4,7 +4,7 @@ import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, type ChatEvent, type ChatOptions} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
-export type {ChatEvent, ChatSource, ChatOptions} from './Chat.js';
+export type {ChatEvent, ChatSource, ChatOptions, ChatMessage} from './Chat.js';
 export type {WriteAssetResult} from './Assets.js';
 
 export interface SnapshotEntry {

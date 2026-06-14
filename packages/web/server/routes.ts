@@ -342,9 +342,24 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             return;
         }
 
-        const body = await readJson<{question?: unknown; pathPrefix?: unknown}>(req);
+        const body = await readJson<{question?: unknown; pathPrefix?: unknown; history?: unknown}>(req);
         const question = asString(body.question, 'question');
         const pathPrefix = typeof body.pathPrefix === 'string' ? body.pathPrefix : undefined;
+
+        const history: Array<{role: 'user' | 'assistant'; content: string}> = [];
+
+        if (Array.isArray(body.history)) {
+            for (const raw of body.history) {
+                if (typeof raw !== 'object' || raw === null) continue;
+                const r = raw as Record<string, unknown>;
+                const role = r.role;
+                const content = r.content;
+
+                if ((role === 'user' || role === 'assistant') && typeof content === 'string') {
+                    history.push({role, content});
+                }
+            }
+        }
 
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -359,6 +374,7 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             for await (const event of service.chat({
                 question,
                 ...(pathPrefix !== undefined ? {pathPrefix} : {}),
+                ...(history.length > 0 ? {history} : {}),
                 abort: ctl.signal
             })) {
                 res.write(`data: ${JSON.stringify(event)}\n\n`);

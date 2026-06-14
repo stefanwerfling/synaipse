@@ -1,4 +1,5 @@
 import {clear, el} from './Dom.js';
+import {PersistentValue} from './Persistence.js';
 
 export interface ChatSource {
     index: number;
@@ -16,16 +17,25 @@ interface Message {
     streaming?: boolean;
 }
 
+const STORAGE_HISTORY = 'synaipse.chat.history';
+const HISTORY_MAX_TURNS = 12;          // 6 user + 6 assistant
+const HISTORY_MAX_CHARS_PER_MSG = 4000;
+
 export interface ChatPanelCallbacks {
     onOpenNote: (noteId: string) => void;
 }
+
+const historyStore = new PersistentValue<Message[]>(STORAGE_HISTORY, []);
 
 export class ChatPanel {
     public readonly element: HTMLElement;
     private readonly thread: HTMLElement;
     private readonly input: HTMLTextAreaElement;
     private readonly modelLabel: HTMLElement;
-    private readonly messages: Message[] = [];
+    private readonly sendBtn: HTMLButtonElement;
+    private readonly stopBtn: HTMLButtonElement;
+    private readonly clearBtn: HTMLButtonElement;
+    private messages: Message[] = [];
     private streaming = false;
     private currentAbort: AbortController | null = null;
     private model = '—';
@@ -35,9 +45,17 @@ export class ChatPanel {
         this.element = el('div', {class: 'chat-panel'});
 
         this.modelLabel = el('span', {class: 'chat-model', text: '—'});
+
+        this.clearBtn = el('button', {
+            class: 'chat-clear',
+            attrs: {type: 'button', title: 'Clear conversation'},
+            text: 'Clear',
+            on: {click: () => this.clearConversation()}
+        }) as HTMLButtonElement;
+
         const head = el('div', {class: 'chat-head'},
             el('h2', {class: 'chat-title', text: 'Chat with your notes'}),
-            this.modelLabel
+            el('div', {class: 'chat-head-right'}, this.modelLabel, this.clearBtn)
         );
 
         this.thread = el('div', {class: 'chat-thread'});
@@ -59,20 +77,29 @@ export class ChatPanel {
             }
         }) as HTMLTextAreaElement;
 
-        const sendBtn = el('button', {
+        this.sendBtn = el('button', {
             class: 'chat-send',
             attrs: {type: 'button'},
             text: 'Send',
             on: {click: () => void this.send()}
-        });
+        }) as HTMLButtonElement;
 
-        const inputRow = el('div', {class: 'chat-input-row'}, this.input, sendBtn);
+        this.stopBtn = el('button', {
+            class: 'chat-stop',
+            attrs: {type: 'button', title: 'Stop streaming response'},
+            text: 'Stop',
+            on: {click: () => this.stop()}
+        }) as HTMLButtonElement;
+
+        this.stopBtn.hidden = true;
+
+        const inputRow = el('div', {class: 'chat-input-row'}, this.input, this.stopBtn, this.sendBtn);
 
         this.element.appendChild(head);
         this.element.appendChild(this.thread);
         this.element.appendChild(inputRow);
 
-        this.renderEmpty();
+        this.restore();
     }
 
     public setInfo(enabled: boolean, model: string | null): void {
@@ -97,15 +124,47 @@ export class ChatPanel {
         this.input.focus();
     }
 
+    private restore(): void {
+        const stored = historyStore.get();
+
+        if (stored.length === 0) {
+            this.renderEmpty();
+            return;
+        }
+
+        // ignore any streaming flags on restore
+        this.messages = stored.map((m) => ({...m, streaming: false}));
+        this.renderThread();
+    }
+
+    private persist(): void {
+        historyStore.set(this.messages);
+    }
+
+    private clearConversation(): void {
+        if (this.streaming) {
+            this.stop();
+        }
+
+        this.messages = [];
+        this.persist();
+        this.renderEmpty();
+    }
+
     private renderEmpty(): void {
         clear(this.thread);
         this.thread.appendChild(
-            el('div', {class: 'chat-empty', text: 'Frag was zu deinen Notes — die Antwort basiert ausschließlich auf dem Vault.'})
+            el('div', {class: 'chat-empty', text: 'Frag was zu deinen Notes — die Antwort basiert ausschließlich auf dem Vault. Folgefragen funktionieren, Verlauf bleibt im Browser.'})
         );
     }
 
     private renderThread(): void {
         clear(this.thread);
+
+        if (this.messages.length === 0) {
+            this.renderEmpty();
+            return;
+        }
 
         for (const msg of this.messages) {
             this.thread.appendChild(this.renderMessage(msg));
@@ -158,6 +217,32 @@ export class ChatPanel {
         );
     }
 
+    private buildHistory(): {role: 'user' | 'assistant'; content: string}[] {
+        // last N completed turns (excludes the in-flight assistant placeholder)
+        const completed = this.messages.filter((m) => m.streaming !== true);
+        const recent = completed.slice(-HISTORY_MAX_TURNS);
+
+        return recent.map((m) => ({
+            role: m.role,
+            content: m.text.length > HISTORY_MAX_CHARS_PER_MSG
+                ? `${m.text.slice(0, HISTORY_MAX_CHARS_PER_MSG)}\n\n…[truncated]`
+                : m.text
+        }));
+    }
+
+    private stop(): void {
+        if (this.currentAbort !== null) {
+            this.currentAbort.abort();
+        }
+    }
+
+    private setStreaming(active: boolean): void {
+        this.streaming = active;
+        this.stopBtn.hidden = !active;
+        this.sendBtn.hidden = active;
+        this.input.disabled = active;
+    }
+
     private async send(): Promise<void> {
         if (!this.enabled || this.streaming) return;
 
@@ -166,7 +251,8 @@ export class ChatPanel {
         if (question.length === 0) return;
 
         this.input.value = '';
-        this.streaming = true;
+
+        const history = this.buildHistory();
 
         const userMsg: Message = {role: 'user', text: question};
         const assistantMsg: Message = {role: 'assistant', text: '', streaming: true, sources: []};
@@ -174,14 +260,16 @@ export class ChatPanel {
         this.messages.push(userMsg);
         this.messages.push(assistantMsg);
         this.renderThread();
+        this.persist();
 
+        this.setStreaming(true);
         this.currentAbort = new AbortController();
 
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({question}),
+                body: JSON.stringify({question, history}),
                 signal: this.currentAbort.signal
             });
 
@@ -212,12 +300,17 @@ export class ChatPanel {
                 }
             }
         } catch (cause) {
-            assistantMsg.text += `\n\n[error: ${String(cause)}]`;
+            if (cause instanceof DOMException && cause.name === 'AbortError') {
+                assistantMsg.text += assistantMsg.text.length > 0 ? '\n\n[stopped]' : '[stopped]';
+            } else {
+                assistantMsg.text += `\n\n[error: ${String(cause)}]`;
+            }
         } finally {
             assistantMsg.streaming = false;
-            this.streaming = false;
             this.currentAbort = null;
+            this.setStreaming(false);
             this.renderThread();
+            this.persist();
         }
     }
 

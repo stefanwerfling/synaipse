@@ -14,11 +14,18 @@ export type ChatEvent =
     | {kind: 'done'; totalTokens: number}
     | {kind: 'error'; message: string};
 
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 export interface ChatOptions {
     question: string;
     pathPrefix?: string;
     limit?: number;
     abort?: AbortSignal;
+    /** Previous turns (excluding the new question). Adds context for follow-ups. */
+    history?: readonly ChatMessage[];
 }
 
 export interface ChatProviderConfig {
@@ -27,7 +34,7 @@ export interface ChatProviderConfig {
     fetch?: typeof fetch;
 }
 
-const SYSTEM_PROMPT = `Du beantwortest Fragen ausschließlich basierend auf den folgenden Notizen aus dem persönlichen Vault des Nutzers. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Notizen. Wenn die Notizen die Frage nicht beantworten, sag das ehrlich — erfinde nichts.`;
+const SYSTEM_PROMPT = `Du beantwortest Fragen ausschließlich basierend auf den folgenden Notizen aus dem persönlichen Vault des Nutzers. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Notizen. Wenn die Notizen die Frage nicht beantworten, sag das ehrlich — erfinde nichts. Bei Folgefragen berücksichtige den bisherigen Gesprächsverlauf, aber stütze neue Aussagen auf die für DIESE Frage gelieferten Notizen.`;
 
 const buildContext = (sources: ChatSource[]): string => {
     const blocks: string[] = [];
@@ -91,15 +98,23 @@ export async function* streamOllamaChat(
     config: ChatProviderConfig,
     system: string,
     user: string,
-    abort?: AbortSignal
+    abort?: AbortSignal,
+    history?: readonly ChatMessage[]
 ): AsyncGenerator<{token?: string; totalTokens?: number; done?: boolean}, void, void> {
     const fetchImpl = config.fetch ?? fetch;
+    const messages: Array<{role: string; content: string}> = [{role: 'system', content: system}];
+
+    if (history !== undefined) {
+        for (const m of history) {
+            messages.push({role: m.role, content: m.content});
+        }
+    }
+
+    messages.push({role: 'user', content: user});
+
     const body = {
         model: config.model,
-        messages: [
-            {role: 'system', content: system},
-            {role: 'user', content: user}
-        ],
+        messages,
         stream: true
     };
 
@@ -210,7 +225,7 @@ export async function* runChat(
     let totalTokens = 0;
 
     try {
-        for await (const event of streamOllamaChat(deps.provider, SYSTEM_PROMPT, userPrompt, options.abort)) {
+        for await (const event of streamOllamaChat(deps.provider, SYSTEM_PROMPT, userPrompt, options.abort, options.history)) {
             if (event.token !== undefined) {
                 yield {kind: 'token', text: event.token};
             }
