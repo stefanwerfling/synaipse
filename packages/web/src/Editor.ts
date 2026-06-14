@@ -1,4 +1,5 @@
 import type {Frontmatter, Note} from '@synaipse/core';
+import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
@@ -156,10 +157,16 @@ export class Editor {
         this.textarea = el('textarea', {
             class: 'editor-body',
             attrs: {spellcheck: 'false'},
-            on: {input: (e) => {
-                this.content = (e.target as HTMLTextAreaElement).value;
-                this.preview.update(this.content);
-            }}
+            on: {
+                input: (e) => {
+                    this.content = (e.target as HTMLTextAreaElement).value;
+                    this.preview.update(this.content);
+                },
+                dragover: (e) => this.onDragOver(e as DragEvent),
+                dragleave: () => this.textarea.classList.remove('drop-target'),
+                drop: (e) => void this.onDrop(e as DragEvent),
+                paste: (e) => void this.onPaste(e as ClipboardEvent)
+            }
         }) as HTMLTextAreaElement;
         this.textarea.value = this.content;
 
@@ -274,5 +281,78 @@ export class Editor {
             this.renderError();
             this.setSaving(false, btn);
         }
+    }
+
+    private onDragOver(event: DragEvent): void {
+        if (event.dataTransfer === null) return;
+
+        const hasFile = Array.from(event.dataTransfer.items).some((i) => i.kind === 'file');
+
+        if (!hasFile) return;
+
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        this.textarea.classList.add('drop-target');
+    }
+
+    private async onDrop(event: DragEvent): Promise<void> {
+        this.textarea.classList.remove('drop-target');
+
+        if (event.dataTransfer === null) return;
+
+        const files = Array.from(event.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+
+        if (files.length === 0) return;
+
+        event.preventDefault();
+        await this.uploadAndInsert(files);
+    }
+
+    private async onPaste(event: ClipboardEvent): Promise<void> {
+        if (event.clipboardData === null) return;
+
+        const files: File[] = [];
+        for (const item of event.clipboardData.items) {
+            if (item.kind === 'file') {
+                const f = item.getAsFile();
+                if (f !== null && f.type.startsWith('image/')) files.push(f);
+            }
+        }
+
+        if (files.length === 0) return;
+
+        event.preventDefault();
+        await this.uploadAndInsert(files);
+    }
+
+    private async uploadAndInsert(files: File[]): Promise<void> {
+        const inserts: string[] = [];
+
+        for (const file of files) {
+            try {
+                const result = await api.uploadAsset(this.note.id, file);
+                const alt = file.name.replace(/\.[^.]+$/, '');
+                inserts.push(`![${alt}](${result.relativePath})`);
+            } catch (e) {
+                this.error = `Upload failed: ${e instanceof Error ? e.message : String(e)}`;
+                this.renderError();
+                return;
+            }
+        }
+
+        const insertion = inserts.join('\n\n');
+        const start = this.textarea.selectionStart;
+        const end = this.textarea.selectionEnd;
+        const before = this.textarea.value.slice(0, start);
+        const after = this.textarea.value.slice(end);
+
+        this.textarea.value = `${before}${insertion}${after}`;
+        this.content = this.textarea.value;
+        this.preview.update(this.content);
+
+        const cursor = start + insertion.length;
+        this.textarea.selectionStart = cursor;
+        this.textarea.selectionEnd = cursor;
+        this.textarea.focus();
     }
 }

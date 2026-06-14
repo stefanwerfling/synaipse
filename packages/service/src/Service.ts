@@ -3,7 +3,9 @@ import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, type ChatEvent, type ChatOptions} from './Chat.js';
+import {writeAsset, type WriteAssetResult} from './Assets.js';
 export type {ChatEvent, ChatSource, ChatOptions} from './Chat.js';
+export type {WriteAssetResult} from './Assets.js';
 
 export interface SnapshotEntry {
     name: string;
@@ -352,6 +354,15 @@ export class SynaipseService {
     }
 
     /** True whenever the History UI should be available — feature is configured. The repo may not be initialised yet (no Synaipse-driven write has happened), in which case noteHistory/snapshot etc. just return empty results. */
+    public async writeNoteAsset(noteId: NoteId, content: Buffer, contentType: string | null): Promise<WriteAssetResult> {
+        return writeAsset({
+            vaultPath: this.vault.root,
+            noteId,
+            content,
+            contentType
+        });
+    }
+
     public chatEnabled(): boolean {
         return this.chatProvider !== null;
     }

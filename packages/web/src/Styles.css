@@ -1423,6 +1423,13 @@ body {
     box-shadow: var(--accent-glow);
 }
 
+.editor-body.drop-target {
+    border-color: var(--green);
+    border-style: dashed;
+    background: rgba(52, 211, 153, 0.06);
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+
 .md-preview {
     min-height: 320px;
     padding: var(--space-4) var(--space-5);

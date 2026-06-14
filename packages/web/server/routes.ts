@@ -198,6 +198,53 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
         return;
     }
 
+    if (path === '/api/assets/upload') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const noteId = decodeURIComponent(req.headers['x-synaipse-note-id'] as string ?? '');
+
+        if (noteId === '') {
+            json(res, 400, {error: 'missing X-Synaipse-Note-Id header'});
+            return;
+        }
+
+        const chunks: Buffer[] = [];
+        let total = 0;
+        const MAX_BYTES = 25 * 1024 * 1024;
+
+        for await (const chunk of req) {
+            const buf = chunk as Buffer;
+            total += buf.length;
+
+            if (total > MAX_BYTES) {
+                json(res, 413, {error: 'asset exceeds 25 MB limit'});
+                return;
+            }
+
+            chunks.push(buf);
+        }
+
+        const body = Buffer.concat(chunks, total);
+        const contentType = (req.headers['content-type'] as string | undefined) ?? null;
+
+        if (body.length === 0) {
+            json(res, 400, {error: 'empty body'});
+            return;
+        }
+
+        try {
+            const result = await service.writeNoteAsset(noteId, body, contentType);
+            json(res, 200, result);
+        } catch (error) {
+            json(res, 500, {error: String(error)});
+        }
+
+        return;
+    }
+
     if (path === '/api/sessions/log') {
         if (method !== 'POST') {
             methodNotAllowed(res);

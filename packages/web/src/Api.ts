@@ -88,8 +88,26 @@ export const api = {
         }
 
         return json(await fetch(url));
+    },
+    uploadAsset: async (noteId: string, file: File): Promise<AssetUploadResult> => {
+        const response = await fetch('/api/assets/upload', {
+            method: 'POST',
+            headers: {
+                'Content-Type': file.type !== '' ? file.type : 'application/octet-stream',
+                'X-Synaipse-Note-Id': encodeURIComponent(noteId)
+            },
+            body: file
+        });
+        return json(response);
     }
 };
+
+export interface AssetUploadResult {
+    assetId: string;
+    relativePath: string;
+    written: number;
+    deduped: boolean;
+}
 
 export interface SnapshotEntry {
     name: string;
