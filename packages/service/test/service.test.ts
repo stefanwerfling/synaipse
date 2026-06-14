@@ -1,8 +1,9 @@
-import {describe, it, expect, beforeEach, afterEach} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import {mkdtemp, rm, writeFile, mkdir, readFile, utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {SynaipseService} from '../src/Service.js';
+import type {ChatEvent} from '../src/Chat.js';
 
 const buildConfig = (vaultPath: string, indexCachePath: string) => ({
     vaultPath,
@@ -728,5 +729,172 @@ describe('SynaipseService project enforcement', () => {
         );
 
         expect(updated.content).toContain('updated');
+    });
+});
+
+const buildChatConfig = (vaultPath: string, indexCachePath: string, model = 'gemma3:4b') => ({
+    ...buildConfig(vaultPath, indexCachePath),
+    chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model}
+});
+
+const ollamaStreamResponse = (lines: string[]): Response => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+            for (const line of lines) {
+                controller.enqueue(encoder.encode(line));
+            }
+            controller.close();
+        }
+    });
+    return new Response(stream, {status: 200, headers: {'content-type': 'application/x-ndjson'}});
+};
+
+const collectChat = async (gen: AsyncGenerator<ChatEvent, void, void>): Promise<ChatEvent[]> => {
+    const out: ChatEvent[] = [];
+    for await (const e of gen) out.push(e);
+    return out;
+};
+
+describe('SynaipseService.chat configuration', () => {
+    it('chatEnabled returns false and getChatModel null when no chat config', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+        expect(service.chatEnabled()).toBe(false);
+        expect(service.getChatModel()).toBeNull();
+    });
+
+    it('chatEnabled and getChatModel reflect the configured model', async () => {
+        service = new SynaipseService(buildChatConfig(vaultDir, cacheFile, 'qwen2.5:7b'));
+        await service.start();
+        expect(service.chatEnabled()).toBe(true);
+        expect(service.getChatModel()).toBe('qwen2.5:7b');
+    });
+
+    it('chat() yields error event when not configured', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'hi'}));
+        expect(events.length).toBe(1);
+        expect(events[0]?.kind).toBe('error');
+
+        if (events[0]?.kind === 'error') {
+            expect(events[0].message).toMatch(/not configured/);
+        }
+    });
+});
+
+describe('SynaipseService.chat end-to-end (mocked Ollama)', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('searches the real vault, emits sources, streams tokens, then done', async () => {
+        await writeNote(vaultDir, 'cluster.md', '---\ntitle: Cluster\n---\nBackendCluster decision body about scaling.');
+        await writeNote(vaultDir, 'unrelated.md', '---\ntitle: Off-Topic\n---\nrecipes and cats');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'Per '}}) + '\n',
+            JSON.stringify({message: {role: 'assistant', content: 'context.'}}) + '\n',
+            JSON.stringify({done: true, eval_count: 7}) + '\n'
+        ])) as unknown as typeof fetch;
+
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService(buildChatConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+
+        const start = events.find((e) => e.kind === 'start');
+        expect(start?.kind).toBe('start');
+        if (start?.kind === 'start') {
+            expect(start.model).toBe('gemma3:4b');
+            // search should return the cluster note (matches keyword)
+            expect(start.sources.length).toBeGreaterThan(0);
+            expect(start.sources[0]?.title).toBe('Cluster');
+            expect(start.sources[0]?.index).toBe(1);
+        }
+
+        const tokens = events.filter((e) => e.kind === 'token') as Extract<ChatEvent, {kind: 'token'}>[];
+        expect(tokens.map((t) => t.text).join('')).toBe('Per context.');
+
+        const done = events[events.length - 1];
+        expect(done?.kind).toBe('done');
+        if (done?.kind === 'done') {
+            expect(done.totalTokens).toBe(7);
+        }
+
+        // verify the actual ollama request payload looks right
+        expect(fakeFetch).toHaveBeenCalledOnce();
+        const [calledUrl, calledInit] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        expect(calledUrl).toBe('http://fake-ollama/api/chat');
+        const body = JSON.parse((calledInit.body as string));
+        expect(body.model).toBe('gemma3:4b');
+        expect(body.stream).toBe(true);
+        expect(body.messages[0].role).toBe('system');
+        expect(body.messages[1].role).toBe('user');
+        expect(body.messages[1].content).toContain('cluster');
+        expect(body.messages[1].content).toContain('Cluster');
+    });
+
+    it('respects pathPrefix when scoping the RAG context', async () => {
+        await writeNote(vaultDir, 'scoped/in.md', '---\ntitle: Inside\n---\ncluster body');
+        await writeNote(vaultDir, 'outside.md', '---\ntitle: Outside\n---\ncluster body');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true, eval_count: 0}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService(buildChatConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster', pathPrefix: 'scoped/'}));
+
+        const start = events.find((e) => e.kind === 'start');
+        if (start?.kind === 'start') {
+            expect(start.sources.map((s) => s.noteId)).toEqual(['scoped/in.md']);
+        }
+    });
+
+    it('strips frontmatter from the synthesized snippet when search has no snippet', async () => {
+        await writeNote(vaultDir, 'fm.md', '---\ntitle: FM\ntags: [a, b]\n---\nclean body content cluster.');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService(buildChatConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const start = events.find((e) => e.kind === 'start');
+
+        if (start?.kind === 'start') {
+            const snippet = start.sources[0]?.snippet ?? '';
+            expect(snippet).toContain('clean body');
+            expect(snippet).not.toContain('tags:');
+            expect(snippet).not.toContain('---');
+        }
+    });
+
+    it('propagates an Ollama 500 into an error event', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: N\n---\ncluster');
+
+        const fakeFetch = vi.fn(async () => new Response('boom', {status: 500})) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService(buildChatConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const last = events[events.length - 1];
+        expect(last?.kind).toBe('error');
+        if (last?.kind === 'error') {
+            expect(last.message).toMatch(/500|Ollama/);
+        }
     });
 });
