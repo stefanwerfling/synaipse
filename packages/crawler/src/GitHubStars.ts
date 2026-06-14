@@ -163,7 +163,17 @@ const buildIndex = (repos: GitHubRepo[], crawledAt: string): {body: string; fron
 
     const sortedLanguages = [...byLanguage.entries()].sort((a, b) => b[1] - a[1]);
     const sortedTopics = [...byTopic.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25);
-    const recentByStars = [...repos].sort((a, b) => b.stargazers_count - a.stargazers_count).slice(0, 50);
+    const reposByStars = [...repos].sort((a, b) => b.stargazers_count - a.stargazers_count);
+
+    const reposByLanguage = new Map<string, GitHubRepo[]>();
+    for (const repo of reposByStars) {
+        const lang = repo.language ?? 'unknown';
+        const bucket = reposByLanguage.get(lang) ?? [];
+        bucket.push(repo);
+        reposByLanguage.set(lang, bucket);
+    }
+
+    const reposAlphabetical = [...repos].sort((a, b) => a.full_name.toLowerCase().localeCompare(b.full_name.toLowerCase()));
 
     const lines: string[] = [];
 
@@ -182,9 +192,19 @@ const buildIndex = (repos: GitHubRepo[], crawledAt: string): {body: string; fron
         }
     }
 
-    lines.push('', '## Top 50 by stars', '');
-    for (const repo of recentByStars) {
-        lines.push(`- [[${repo.full_name}]] ⭐ ${repo.stargazers_count} — ${repo.description ?? ''}`.trimEnd());
+    lines.push('', '## All repositories — grouped by language');
+    for (const [lang, count] of sortedLanguages) {
+        lines.push('', `### ${lang} · ${count}`);
+        const bucket = reposByLanguage.get(lang) ?? [];
+        for (const repo of bucket) {
+            const desc = repo.description !== null && repo.description.length > 0 ? ` — ${repo.description}` : '';
+            lines.push(`- [[${repo.full_name}]] ⭐ ${repo.stargazers_count}${desc}`);
+        }
+    }
+
+    lines.push('', '## All repositories — alphabetical');
+    for (const repo of reposAlphabetical) {
+        lines.push(`- [[${repo.full_name}]]`);
     }
 
     return {
