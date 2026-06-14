@@ -116,7 +116,12 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
                 }
             }
             : {}),
-        git: {autoCommit: gitEnabled, author: gitAuthor}
+        git: {autoCommit: gitEnabled, author: gitAuthor},
+        chat: {
+            provider: 'ollama' as const,
+            url: env.SYNAIPSE_CHAT_URL ?? env.OLLAMA_URL ?? 'http://localhost:11434',
+            model: env.SYNAIPSE_CHAT_MODEL ?? 'gemma3:4b'
+        }
     };
 
     const errors: SchemaErrors = [];

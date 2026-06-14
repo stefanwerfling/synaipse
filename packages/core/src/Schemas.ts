@@ -135,6 +135,11 @@ export const ConfigSchema = Vts.object({
             name: Vts.string(),
             email: Vts.string()
         })
+    })),
+    chat: Vts.optional(Vts.object({
+        provider: Vts.equal('ollama' as const),
+        url: Vts.string(),
+        model: Vts.string()
     }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

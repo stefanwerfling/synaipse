@@ -1,6 +1,7 @@
 import type {Graph} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
+import {ChatPanel} from './ChatPanel.js';
 import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
@@ -22,7 +23,7 @@ const STORAGE_THREE_D = 'synaipse.graph.threeD';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
-type Tab = 'notes' | 'graph';
+type Tab = 'notes' | 'graph' | 'chat';
 
 export class App {
     public readonly element: HTMLElement;
@@ -44,6 +45,8 @@ export class App {
     private graphWrap: HTMLElement;
     private notesTabBtn!: HTMLButtonElement;
     private graphTabBtn!: HTMLButtonElement;
+    private chatTabBtn!: HTMLButtonElement;
+    private chatPanel!: ChatPanel;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
 
@@ -77,6 +80,13 @@ export class App {
             onNotesChanged: () => {
                 this.graph = null;
                 this.loadNotes();
+            }
+        });
+
+        this.chatPanel = new ChatPanel({
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
             }
         });
 
@@ -273,6 +283,7 @@ export class App {
             semanticEnabled = info.semanticEnabled;
             this.project = info.project;
             this.notesPanel.setHistoryEnabled(info.historyEnabled);
+            this.chatPanel.setInfo(info.chatEnabled, info.chatModel);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }
@@ -308,6 +319,13 @@ export class App {
             on: {click: () => void this.switchTab('graph')}
         }) as HTMLButtonElement;
 
+        this.chatTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button'},
+            text: 'Chat',
+            on: {click: () => void this.switchTab('chat')}
+        }) as HTMLButtonElement;
+
         const brand = el('div', {class: 'brand'});
         const logo = el('span', {class: 'brand-logo'});
         logo.innerHTML = logoSvg;
@@ -327,7 +345,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn),
             el('div', {class: 'topbar-spacer'}),
             this.activityBtn
         );
@@ -352,13 +370,25 @@ export class App {
         this.tab = tab;
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
+        this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
 
         if (tab === 'notes') {
             this.showNotes();
             return;
         }
 
+        if (tab === 'chat') {
+            this.showChat();
+            return;
+        }
+
         await this.showGraph();
+    }
+
+    private showChat(): void {
+        clear(this.body);
+        this.body.appendChild(this.chatPanel.element);
+        this.chatPanel.focusInput();
     }
 
     private async loadNotes(): Promise<void> {

@@ -282,8 +282,45 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             semanticEnabled: service.hasSemanticIndex(),
             notesCount: service.listNotes().length,
             project: service.getProject(),
-            historyEnabled: await service.historyEnabled()
+            historyEnabled: await service.historyEnabled(),
+            chatEnabled: service.chatEnabled(),
+            chatModel: service.getChatModel()
         });
+        return;
+    }
+
+    if (path === '/api/chat') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const body = await readJson<{question?: unknown; pathPrefix?: unknown}>(req);
+        const question = asString(body.question, 'question');
+        const pathPrefix = typeof body.pathPrefix === 'string' ? body.pathPrefix : undefined;
+
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive'
+        });
+
+        const ctl = new AbortController();
+        req.on('close', () => ctl.abort());
+
+        try {
+            for await (const event of service.chat({
+                question,
+                ...(pathPrefix !== undefined ? {pathPrefix} : {}),
+                abort: ctl.signal
+            })) {
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+        } catch (error) {
+            res.write(`data: ${JSON.stringify({kind: 'error', message: String(error)})}\n\n`);
+        }
+
+        res.end();
         return;
     }
 

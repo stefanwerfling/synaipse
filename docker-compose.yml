@@ -30,5 +30,5 @@ services:
       - ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["sh", "-c", "sleep 10 && ollama pull ${OLLAMA_MODEL:-nomic-embed-text} && echo 'model ready'"]
+    entrypoint: ["sh", "-c", "sleep 10 && ollama pull ${OLLAMA_MODEL:-nomic-embed-text} && ollama pull ${SYNAIPSE_CHAT_MODEL:-gemma3:4b} && echo 'models ready'"]
     restart: "no"

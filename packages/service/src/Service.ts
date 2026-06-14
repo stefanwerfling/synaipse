@@ -2,6 +2,8 @@ import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, Searc
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
+import {runChat, type ChatEvent, type ChatOptions} from './Chat.js';
+export type {ChatEvent, ChatSource, ChatOptions} from './Chat.js';
 
 export interface SnapshotEntry {
     name: string;
@@ -113,6 +115,7 @@ export class SynaipseService {
     private readonly cache: HashCache;
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
+    private readonly chatProvider: {url: string; model: string} | null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -129,6 +132,9 @@ export class SynaipseService {
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
         this.configProjectExtraTags = config.project?.extraTags ?? [];
+        this.chatProvider = config.chat !== undefined
+            ? {url: config.chat.url, model: config.chat.model}
+            : null;
 
         const embedder = createEmbedder(config);
 
@@ -340,6 +346,33 @@ export class SynaipseService {
     }
 
     /** True whenever the History UI should be available — feature is configured. The repo may not be initialised yet (no Synaipse-driven write has happened), in which case noteHistory/snapshot etc. just return empty results. */
+    public chatEnabled(): boolean {
+        return this.chatProvider !== null;
+    }
+
+    public getChatModel(): string | null {
+        return this.chatProvider?.model ?? null;
+    }
+
+    public async *chat(options: ChatOptions): AsyncGenerator<ChatEvent, void, void> {
+        const provider = this.chatProvider;
+
+        if (provider === null) {
+            yield {kind: 'error', message: 'chat not configured — set SYNAIPSE_CHAT_URL + SYNAIPSE_CHAT_MODEL'};
+            return;
+        }
+
+        yield* runChat({
+            search: (q, prefix, limit) => this.search(q, 'hybrid', limit).then((hits) =>
+                prefix === undefined || prefix.length === 0
+                    ? hits
+                    : hits.filter((h) => h.noteId.startsWith(prefix))
+            ),
+            readNote: (id) => this.vault.tryGet(id)?.content,
+            provider
+        }, options);
+    }
+
     public async historyEnabled(): Promise<boolean> {
         if (this.vault.isHistoryConfigured()) {
             return true;

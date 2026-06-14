@@ -18,6 +18,7 @@ Setup, reference and integration guides for [Synaipse](../README.md).
 
 - [Architecture](architecture.md) — packages, data flow, design choices
 - [Crawler](crawler.md) — pulling external sources (GitHub stars, …) into the vault
+- [Local chat](chat.md) — offline RAG over the vault via a local Ollama model
 - [Synaipse als Langzeitgedächtnis](synaipse-claude-memory.md) — original concept note (DE)
 
 ## Operations

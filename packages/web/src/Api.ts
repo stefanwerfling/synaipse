@@ -56,7 +56,7 @@ export const api = {
     getGraph: async (): Promise<Graph> => {
         return json(await fetch('/api/graph'));
     },
-    getInfo: async (): Promise<{semanticEnabled: boolean; notesCount: number; project: string | null; historyEnabled: boolean}> => {
+    getInfo: async (): Promise<{semanticEnabled: boolean; notesCount: number; project: string | null; historyEnabled: boolean; chatEnabled: boolean; chatModel: string | null}> => {
         return json(await fetch('/api/info'));
     },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {
