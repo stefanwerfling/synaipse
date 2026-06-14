@@ -2,6 +2,7 @@ import type {Graph} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
 import {ChatPanel} from './ChatPanel.js';
+import {CommandPalette} from './CommandPalette.js';
 import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
@@ -47,6 +48,7 @@ export class App {
     private graphTabBtn!: HTMLButtonElement;
     private chatTabBtn!: HTMLButtonElement;
     private chatPanel!: ChatPanel;
+    private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
 
@@ -88,6 +90,14 @@ export class App {
                 this.notesPanel.openNote(noteId);
                 void this.switchTab('notes');
             }
+        });
+
+        this.palette = new CommandPalette<NoteSummary>({
+            onSelectNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            },
+            onSwitchTab: (tab) => void this.switchTab(tab)
         });
 
         this.body = el('div', {style: {display: 'contents'}});
@@ -202,6 +212,7 @@ export class App {
 
     public async mount(host: HTMLElement): Promise<void> {
         host.appendChild(this.element);
+        host.appendChild(this.palette.element);
         this.events.start();
         this.heatTickTimer = window.setInterval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
         await Promise.all([this.loadNotes(), this.installSearch()]);
@@ -343,9 +354,19 @@ export class App {
             this.activityBadge
         ) as HTMLButtonElement;
 
+        const paletteBtn = el('button', {
+            class: 'palette-trigger',
+            attrs: {type: 'button', title: 'Open command palette (Ctrl/Cmd+K)'},
+            on: {click: () => this.palette.openPalette()}
+        },
+            el('span', {text: 'Search'}),
+            el('kbd', {text: '⌘K'})
+        );
+
         return el('header', {class: 'topbar'},
             brand,
             el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn),
+            paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             this.activityBtn
         );
@@ -395,6 +416,7 @@ export class App {
         try {
             this.notes = await api.listNotes();
             this.notesPanel.setNotes(this.notes);
+            this.palette.setNotes(this.notes);
         } catch (error) {
             console.error('failed to load notes', error);
         }
