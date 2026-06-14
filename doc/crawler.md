@@ -103,6 +103,7 @@ Crawls the latest articles from [dev.to](https://dev.to), one note per article (
 DEVTO_API_KEY=…                # https://dev.to/settings/extensions
 DEVTO_PER_PAGE=100             # default 100, max 1000
 DEVTO_CRAWL_BODY_MAX=3000      # 0 → skip body fetch, metadata only
+DEVTO_DOWNLOAD_IMAGES=true     # default — false keeps remote URLs
 ```
 
 ### Run
@@ -114,8 +115,25 @@ npm run crawl:devto
 The crawler:
 1. Fetches `GET /api/articles/latest?per_page=<N>` (one call)
 2. For each article (if `DEVTO_CRAWL_BODY_MAX > 0`): fetches `GET /api/articles/<id>` to get the full `body_markdown`
-3. Writes `Crawler/devto/articles/<id>-<slug>.md` per article
-4. Writes `Crawler/devto/articles/_index.md` with by-tag, by-date and by-reactions buckets
+3. Downloads every image referenced in the body + the `cover_image` into the article's folder (sha1-keyed filenames, idempotent); inline `![](url)` references in the markdown are rewritten to `./img-<hash>.<ext>` so the article is fully offline
+4. Writes `Crawler/devto/articles/<id>-<slug>/article.md` per article — **one folder per article** so its assets sit next to it
+5. Writes `Crawler/devto/articles/_index.md` with by-tag, by-date and by-reactions buckets
+
+### Folder layout
+
+```
+Crawler/devto/articles/
+├── _index.md
+├── 1234-why-typescript-is-great/
+│   ├── article.md
+│   ├── img-3f9c2a1e7b81.png       (cover)
+│   └── img-c92f481abe44.jpg       (inline diagram)
+└── 5678-rust-async-explained/
+    ├── article.md
+    └── img-08bc31f2deef.png
+```
+
+Images are downloaded only if their target file is missing — on the next run any unchanged image is a cache hit. Set `DEVTO_DOWNLOAD_IMAGES=false` to keep URLs pointing at dev.to / cloudinary and avoid the extra HTTP traffic.
 
 Re-runs are idempotent — ngit's content-addressed store skips unchanged articles, so only new or edited ones produce commits.
 
@@ -139,10 +157,11 @@ reactions: 99
 comments: 12
 tags: [crawler, devto, tag/typescript, tag/webdev]
 crawledAt: 2026-06-14
+coverImage: ./img-3f9c2a1e7b81.png   # only when DEVTO_DOWNLOAD_IMAGES=true
 ---
 ```
 
-Body: title, blockquoted description, author byline + back-link `[[Dev.to — latest articles]]`, stats, truncated body_markdown.
+Body: title, blockquoted description, author byline + back-link `[[Dev.to — latest articles]]`, stats, truncated body_markdown (with inline image URLs rewritten to `./img-<hash>.<ext>` if images are downloaded).
 
 ### What you can do with it
 

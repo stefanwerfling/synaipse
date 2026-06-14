@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {Frontmatter} from '@synaipse/core';
 import type {Crawler, CrawlerContext, CrawlerReport} from './Crawler.js';
 import {
@@ -7,12 +8,14 @@ import {
     type DevToArticleListItem,
     type FetchOptions
 } from './DevToApi.js';
+import {downloadAsset, extractImageUrls, rewriteImageUrls} from './Assets.js';
 
 export interface DevToOptions {
     apiKey: string;
     perPage?: number;
     bodyMax?: number;
     pathPrefix?: string;
+    downloadImages?: boolean;
     fetch?: typeof fetch;
 }
 
@@ -185,8 +188,12 @@ const buildIndex = (articles: DevToArticleListItem[], crawledAt: string): {body:
     };
 };
 
+const articleFolder = (prefix: string, article: DevToArticleListItem): string => {
+    return `${prefix}/${article.id}-${slugify(article.slug)}`;
+};
+
 const articlePath = (prefix: string, article: DevToArticleListItem): string => {
-    return `${prefix}/${article.id}-${slugify(article.slug)}.md`;
+    return `${articleFolder(prefix, article)}/article.md`;
 };
 
 export class DevToCrawler implements Crawler {
@@ -208,6 +215,9 @@ export class DevToCrawler implements Crawler {
         const perPage = this.opts.perPage ?? DEFAULT_PER_PAGE;
         const crawledAt = new Date().toISOString().slice(0, 10);
 
+        const downloadImages = this.opts.downloadImages ?? true;
+        const fetchImpl = this.opts.fetch ?? fetch;
+
         ctx.log(`[devto] fetching latest ${perPage} articles → ${prefix}/`);
 
         const articles = await listLatestArticles(apiKey, perPage, fetchOpts);
@@ -215,6 +225,9 @@ export class DevToCrawler implements Crawler {
         const errors: Array<{item: string; error: string}> = [];
         let written = 0;
         let unchanged = 0;
+        let imagesDownloaded = 0;
+        let imagesCached = 0;
+        let imageFailures = 0;
 
         for (const article of articles) {
             try {
@@ -224,16 +237,58 @@ export class DevToCrawler implements Crawler {
                     full = await getArticle(apiKey, article.id, fetchOpts);
                 }
 
-                const path = articlePath(prefix, article);
-                const frontmatter = buildFrontmatter(article, crawledAt);
-                const content = buildBody(article, full, bodyMax);
+                const folder = articleFolder(prefix, article);
+                const folderAbs = path.join(ctx.vault.root, folder);
+                const notePath = articlePath(prefix, article);
+                const baseFrontmatter = buildFrontmatter(article, crawledAt);
+                let body = buildBody(article, full, bodyMax);
 
-                const before = ctx.vault.tryGet(path);
-                await ctx.vault.write({path, content, frontmatter}, {
+                if (downloadImages) {
+                    const urlToLocal = new Map<string, string>();
+                    const urls = new Set<string>();
+
+                    if (article.cover_image !== null) {
+                        urls.add(article.cover_image);
+                    }
+
+                    for (const u of extractImageUrls(body)) {
+                        urls.add(u);
+                    }
+
+                    for (const url of urls) {
+                        const result = await downloadAsset(url, folderAbs, fetchImpl);
+
+                        if (result.ok) {
+                            urlToLocal.set(url, result.filename);
+
+                            if (result.cached) {
+                                imagesCached += 1;
+                            } else {
+                                imagesDownloaded += 1;
+                            }
+                        } else {
+                            imageFailures += 1;
+                            errors.push({item: `image ${url}`, error: result.error ?? 'unknown'});
+                        }
+                    }
+
+                    if (article.cover_image !== null) {
+                        const local = urlToLocal.get(article.cover_image);
+
+                        if (local !== undefined) {
+                            baseFrontmatter.coverImage = `./${local}`;
+                        }
+                    }
+
+                    body = rewriteImageUrls(body, urlToLocal);
+                }
+
+                const before = ctx.vault.tryGet(notePath);
+                await ctx.vault.write({path: notePath, content: body, frontmatter: baseFrontmatter}, {
                     message: `crawler(devto): article ${article.id} ${article.title}`,
                     author: {name: 'devto', email: 'crawler@synaipse.local'}
                 });
-                const after = ctx.vault.tryGet(path);
+                const after = ctx.vault.tryGet(notePath);
 
                 if (before !== undefined && after !== undefined && before.hash === after.hash) {
                     unchanged += 1;
@@ -243,6 +298,10 @@ export class DevToCrawler implements Crawler {
             } catch (cause) {
                 errors.push({item: `#${article.id} ${article.title}`, error: String(cause)});
             }
+        }
+
+        if (downloadImages) {
+            ctx.log(`[devto] images: ${imagesDownloaded} downloaded, ${imagesCached} cached, ${imageFailures} failed`);
         }
 
         try {

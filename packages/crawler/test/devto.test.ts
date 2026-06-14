@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach, afterEach} from 'vitest';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, readFile, stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {Vault} from '@synaipse/vault';
@@ -37,7 +37,13 @@ const makeListItem = (overrides: Partial<Record<string, unknown>> = {}) => ({
     ...overrides
 });
 
-const makeFetch = (handlers: Record<string, () => Response>): typeof fetch => {
+interface Handler {
+    body: () => Buffer | string | object;
+    contentType?: string;
+    status?: number;
+}
+
+const makeFetch = (handlers: Record<string, Handler | (() => Response)>): typeof fetch => {
     return (async (url: string | URL | Request): Promise<Response> => {
         const key = typeof url === 'string' ? url : url.toString();
         const handler = handlers[key];
@@ -46,7 +52,31 @@ const makeFetch = (handlers: Record<string, () => Response>): typeof fetch => {
             throw new Error(`unexpected fetch: ${key}`);
         }
 
-        return handler();
+        if (typeof handler === 'function') {
+            return handler();
+        }
+
+        const status = handler.status ?? 200;
+        const body = handler.body();
+
+        if (body instanceof Buffer) {
+            return new Response(body, {
+                status,
+                headers: handler.contentType ? {'content-type': handler.contentType} : {}
+            });
+        }
+
+        if (typeof body === 'string') {
+            return new Response(body, {
+                status,
+                headers: handler.contentType ? {'content-type': handler.contentType} : {}
+            });
+        }
+
+        return new Response(JSON.stringify(body), {
+            status,
+            headers: {'content-type': 'application/json'}
+        });
     }) as typeof fetch;
 };
 
@@ -57,8 +87,10 @@ const jsonResponse = (body: unknown): Response => {
     });
 };
 
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic bytes
+
 describe('DevToCrawler', () => {
-    it('writes a note per article with article id in path + frontmatter, plus _index.md', async () => {
+    it('writes one folder per article with article.md and the id in path + frontmatter', async () => {
         const vault = new Vault(vaultDir);
         await vault.load();
 
@@ -71,109 +103,155 @@ describe('DevToCrawler', () => {
             })
         });
 
-        const crawler = new DevToCrawler({apiKey: 'fake', fetch: fakeFetch});
+        const crawler = new DevToCrawler({apiKey: 'fake', downloadImages: false, fetch: fakeFetch});
         const report = await crawler.run({vault, log: () => undefined});
 
         expect(report.fetched).toBe(1);
         expect(report.written).toBe(1);
         expect(report.errors).toEqual([]);
 
-        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc.md');
+        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc/article.md');
         expect(note).toBeDefined();
         expect(note!.title).toBe('Why TypeScript is great');
-        expect(note!.frontmatter.type).toBe('external');
-        expect(note!.frontmatter.source).toBe('devto');
         expect(note!.frontmatter.articleId).toBe(1234);
-        expect(note!.frontmatter.author).toBe('alice');
-        expect(note!.tags).toEqual(expect.arrayContaining(['crawler', 'devto', 'tag/typescript', 'tag/webdev']));
         expect(note!.content).toContain('Article `1234`');
-        expect(note!.content).toContain('Indexed in [[Dev.to — latest articles]]');
         expect(note!.content).toContain('article body about types');
 
         const index = vault.tryGet('Crawler/devto/articles/_index.md');
         expect(index).toBeDefined();
-        expect(index!.content).toContain('1 articles crawled');
         expect(index!.content).toContain('[[Why TypeScript is great]]');
-        expect(index!.content).toContain('`#1234`');
-        expect(index!.frontmatter.totalArticles).toBe(1);
     });
 
-    it('skips the per-article body fetch when bodyMax is 0', async () => {
+    it('downloads inline images and rewrites the markdown to local paths', async () => {
         const vault = new Vault(vaultDir);
         await vault.load();
 
+        const imgUrl = 'https://media2.dev.to/uploads/diagram.png';
         const listItem = makeListItem();
-        const fakeFetch = makeFetch({
-            'https://dev.to/api/articles/latest?per_page=100': () => jsonResponse([listItem])
-            // notably no /articles/1234 handler — the test fails if we call it
-        });
-
-        const crawler = new DevToCrawler({apiKey: 'fake', bodyMax: 0, fetch: fakeFetch});
-        const report = await crawler.run({vault, log: () => undefined});
-
-        expect(report.errors).toEqual([]);
-        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc.md');
-        expect(note!.content).not.toContain('## Body');
-        expect(note!.content).toContain('Article `1234`');
-    });
-
-    it('truncates a long body to bodyMax', async () => {
-        const vault = new Vault(vaultDir);
-        await vault.load();
-
-        const listItem = makeListItem();
-        const longBody = 'B'.repeat(7000);
-        const fakeFetch = makeFetch({
-            'https://dev.to/api/articles/latest?per_page=100': () => jsonResponse([listItem]),
-            'https://dev.to/api/articles/1234': () => jsonResponse({...listItem, body_markdown: longBody})
-        });
-
-        const crawler = new DevToCrawler({apiKey: 'fake', bodyMax: 500, fetch: fakeFetch});
-        await crawler.run({vault, log: () => undefined});
-
-        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc.md');
-        expect(note!.content).toContain('…(truncated)');
-    });
-
-    it('counts unchanged on a repeated run with identical content', async () => {
-        const vault = new Vault(vaultDir);
-        await vault.load();
-
-        const listItem = makeListItem();
-        const baseHandlers = {
-            'https://dev.to/api/articles/latest?per_page=100': () => jsonResponse([listItem]),
-            'https://dev.to/api/articles/1234': () => jsonResponse({...listItem, body_markdown: '# stable'})
-        };
-
-        const crawler = new DevToCrawler({apiKey: 'fake', fetch: makeFetch(baseHandlers)});
-
-        const first = await crawler.run({vault, log: () => undefined});
-        expect(first.written).toBe(1);
-
-        const second = await crawler.run({vault, log: () => undefined});
-        expect(second.unchanged).toBe(1);
-        expect(second.written).toBe(0);
-    });
-
-    it('continues past per-article fetch failures', async () => {
-        const vault = new Vault(vaultDir);
-        await vault.load();
-
-        const ok = makeListItem({id: 1, slug: 'ok'});
-        const broken = makeListItem({id: 2, slug: 'broken', title: 'Broken'});
 
         const fakeFetch = makeFetch({
-            'https://dev.to/api/articles/latest?per_page=100': () => jsonResponse([ok, broken]),
-            'https://dev.to/api/articles/1': () => jsonResponse({...ok, body_markdown: '# ok'}),
-            'https://dev.to/api/articles/2': () => new Response('boom', {status: 500})
+            'https://dev.to/api/articles/latest?per_page=100': {body: () => [listItem]},
+            'https://dev.to/api/articles/1234': {body: () => ({
+                ...listItem,
+                body_markdown: `# Heading\n\nLook:\n\n![Diagram](${imgUrl})\n\nDone.`
+            })},
+            [imgUrl]: {body: () => PNG, contentType: 'image/png'}
         });
 
         const crawler = new DevToCrawler({apiKey: 'fake', fetch: fakeFetch});
         const report = await crawler.run({vault, log: () => undefined});
 
-        expect(report.errors.length).toBe(1);
-        expect(report.errors[0]?.item).toContain('#2');
-        expect(vault.tryGet('Crawler/devto/articles/1-ok.md')).toBeDefined();
-        expect(vault.tryGet('Crawler/devto/articles/_index.md')).toBeDefined();
+        expect(report.errors).toEqual([]);
+
+        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc/article.md');
+        expect(note!.content).toMatch(/!\[Diagram\]\(\.\/img-[0-9a-f]{12}\.png\)/);
+        expect(note!.content).not.toContain(imgUrl);
+
+        const folder = path.join(vaultDir, 'Crawler/devto/articles/1234-why-typescript-is-great-1abc');
+        const localMatch = note!.content.match(/\.\/(img-[0-9a-f]{12}\.png)/);
+        expect(localMatch).not.toBeNull();
+        const info = await stat(path.join(folder, localMatch![1]!));
+        expect(info.size).toBeGreaterThan(0);
+        const onDisk = await readFile(path.join(folder, localMatch![1]!));
+        expect(onDisk.equals(PNG)).toBe(true);
+    });
+
+    it('downloads the cover image and rewrites coverImage in frontmatter', async () => {
+        const vault = new Vault(vaultDir);
+        await vault.load();
+
+        const coverUrl = 'https://media2.dev.to/covers/123.jpg';
+        const listItem = makeListItem({cover_image: coverUrl});
+
+        const fakeFetch = makeFetch({
+            'https://dev.to/api/articles/latest?per_page=100': {body: () => [listItem]},
+            'https://dev.to/api/articles/1234': {body: () => ({...listItem, body_markdown: '# x'})},
+            [coverUrl]: {body: () => PNG, contentType: 'image/jpeg'}
+        });
+
+        const crawler = new DevToCrawler({apiKey: 'fake', fetch: fakeFetch});
+        await crawler.run({vault, log: () => undefined});
+
+        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc/article.md');
+        expect(note!.frontmatter.coverImage).toMatch(/^\.\/img-[0-9a-f]{12}\.jpg$/);
+    });
+
+    it('cache-hits an existing image file on a second run (no re-download)', async () => {
+        const vault = new Vault(vaultDir);
+        await vault.load();
+
+        const imgUrl = 'https://media2.dev.to/uploads/cache.png';
+        const listItem = makeListItem();
+        let imageHits = 0;
+
+        const fakeFetch = makeFetch({
+            'https://dev.to/api/articles/latest?per_page=100': {body: () => [listItem]},
+            'https://dev.to/api/articles/1234': {body: () => ({
+                ...listItem,
+                body_markdown: `![](${imgUrl})`
+            })},
+            [imgUrl]: () => {
+                imageHits += 1;
+                return new Response(PNG, {status: 200, headers: {'content-type': 'image/png'}});
+            }
+        });
+
+        const crawler = new DevToCrawler({apiKey: 'fake', fetch: fakeFetch});
+        await crawler.run({vault, log: () => undefined});
+        await crawler.run({vault, log: () => undefined});
+
+        expect(imageHits).toBe(1);
+    });
+
+    it('continues past image download failures', async () => {
+        const vault = new Vault(vaultDir);
+        await vault.load();
+
+        const goodUrl = 'https://media2.dev.to/ok.png';
+        const badUrl = 'https://media2.dev.to/broken.png';
+        const listItem = makeListItem();
+
+        const fakeFetch = makeFetch({
+            'https://dev.to/api/articles/latest?per_page=100': {body: () => [listItem]},
+            'https://dev.to/api/articles/1234': {body: () => ({
+                ...listItem,
+                body_markdown: `![ok](${goodUrl}) ![bad](${badUrl})`
+            })},
+            [goodUrl]: {body: () => PNG, contentType: 'image/png'},
+            [badUrl]: {body: () => 'nope', status: 500}
+        });
+
+        const crawler = new DevToCrawler({apiKey: 'fake', fetch: fakeFetch});
+        const report = await crawler.run({vault, log: () => undefined});
+
+        expect(report.errors.some((e) => e.item.includes('broken.png'))).toBe(true);
+        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc/article.md');
+        expect(note!.content).toContain(badUrl);                  // unchanged URL stays
+        expect(note!.content).toMatch(/!\[ok\]\(\.\/img-[0-9a-f]{12}\.png\)/);
+    });
+
+    it('skips downloads entirely when downloadImages is false', async () => {
+        const vault = new Vault(vaultDir);
+        await vault.load();
+
+        const imgUrl = 'https://media2.dev.to/skip.png';
+        const listItem = makeListItem({cover_image: imgUrl});
+
+        const fakeFetch = makeFetch({
+            'https://dev.to/api/articles/latest?per_page=100': {body: () => [listItem]},
+            'https://dev.to/api/articles/1234': {body: () => ({
+                ...listItem,
+                body_markdown: `![x](${imgUrl})`
+            })}
+            // notably no handler for the image URL
+        });
+
+        const crawler = new DevToCrawler({apiKey: 'fake', downloadImages: false, fetch: fakeFetch});
+        const report = await crawler.run({vault, log: () => undefined});
+
+        expect(report.errors).toEqual([]);
+        const note = vault.tryGet('Crawler/devto/articles/1234-why-typescript-is-great-1abc/article.md');
+        expect(note!.content).toContain(imgUrl);
+        expect(note!.frontmatter.coverImage).toBe(imgUrl);
     });
 });

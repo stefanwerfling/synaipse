@@ -74,11 +74,14 @@ const runCrawler = async (name: string): Promise<number> => {
 
         const perPage = Number.parseInt(process.env.DEVTO_PER_PAGE ?? '100', 10);
         const bodyMax = Number.parseInt(process.env.DEVTO_CRAWL_BODY_MAX ?? '3000', 10);
+        const downloadImagesRaw = (process.env.DEVTO_DOWNLOAD_IMAGES ?? 'true').toLowerCase();
+        const downloadImages = downloadImagesRaw !== 'false' && downloadImagesRaw !== '0' && downloadImagesRaw !== 'no';
 
         const crawler = new DevToCrawler({
             apiKey,
             perPage: Number.isFinite(perPage) ? perPage : 100,
-            bodyMax: Number.isFinite(bodyMax) ? bodyMax : 3000
+            bodyMax: Number.isFinite(bodyMax) ? bodyMax : 3000,
+            downloadImages
         });
 
         log(`[crawler] starting ${crawler.name}`);
