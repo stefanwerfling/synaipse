@@ -1234,6 +1234,128 @@ body {
     cursor: not-allowed;
 }
 
+.viewer-links {
+    margin-top: var(--space-6);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.viewer-links-block {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    overflow: hidden;
+}
+
+.viewer-links-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.viewer-links-count {
+    background: var(--bg-3);
+    color: var(--text-1);
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.viewer-links-list {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-1) 0;
+}
+
+.viewer-link-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 4px var(--space-3);
+}
+
+.viewer-link-row:hover {
+    background: var(--bg-2);
+}
+
+.viewer-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-1);
+    text-align: left;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+.viewer-link-btn:hover {
+    color: var(--accent);
+}
+
+.viewer-link-btn.unresolved {
+    color: var(--text-3);
+}
+
+.viewer-link-btn.unresolved:hover {
+    color: var(--gold);
+}
+
+.viewer-link-icon {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-3);
+    flex: 0 0 auto;
+    width: 14px;
+    text-align: center;
+}
+
+.viewer-link-btn.unresolved .viewer-link-icon {
+    color: var(--gold);
+}
+
+.viewer-link-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.viewer-link-path {
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+}
+
+.viewer-link-row.unresolved .viewer-link-path {
+    color: var(--gold);
+    font-family: inherit;
+    font-style: italic;
+    font-size: 11px;
+}
+
 .viewer-empty {
     display: flex;
     flex-direction: column;

@@ -619,6 +619,115 @@ export class NotesPanel {
 
         this.viewer.appendChild(this.viewerPreview.element);
         this.viewerPreview.update(this.active.content);
+        this.renderLinks();
+    }
+
+    private renderLinks(): void {
+        if (this.active === null) return;
+
+        const backlinks = this.active.backlinks;
+        const outgoing = this.active.wikilinks;
+
+        if (backlinks.length === 0 && outgoing.length === 0) return;
+
+        const noteById = new Map(this.notes.map((n) => [n.id, n]));
+        const section = el('section', {class: 'viewer-links'});
+
+        if (backlinks.length > 0) {
+            section.appendChild(this.renderBacklinks(backlinks, noteById));
+        }
+
+        if (outgoing.length > 0) {
+            section.appendChild(this.renderOutgoing(outgoing));
+        }
+
+        this.viewer.appendChild(section);
+    }
+
+    private renderBacklinks(backlinks: readonly string[], lookup: Map<string, NoteSummary>): HTMLElement {
+        const block = el('div', {class: 'viewer-links-block'},
+            el('h3', {class: 'viewer-links-head'},
+                el('span', {text: 'Linked from'}),
+                el('span', {class: 'viewer-links-count', text: String(backlinks.length)})
+            )
+        );
+
+        const list = el('ul', {class: 'viewer-links-list'});
+
+        for (const id of backlinks) {
+            const summary = lookup.get(id);
+            const title = summary?.title ?? id;
+
+            list.appendChild(el('li', {class: 'viewer-link-row'},
+                el('button', {
+                    class: 'viewer-link-btn',
+                    attrs: {type: 'button', title: id},
+                    on: {click: () => void this.openNoteFromWikilink(id)}
+                },
+                    el('span', {class: 'viewer-link-icon', text: '←'}),
+                    el('span', {class: 'viewer-link-title', text: title})
+                ),
+                el('span', {class: 'viewer-link-path', text: id})
+            ));
+        }
+
+        block.appendChild(list);
+        return block;
+    }
+
+    private renderOutgoing(wikilinks: readonly string[]): HTMLElement {
+        const resolved: Array<{title: string; noteId: string}> = [];
+        const unresolved: string[] = [];
+
+        for (const link of wikilinks) {
+            const noteId = this.resolver(link);
+
+            if (noteId !== undefined) {
+                resolved.push({title: link, noteId});
+            } else {
+                unresolved.push(link);
+            }
+        }
+
+        const block = el('div', {class: 'viewer-links-block'},
+            el('h3', {class: 'viewer-links-head'},
+                el('span', {text: 'Links to'}),
+                el('span', {class: 'viewer-links-count', text: String(wikilinks.length)})
+            )
+        );
+
+        const list = el('ul', {class: 'viewer-links-list'});
+
+        for (const {title, noteId} of resolved) {
+            list.appendChild(el('li', {class: 'viewer-link-row'},
+                el('button', {
+                    class: 'viewer-link-btn',
+                    attrs: {type: 'button', title: noteId},
+                    on: {click: () => void this.openNoteFromWikilink(noteId)}
+                },
+                    el('span', {class: 'viewer-link-icon', text: '→'}),
+                    el('span', {class: 'viewer-link-title', text: title})
+                ),
+                el('span', {class: 'viewer-link-path', text: noteId})
+            ));
+        }
+
+        for (const title of unresolved) {
+            list.appendChild(el('li', {class: 'viewer-link-row unresolved'},
+                el('button', {
+                    class: 'viewer-link-btn unresolved',
+                    attrs: {type: 'button', title: `Create '${title}'`},
+                    on: {click: () => void this.createFromWikilink(title)}
+                },
+                    el('span', {class: 'viewer-link-icon', text: '?'}),
+                    el('span', {class: 'viewer-link-title', text: title})
+                ),
+                el('span', {class: 'viewer-link-path', text: 'unresolved — click to create'})
+            ));
+        }
+
+        block.appendChild(list);
+        return block;
     }
 
     private renderEditor(): void {
