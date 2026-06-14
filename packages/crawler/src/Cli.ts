@@ -12,6 +12,7 @@ dotenvConfig({path: path.join(repoRoot, '.env')});
 const {loadConfigFromEnv} = await import('@synaipse/core');
 const {Vault} = await import('@synaipse/vault');
 const {GitHubStarsCrawler} = await import('./GitHubStars.js');
+const {DevToCrawler} = await import('./DevTo.js');
 
 const args = process.argv.slice(2);
 const crawlerName = args[0] ?? 'github-stars';
@@ -32,35 +33,69 @@ const log = (line: string): void => {
 
 const ctx = {vault, log};
 
-if (crawlerName === 'github-stars') {
-    const token = process.env.GITHUB_TOKEN;
+const runCrawler = async (name: string): Promise<number> => {
+    if (name === 'github-stars') {
+        const token = process.env.GITHUB_TOKEN;
 
-    if (token === undefined || token.length === 0) {
-        process.stderr.write('GITHUB_TOKEN is required\n');
-        process.exit(2);
-    }
-
-    const username = process.env.GITHUB_USERNAME;
-    const readmeMax = Number.parseInt(process.env.GITHUB_CRAWL_README_MAX ?? '3000', 10);
-
-    const crawler = new GitHubStarsCrawler({
-        token,
-        ...(username !== undefined && username.length > 0 ? {username} : {}),
-        readmeMax: Number.isFinite(readmeMax) ? readmeMax : 3000
-    });
-
-    log(`[crawler] starting ${crawler.name}`);
-    const report = await crawler.run(ctx);
-    log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
-
-    if (report.errors.length > 0) {
-        for (const err of report.errors.slice(0, 10)) {
-            log(`  ! ${err.item}: ${err.error}`);
+        if (token === undefined || token.length === 0) {
+            process.stderr.write('GITHUB_TOKEN is required\n');
+            return 2;
         }
+
+        const username = process.env.GITHUB_USERNAME;
+        const readmeMax = Number.parseInt(process.env.GITHUB_CRAWL_README_MAX ?? '3000', 10);
+
+        const crawler = new GitHubStarsCrawler({
+            token,
+            ...(username !== undefined && username.length > 0 ? {username} : {}),
+            readmeMax: Number.isFinite(readmeMax) ? readmeMax : 3000
+        });
+
+        log(`[crawler] starting ${crawler.name}`);
+        const report = await crawler.run(ctx);
+        log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
+
+        if (report.errors.length > 0) {
+            for (const err of report.errors.slice(0, 10)) {
+                log(`  ! ${err.item}: ${err.error}`);
+            }
+        }
+
+        return report.errors.length === 0 ? 0 : 1;
     }
 
-    process.exit(report.errors.length === 0 ? 0 : 1);
-}
+    if (name === 'devto') {
+        const apiKey = process.env.DEVTO_API_KEY;
 
-process.stderr.write(`unknown crawler: ${crawlerName}\n`);
-process.exit(2);
+        if (apiKey === undefined || apiKey.length === 0) {
+            process.stderr.write('DEVTO_API_KEY is required\n');
+            return 2;
+        }
+
+        const perPage = Number.parseInt(process.env.DEVTO_PER_PAGE ?? '100', 10);
+        const bodyMax = Number.parseInt(process.env.DEVTO_CRAWL_BODY_MAX ?? '3000', 10);
+
+        const crawler = new DevToCrawler({
+            apiKey,
+            perPage: Number.isFinite(perPage) ? perPage : 100,
+            bodyMax: Number.isFinite(bodyMax) ? bodyMax : 3000
+        });
+
+        log(`[crawler] starting ${crawler.name}`);
+        const report = await crawler.run(ctx);
+        log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
+
+        if (report.errors.length > 0) {
+            for (const err of report.errors.slice(0, 10)) {
+                log(`  ! ${err.item}: ${err.error}`);
+            }
+        }
+
+        return report.errors.length === 0 ? 0 : 1;
+    }
+
+    process.stderr.write(`unknown crawler: ${name}\n`);
+    return 2;
+};
+
+process.exit(await runCrawler(crawlerName));

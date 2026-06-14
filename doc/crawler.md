@@ -92,6 +92,71 @@ Body: title, blockquoted description, link, stats list, truncated README.
 
 Weekly refresh keeps the vault current without touching your curated notes — only files that actually changed (e.g. a repo that gained stars) create new ngit commits.
 
+## Built-in: dev.to latest articles
+
+Crawls the latest articles from [dev.to](https://dev.to), one note per article (the article's numeric id is in both the filename and the frontmatter), plus an `_index.md`.
+
+### Setup
+
+```bash
+# in .env
+DEVTO_API_KEY=…                # https://dev.to/settings/extensions
+DEVTO_PER_PAGE=100             # default 100, max 1000
+DEVTO_CRAWL_BODY_MAX=3000      # 0 → skip body fetch, metadata only
+```
+
+### Run
+
+```bash
+npm run crawl:devto
+```
+
+The crawler:
+1. Fetches `GET /api/articles/latest?per_page=<N>` (one call)
+2. For each article (if `DEVTO_CRAWL_BODY_MAX > 0`): fetches `GET /api/articles/<id>` to get the full `body_markdown`
+3. Writes `Crawler/devto/articles/<id>-<slug>.md` per article
+4. Writes `Crawler/devto/articles/_index.md` with by-tag, by-date and by-reactions buckets
+
+Re-runs are idempotent — ngit's content-addressed store skips unchanged articles, so only new or edited ones produce commits.
+
+### Layout per article note
+
+Frontmatter:
+
+```yaml
+---
+title: Why TypeScript is great
+type: external
+source: devto
+articleId: 1234
+slug: why-typescript-is-great-1abc
+url: https://dev.to/alice/why-typescript-is-great-1abc
+author: alice
+authorName: Alice Wonderland
+publishedAt: 2026-06-14
+readingTime: 4
+reactions: 99
+comments: 12
+tags: [crawler, devto, tag/typescript, tag/webdev]
+crawledAt: 2026-06-14
+---
+```
+
+Body: title, blockquoted description, author byline + back-link `[[Dev.to — latest articles]]`, stats, truncated body_markdown.
+
+### What you can do with it
+
+- `synaipse_search "type inference benchmarks" mode:semantic` → finds matching dev.to articles by body content
+- `synaipse_notes_by_tag tag/rust` → all dev.to Rust articles you crawled
+- `synaipse_recent {pathPrefix: "Crawler/devto/"}` → newest crawls
+- Compose with a cron job for a daily feed digest
+
+### Cron
+
+```cron
+0 7 * * *  cd ~/Synaipse && npm run crawl:devto >> /tmp/synaipse-crawler.log 2>&1
+```
+
 ## Writing your own crawler
 
 Implement the `Crawler` interface:

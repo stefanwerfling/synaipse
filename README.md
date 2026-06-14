@@ -117,4 +117,5 @@ npm run docker:up:voyage   start qdrant only
 npm run docker:up:ollama   start qdrant + ollama + model pull
 npm run docker:down        stop all
 npm run crawl:github-stars crawl your starred repos into Crawler/github/starred/
+npm run crawl:devto        crawl the latest 100 dev.to articles into Crawler/devto/articles/
 ```
