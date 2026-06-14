@@ -29,7 +29,7 @@ const useSemantic = process.env.TEST_SEMANTIC !== 'false';
 
 const service = new SynaipseService({
     vaultPath,
-    indexCachePath: path.join(repoRoot, 'data/real-vault-chat.json'),
+    indexCachePath: '/tmp/synaipse-real-vault-chat.json',
     embeddings: {provider: useSemantic ? 'ollama' : 'none'},
     ollama: {url: process.env.OLLAMA_URL ?? 'http://localhost:11434', model: 'nomic-embed-text'},
     qdrant: {url: process.env.QDRANT_URL ?? 'http://localhost:6333', collection: 'live-chat-test'},

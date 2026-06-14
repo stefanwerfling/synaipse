@@ -26,12 +26,23 @@ const scoreNote = (note: Note, terms: string[]): {score: number; snippet: string
     return {score, snippet};
 };
 
-export const fulltextSearch = (notes: Iterable<Note>, query: string, limit: number): SearchHit[] => {
-    const terms = query
+const STOPWORDS = new Set([
+    'und', 'oder', 'die', 'der', 'das', 'ein', 'eine', 'wie', 'was', 'wo', 'wer',
+    'sind', 'ist', 'sein', 'haben', 'habe', 'hat', 'mit', 'von', 'für', 'auf',
+    'an', 'in', 'im', 'aus', 'zu', 'zur', 'zum',
+    'the', 'and', 'or', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'of', 'for'
+]);
+
+const queryTerms = (query: string): string[] => {
+    return query
         .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t.length > 0)
+        .split(/[\s\-_/]+/)
+        .filter((t) => t.length > 1 && !STOPWORDS.has(t))
         .map(escape);
+};
+
+export const fulltextSearch = (notes: Iterable<Note>, query: string, limit: number): SearchHit[] => {
+    const terms = queryTerms(query);
 
     if (terms.length === 0) {
         return [];
@@ -57,5 +68,46 @@ export const fulltextSearch = (notes: Iterable<Note>, query: string, limit: numb
 
     hits.sort((a, b) => b.score - a.score);
 
+    return hits.slice(0, limit);
+};
+
+/**
+ * Separate ranking that scores TITLE matches only. Used as an additional RRF
+ * input so a note whose title hits the query terms ranks well even if longer
+ * notes accumulate more body matches by sheer surface area.
+ */
+export const titleSearch = (notes: Iterable<Note>, query: string, limit: number): SearchHit[] => {
+    const terms = queryTerms(query);
+
+    if (terms.length === 0) {
+        return [];
+    }
+
+    const hits: SearchHit[] = [];
+
+    for (const note of notes) {
+        const lowerTitle = note.title.toLowerCase();
+        let titleHits = 0;
+
+        for (const term of terms) {
+            if (lowerTitle.includes(term)) {
+                titleHits += 1;
+            }
+        }
+
+        if (titleHits === 0) {
+            continue;
+        }
+
+        hits.push({
+            noteId: note.id,
+            path: note.path,
+            title: note.title,
+            score: titleHits,
+            snippet: note.content.slice(0, 200)
+        });
+    }
+
+    hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, limit);
 };

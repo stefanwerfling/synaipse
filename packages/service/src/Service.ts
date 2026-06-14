@@ -11,7 +11,8 @@ export interface SnapshotEntry {
     sha: string;
 }
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
-import {fulltextSearch} from './Fulltext.js';
+import {fulltextSearch, titleSearch} from './Fulltext.js';
+import {defaultDemote, reciprocalRankFusion} from './Fusion.js';
 import {HashCache} from './Cache.js';
 
 export interface IndexingStats {
@@ -257,12 +258,17 @@ export class SynaipseService {
             return this.index.semanticSearch(query, limit);
         }
 
+        const notes = this.vault.list();
         const [ft, sem] = await Promise.all([
-            Promise.resolve(fulltextSearch(this.vault.list(), query, limit)),
+            Promise.resolve(fulltextSearch(notes, query, limit)),
             this.index.semanticSearch(query, limit)
         ]);
+        const titles = titleSearch(notes, query, limit);
 
-        return this.mergeHits(ft, sem, limit);
+        return reciprocalRankFusion([titles, sem, ft], {
+            limit,
+            weightFor: defaultDemote((id) => this.vault.tryGet(id))
+        });
     }
 
     public getProject(override?: string | null): string | null {
@@ -363,11 +369,19 @@ export class SynaipseService {
         }
 
         yield* runChat({
-            search: (q, prefix, limit) => this.search(q, 'hybrid', limit).then((hits) =>
-                prefix === undefined || prefix.length === 0
-                    ? hits
-                    : hits.filter((h) => h.noteId.startsWith(prefix))
-            ),
+            search: async (q, prefix, limit) => {
+                const scoped = prefix !== undefined && prefix.length > 0;
+                // Over-fetch when scoping by prefix so the filter still has enough
+                // candidates to keep `limit` strong post-filter.
+                const overFetch = scoped ? Math.max(limit * 6, 60) : limit;
+                const hits = await this.search(q, 'hybrid', overFetch);
+
+                if (!scoped) {
+                    return hits.slice(0, limit);
+                }
+
+                return hits.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
+            },
             readNote: (id) => this.vault.tryGet(id)?.content,
             provider
         }, options);
@@ -1097,23 +1111,4 @@ export class SynaipseService {
             .replaceAll('\\', '/');
     }
 
-    private mergeHits(a: SearchHit[], b: SearchHit[], limit: number): SearchHit[] {
-        const map = new Map<NoteId, SearchHit>();
-
-        const add = (hit: SearchHit, weight: number): void => {
-            const prev = map.get(hit.noteId);
-
-            if (!prev) {
-                map.set(hit.noteId, {...hit, score: hit.score * weight});
-                return;
-            }
-
-            prev.score += hit.score * weight;
-        };
-
-        for (const hit of a) add(hit, 1);
-        for (const hit of b) add(hit, 1.2);
-
-        return [...map.values()].sort((x, y) => y.score - x.score).slice(0, limit);
-    }
 }

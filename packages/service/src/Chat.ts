@@ -185,7 +185,7 @@ export async function* runChat(
     deps: RunChatDeps,
     options: ChatOptions
 ): AsyncGenerator<ChatEvent, void, void> {
-    const limit = options.limit ?? 8;
+    const limit = options.limit ?? 12;
     const hits = await deps.search(options.question, options.pathPrefix, limit);
 
     const previews = new Map<string, string>();
