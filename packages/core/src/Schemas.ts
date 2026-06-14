@@ -7,7 +7,8 @@ export const NoteTypeSchema = Vts.or([
     Vts.equal('fact' as const),
     Vts.equal('concept' as const),
     Vts.equal('todo' as const),
-    Vts.equal('question' as const)
+    Vts.equal('question' as const),
+    Vts.equal('external' as const)
 ]);
 
 export const FrontmatterSchema = Vts.object(

@@ -6,6 +6,7 @@
     { "path": "./packages/vector" },
     { "path": "./packages/service" },
     { "path": "./packages/mcp-server" },
-    { "path": "./packages/web" }
+    { "path": "./packages/web" },
+    { "path": "./packages/crawler" }
   ]
 }

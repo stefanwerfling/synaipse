@@ -7,7 +7,8 @@ export type NoteType =
     | 'fact'
     | 'concept'
     | 'todo'
-    | 'question';
+    | 'question'
+    | 'external';
 
 export const NOTE_TYPES: readonly NoteType[] = [
     'note',
@@ -16,7 +17,8 @@ export const NOTE_TYPES: readonly NoteType[] = [
     'fact',
     'concept',
     'todo',
-    'question'
+    'question',
+    'external'
 ] as const;
 
 export interface Frontmatter {

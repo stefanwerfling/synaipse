@@ -1,0 +1,28 @@
+{
+  "name": "@synaipse/crawler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synaipse crawlers — ingest external sources into the vault under Crawler/<source>/",
+  "type": "module",
+  "main": "./dist/Index.js",
+  "types": "./dist/Index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/Index.d.ts",
+      "import": "./dist/Index.js"
+    }
+  },
+  "bin": {
+    "synaipse-crawl": "./dist/Cli.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "start": "node --enable-source-maps dist/Cli.js"
+  },
+  "dependencies": {
+    "@synaipse/core": "*",
+    "@synaipse/vault": "*",
+    "dotenv": "^16.4.7"
+  }
+}

@@ -20,6 +20,8 @@
     "mcp:http": "npm --workspace @synaipse/mcp-server run start:http",
     "web": "npm --workspace @synaipse/web run dev",
     "vault:init": "node scripts/init-vault.mjs",
+    "crawl": "npm --workspace @synaipse/crawler run start --silent --",
+    "crawl:github-stars": "npm --workspace @synaipse/crawler run start --silent -- github-stars",
     "docker:up:voyage": "docker-compose --profile voyage up -d",
     "docker:up:ollama": "docker-compose --profile ollama up -d",
     "docker:down": "docker-compose --profile voyage --profile ollama down"

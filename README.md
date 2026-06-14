@@ -59,6 +59,7 @@ Index: [doc/README.md](doc/README.md).
 | `@synaipse/service`    | Vault + vector orchestration, fulltext, hybrid merge |
 | `@synaipse/mcp-server` | MCP server (stdio) exposing tools to Claude Code |
 | `@synaipse/web`        | Vanilla TS web UI (no React) for browsing, search, edit, graph |
+| `@synaipse/crawler`    | External-source crawlers writing under `Crawler/` (first: GitHub stars) |
 
 ## Use from Claude Code
 
@@ -115,4 +116,5 @@ npm run web                start API + Vite dev server
 npm run docker:up:voyage   start qdrant only
 npm run docker:up:ollama   start qdrant + ollama + model pull
 npm run docker:down        stop all
+npm run crawl:github-stars crawl your starred repos into Crawler/github/starred/
 ```
