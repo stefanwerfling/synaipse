@@ -3,11 +3,14 @@ import type {Chunk, Note} from '@synaipse/core';
 export interface ChunkOptions {
     targetChars: number;
     overlapChars: number;
+    /** Hard upper bound — chunks larger than this are sliced even if they were a single paragraph. Keeps us under the embedder's context window. */
+    hardCapChars: number;
 }
 
 export const CHUNK_DEFAULTS: ChunkOptions = {
     targetChars: 1200,
-    overlapChars: 150
+    overlapChars: 150,
+    hardCapChars: 4000
 };
 
 const splitParagraphs = (content: string): string[] => {
@@ -17,7 +20,12 @@ const splitParagraphs = (content: string): string[] => {
         .filter((p) => p.length > 0);
 };
 
-export const chunkNote = (note: Note, opts: ChunkOptions = CHUNK_DEFAULTS): Chunk[] => {
+export const chunkNote = (note: Note, opts: Partial<ChunkOptions> = {}): Chunk[] => {
+    const merged: ChunkOptions = {...CHUNK_DEFAULTS, ...opts};
+    return chunkNoteWith(note, merged);
+};
+
+const chunkNoteWith = (note: Note, opts: ChunkOptions): Chunk[] => {
     const paragraphs = splitParagraphs(note.content);
 
     if (paragraphs.length === 0) {
@@ -64,5 +72,40 @@ export const chunkNote = (note: Note, opts: ChunkOptions = CHUNK_DEFAULTS): Chun
 
     flush();
 
-    return chunks;
+    return enforceHardCap(chunks, opts);
+};
+
+const enforceHardCap = (chunks: Chunk[], opts: ChunkOptions): Chunk[] => {
+    const out: Chunk[] = [];
+    let outIdx = 0;
+
+    for (const chunk of chunks) {
+        if (chunk.text.length <= opts.hardCapChars) {
+            out.push({...chunk, id: `${chunk.noteId}::${outIdx}`, index: outIdx});
+            outIdx += 1;
+            continue;
+        }
+
+        let pos = 0;
+        const step = Math.max(1, opts.hardCapChars - opts.overlapChars);
+
+        while (pos < chunk.text.length) {
+            const piece = chunk.text.slice(pos, pos + opts.hardCapChars).trim();
+
+            if (piece.length > 0) {
+                out.push({
+                    id: `${chunk.noteId}::${outIdx}`,
+                    noteId: chunk.noteId,
+                    path: chunk.path,
+                    text: piece,
+                    index: outIdx
+                });
+                outIdx += 1;
+            }
+
+            pos += step;
+        }
+    }
+
+    return out;
 };

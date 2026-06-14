@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {QdrantClient} from '@qdrant/js-client-rest';
 import {VectorError} from '@synaipse/core';
 import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
@@ -14,6 +15,7 @@ interface ChunkPayload {
     path: string;
     text: string;
     index: number;
+    chunkId: string;
 }
 
 const isChunkPayload = (value: unknown): value is ChunkPayload => {
@@ -27,6 +29,28 @@ const isChunkPayload = (value: unknown): value is ChunkPayload => {
         && typeof record.path === 'string'
         && typeof record.text === 'string'
         && typeof record.index === 'number';
+};
+
+/**
+ * Qdrant rejects free-form string point IDs — only unsigned ints and UUIDs.
+ * SHA-1 → first 32 hex chars → UUID format. Stable and idempotent for the
+ * same input string, so re-indexing is still a no-op.
+ */
+const toPointId = (chunkId: string): string => {
+    const hex = createHash('sha1').update(chunkId).digest('hex').slice(0, 32);
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+};
+
+/**
+ * Some user content (especially crawled HTML/markdown) carries lone UTF-16
+ * surrogates and other invalid sequences that the Qdrant server's JSON parser
+ * rejects with "lone leading surrogate in hex escape". Replace orphan
+ * surrogates with U+FFFD and drop NULs.
+ */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+const sanitiseText = (text: string): string => {
+    return text.replace(LONE_SURROGATE_RE, '�').replaceAll('\0', '');
 };
 
 export class QdrantStore {
@@ -76,13 +100,14 @@ export class QdrantStore {
         await this.client.upsert(this.options.collection, {
             wait: true,
             points: chunks.map((chunk, i) => ({
-                id: chunk.id,
+                id: toPointId(chunk.id),
                 vector: vectors[i]!,
                 payload: {
                     noteId: chunk.noteId,
                     path: chunk.path,
-                    text: chunk.text,
-                    index: chunk.index
+                    text: sanitiseText(chunk.text),
+                    index: chunk.index,
+                    chunkId: chunk.id
                 } satisfies ChunkPayload
             }))
         });
@@ -129,7 +154,7 @@ export class QdrantStore {
                 title: point.payload.noteId,
                 score: point.score,
                 snippet: point.payload.text.slice(0, 240),
-                chunkId: String(point.id)
+                chunkId: point.payload.chunkId
             });
         }
 
