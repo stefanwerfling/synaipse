@@ -361,10 +361,10 @@ body {
     border-right: 1px solid var(--border-soft);
     background: var(--bg-1);
     padding: var(--space-4);
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    min-height: 0;
 }
 
 .sidebar-head {
@@ -405,6 +405,22 @@ body {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.note-list.virt {
+    display: block;
+    position: relative;
+    gap: 0;
+}
+
+.note-list.virt > li {
+    position: absolute;
+    left: 0;
+    right: 0;
+    box-sizing: border-box;
 }
 
 .note-list-item {

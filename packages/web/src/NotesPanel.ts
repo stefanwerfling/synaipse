@@ -28,6 +28,14 @@ interface NoteGroup {
     notes: NoteSummary[];
 }
 
+const GROUP_ROW_H = 32;
+const NOTE_ROW_H = 56;
+const VIRT_BUFFER = 8;
+
+type VirtualRow =
+    | {kind: 'group'; group: NoteGroup; key: string; isCollapsed: boolean}
+    | {kind: 'note'; note: NoteSummary};
+
 const startOfDay = (ts: number): number => {
     const d = new Date(ts);
     d.setHours(0, 0, 0, 0);
@@ -164,6 +172,12 @@ export class NotesPanel {
     private historyPanel: HistoryPanel | null = null;
     private historyEnabled = false;
 
+    // virtualised list state
+    private flatRows: VirtualRow[] = [];
+    private rowOffsets: number[] = [];
+    private totalListHeight = 0;
+    private virtualFrame: number | null = null;
+
     public setHistoryEnabled(enabled: boolean): void {
         if (this.historyEnabled === enabled) return;
         this.historyEnabled = enabled;
@@ -240,7 +254,10 @@ export class NotesPanel {
 
         this.noteCounter = el('div', {class: 'sidebar-counter', text: '0 notes'});
 
-        this.noteList = el('ul', {class: 'note-list'}) as HTMLUListElement;
+        this.noteList = el('ul', {
+            class: 'note-list',
+            on: {scroll: () => this.scheduleVirtualRender()}
+        }) as HTMLUListElement;
 
         this.sidebar = el('aside', {class: 'sidebar'}, head, this.modeSwitcher, this.noteCounter, this.noteList);
 
@@ -277,8 +294,6 @@ export class NotesPanel {
             ? this.notes
             : this.notes.filter((n) => n.title.toLowerCase().includes(q) || n.id.toLowerCase().includes(q));
 
-        clear(this.noteList);
-
         const total = this.notes.length;
 
         if (q === '') {
@@ -288,6 +303,12 @@ export class NotesPanel {
         }
 
         if (this.notes.length === 0) {
+            this.flatRows = [];
+            this.rowOffsets = [];
+            this.totalListHeight = 0;
+            clear(this.noteList);
+            this.noteList.classList.remove('virt');
+            this.noteList.style.height = '';
             this.noteList.appendChild(el('li', {class: 'note-list-empty'},
                 el('div', {class: 'note-list-empty-title', text: 'No notes yet'}),
                 el('div', {class: 'note-list-empty-hint', text: 'Click + New to create your first note.'})
@@ -296,6 +317,12 @@ export class NotesPanel {
         }
 
         if (visible.length === 0) {
+            this.flatRows = [];
+            this.rowOffsets = [];
+            this.totalListHeight = 0;
+            clear(this.noteList);
+            this.noteList.classList.remove('virt');
+            this.noteList.style.height = '';
             this.noteList.appendChild(el('li', {class: 'note-list-empty'},
                 el('div', {class: 'note-list-empty-title', text: 'No matches'}),
                 el('div', {class: 'note-list-empty-hint', text: `No notes match "${this.filter}".`})
@@ -307,61 +334,130 @@ export class NotesPanel {
         const collapsed = this.collapsedGroups.get();
         const groups = buildGroups(visible, mode, Date.now());
 
+        this.flatRows = [];
+        this.rowOffsets = [];
+
+        let offset = 0;
         for (const group of groups) {
             const groupKey = `${mode}:${group.key}`;
             const isCollapsed = collapsed.has(groupKey);
 
-            const header = el('li', {
-                class: isCollapsed ? 'note-group-header collapsed' : 'note-group-header',
-                attrs: {role: 'button', tabindex: '0'},
-                on: {click: () => this.toggleGroup(groupKey)}
-            },
-                el('span', {class: 'note-group-caret', text: '▾'}),
-                el('span', {class: 'note-group-label', text: group.label}),
-                el('span', {class: 'note-group-count', text: String(group.notes.length)})
-            );
+            this.flatRows.push({kind: 'group', group, key: groupKey, isCollapsed});
+            this.rowOffsets.push(offset);
+            offset += GROUP_ROW_H;
 
-            this.noteList.appendChild(header);
-
-            if (isCollapsed) {
-                continue;
-            }
-
-            for (const n of group.notes) {
-                const meta = el('div', {class: 'note-list-meta'},
-                    el('span', {class: 'note-list-path', text: n.id})
-                );
-
-                if (n.tags.length > 0) {
-                    const chipHost = el('div', {class: 'note-list-tags'});
-
-                    for (const tag of n.tags.slice(0, 3)) {
-                        const color = tagColor(tag);
-                        chipHost.appendChild(el('span', {
-                            class: 'note-list-tag',
-                            text: tag,
-                            style: {borderColor: color, color}
-                        }));
-                    }
-
-                    if (n.tags.length > 3) {
-                        chipHost.appendChild(el('span', {class: 'note-list-tag-more', text: `+${n.tags.length - 3}`}));
-                    }
-
-                    meta.appendChild(chipHost);
+            if (!isCollapsed) {
+                for (const n of group.notes) {
+                    this.flatRows.push({kind: 'note', note: n});
+                    this.rowOffsets.push(offset);
+                    offset += NOTE_ROW_H;
                 }
-
-                const li = el('li', {
-                    class: n.id === this.activeId ? 'note-list-item active' : 'note-list-item',
-                    on: {click: () => this.handleSelect(n.id)}
-                },
-                    el('div', {class: 'note-list-title', text: n.title}),
-                    meta
-                );
-
-                this.noteList.appendChild(li);
             }
         }
+
+        this.totalListHeight = offset;
+        this.noteList.classList.add('virt');
+        this.noteList.style.height = `${offset}px`;
+
+        this.renderVirtualWindow();
+    }
+
+    private scheduleVirtualRender(): void {
+        if (this.virtualFrame !== null) return;
+
+        this.virtualFrame = window.requestAnimationFrame(() => {
+            this.virtualFrame = null;
+            this.renderVirtualWindow();
+        });
+    }
+
+    private findFirstVisibleRow(scrollTop: number): number {
+        // binary search over rowOffsets
+        let lo = 0;
+        let hi = this.rowOffsets.length;
+
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if ((this.rowOffsets[mid] ?? 0) <= scrollTop) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+
+        return Math.max(0, lo - 1);
+    }
+
+    private renderVirtualWindow(): void {
+        if (this.flatRows.length === 0) return;
+
+        const scrollTop = this.noteList.scrollTop;
+        const viewportH = this.noteList.clientHeight || 600;
+
+        const firstVisible = this.findFirstVisibleRow(scrollTop);
+        const lastVisible = this.findFirstVisibleRow(scrollTop + viewportH);
+
+        const first = Math.max(0, firstVisible - VIRT_BUFFER);
+        const last = Math.min(this.flatRows.length, lastVisible + VIRT_BUFFER + 1);
+
+        clear(this.noteList);
+
+        for (let i = first; i < last; i += 1) {
+            const row = this.flatRows[i];
+            if (row === undefined) continue;
+
+            const top = this.rowOffsets[i] ?? 0;
+            this.noteList.appendChild(this.renderVirtualRow(row, top));
+        }
+    }
+
+    private renderVirtualRow(row: VirtualRow, top: number): HTMLElement {
+        if (row.kind === 'group') {
+            const header = el('li', {
+                class: row.isCollapsed ? 'note-group-header collapsed' : 'note-group-header',
+                attrs: {role: 'button', tabindex: '0'},
+                style: {top: `${top}px`, height: `${GROUP_ROW_H}px`},
+                on: {click: () => this.toggleGroup(row.key)}
+            },
+                el('span', {class: 'note-group-caret', text: '▾'}),
+                el('span', {class: 'note-group-label', text: row.group.label}),
+                el('span', {class: 'note-group-count', text: String(row.group.notes.length)})
+            );
+            return header;
+        }
+
+        const n = row.note;
+        const meta = el('div', {class: 'note-list-meta'},
+            el('span', {class: 'note-list-path', text: n.id})
+        );
+
+        if (n.tags.length > 0) {
+            const chipHost = el('div', {class: 'note-list-tags'});
+
+            for (const tag of n.tags.slice(0, 3)) {
+                const color = tagColor(tag);
+                chipHost.appendChild(el('span', {
+                    class: 'note-list-tag',
+                    text: tag,
+                    style: {borderColor: color, color}
+                }));
+            }
+
+            if (n.tags.length > 3) {
+                chipHost.appendChild(el('span', {class: 'note-list-tag-more', text: `+${n.tags.length - 3}`}));
+            }
+
+            meta.appendChild(chipHost);
+        }
+
+        return el('li', {
+            class: n.id === this.activeId ? 'note-list-item active' : 'note-list-item',
+            style: {top: `${top}px`, height: `${NOTE_ROW_H}px`},
+            on: {click: () => this.handleSelect(n.id)}
+        },
+            el('div', {class: 'note-list-title', text: n.title}),
+            meta
+        );
     }
 
     private toggleGroup(groupKey: string): void {

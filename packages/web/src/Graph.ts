@@ -7,7 +7,12 @@ import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './
 import {CONCENTRATE_COLOR, PULSE_COLORS, concentrateOpacity, concentrateRadius} from './GraphRenderer.js';
 import {normalizeHeat} from './Heat.js';
 import {convexHull, expandHull, toSvgPoints, type Point} from './Hulls.js';
+import {PersistentValue} from './Persistence.js';
 import {bezierControl, trailOpacity, trailSvgPath} from './Trail.js';
+
+const STORAGE_POSITIONS = 'synaipse.graph.positions';
+type PositionMap = Record<string, {x: number; y: number}>;
+const positionsStore = new PersistentValue<PositionMap>(STORAGE_POSITIONS, {});
 
 export type GraphState = GraphRendererState;
 
@@ -435,9 +440,25 @@ export class GraphView implements GraphRenderer {
         clear(this.stats);
         this.stats.textContent = `${filter.visibleNodeCount} nodes · ${filter.visibleEdgeCount} edges`;
 
+        const savedPositions = positionsStore.get();
+        const nodeIds = filter.elements
+            .filter((e) => e.data.source === undefined)
+            .map((e) => e.data.id as string);
+        const haveAllPositions = nodeIds.length > 0 && nodeIds.every((id) => savedPositions[id] !== undefined);
+
+        const elementsWithPositions = filter.elements.map((e) => {
+            const id = e.data.id;
+            const isNode = e.data.source === undefined;
+            const pos = isNode && typeof id === 'string' ? savedPositions[id] : undefined;
+            return pos !== undefined ? {...e, position: pos} : e;
+        });
+
         this.cy = cytoscape({
             container: this.canvas,
-            elements: filter.elements,
+            elements: elementsWithPositions,
+            hideEdgesOnViewport: true,
+            textureOnViewport: true,
+            pixelRatio: 1,
             style: [
                 {
                     selector: 'node',
@@ -470,14 +491,16 @@ export class GraphView implements GraphRenderer {
                     style: {'border-width': 2, 'border-color': '#ffb86c'}
                 }
             ],
-            layout: {
-                name: 'cose',
-                animate: false,
-                idealEdgeLength: () => 80,
-                nodeRepulsion: () => 8000,
-                padding: 24,
-                fit: true
-            },
+            layout: haveAllPositions
+                ? {name: 'preset', fit: true, padding: 24}
+                : {
+                    name: 'cose',
+                    animate: false,
+                    idealEdgeLength: () => 80,
+                    nodeRepulsion: () => 8000,
+                    padding: 24,
+                    fit: true
+                },
             wheelSensitivity: 0.2
         });
 
@@ -488,7 +511,24 @@ export class GraphView implements GraphRenderer {
         this.nodeIndex = new Map(this.state.data.nodes.map((n) => [n.id, n]));
 
         this.cy.on('pan zoom resize layoutstop', () => this.scheduleHullRender());
+        this.cy.on('layoutstop', () => this.snapshotPositions());
+        // dragfree fires when the user finishes dragging a single node — capture that too
+        this.cy.on('dragfree', 'node', () => this.snapshotPositions());
         this.scheduleHullRender();
+    }
+
+    private snapshotPositions(): void {
+        if (this.cy === null) return;
+
+        const out: PositionMap = {...positionsStore.get()};
+
+        this.cy.nodes().forEach((node) => {
+            const id = node.id();
+            const pos = node.position();
+            out[id] = {x: pos.x, y: pos.y};
+        });
+
+        positionsStore.set(out);
     }
 
     private scheduleHullRender(): void {

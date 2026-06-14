@@ -13,8 +13,8 @@ export interface SnapshotEntry {
     sha: string;
 }
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
-import {fulltextSearch, titleSearch} from './Fulltext.js';
 import {defaultDemote, reciprocalRankFusion} from './Fusion.js';
+import {InvertedIndex} from './InvertedIndex.js';
 import {HashCache} from './Cache.js';
 
 export interface IndexingStats {
@@ -116,6 +116,7 @@ export class SynaipseService {
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly cache: HashCache;
+    private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
     private readonly chatProvider: {url: string; model: string} | null;
@@ -167,6 +168,8 @@ export class SynaipseService {
 
     public async start(): Promise<void> {
         await Promise.all([this.vault.load(), this.cache.load()]);
+        this.fulltextIndex.build(this.vault.list());
+        process.stderr.write(`[synaipse] fulltext index: ${this.fulltextIndex.size()} notes · ${this.fulltextIndex.termCount()} terms\n`);
 
         if (this.index === null) {
             process.stderr.write(`[synaipse] embeddings disabled (provider=none) — fulltext only, ${this.vault.list().length} notes loaded\n`);
@@ -253,19 +256,18 @@ export class SynaipseService {
 
     private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
         if (mode === 'fulltext' || this.index === null) {
-            return fulltextSearch(this.vault.list(), query, limit);
+            return this.fulltextIndex.search(query, limit);
         }
 
         if (mode === 'semantic') {
             return this.index.semanticSearch(query, limit);
         }
 
-        const notes = this.vault.list();
         const [ft, sem] = await Promise.all([
-            Promise.resolve(fulltextSearch(notes, query, limit)),
+            Promise.resolve(this.fulltextIndex.search(query, limit)),
             this.index.semanticSearch(query, limit)
         ]);
-        const titles = titleSearch(notes, query, limit);
+        const titles = this.fulltextIndex.searchTitle(query, limit);
 
         return reciprocalRankFusion([titles, sem, ft], {
             limit,
@@ -554,6 +556,7 @@ export class SynaipseService {
             await this.index.indexNote(note);
         }
 
+        this.fulltextIndex.addNote(note);
         this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
         return note;
     }
@@ -571,6 +574,7 @@ export class SynaipseService {
             await this.index.deleteNote(id);
         }
 
+        this.fulltextIndex.removeNote(id);
         this.cache.delete(id);
     }
 
@@ -1080,6 +1084,7 @@ export class SynaipseService {
             if (this.index !== null) {
                 await this.index.deleteNote(id);
             }
+            this.fulltextIndex.removeNote(id);
             this.cache.delete(id);
             this.notifyVaultChange({kind, path, noteId: id});
             return;
@@ -1101,6 +1106,7 @@ export class SynaipseService {
             await this.index.indexNote(note);
         }
 
+        this.fulltextIndex.addNote(note);
         this.cache.set(id, {hash: note.hash, mtime: note.mtime});
         this.notifyVaultChange({kind, path, noteId: id});
     }
