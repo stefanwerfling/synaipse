@@ -23,6 +23,7 @@ const HISTORY_MAX_CHARS_PER_MSG = 4000;
 
 export interface ChatPanelCallbacks {
     onOpenNote: (noteId: string) => void;
+    onSaveAsNote?: (markdown: string) => Promise<{noteId: string} | null>;
 }
 
 const historyStore = new PersistentValue<Message[]>(STORAGE_HISTORY, []);
@@ -40,6 +41,9 @@ export class ChatPanel {
     private currentAbort: AbortController | null = null;
     private model = '—';
     private enabled = false;
+    private stickyContext: {label: string; text: string} | null = null;
+    private stickyHost!: HTMLElement;
+    private readonly saveBtn: HTMLButtonElement;
 
     public constructor(private readonly cb: ChatPanelCallbacks) {
         this.element = el('div', {class: 'chat-panel'});
@@ -53,11 +57,19 @@ export class ChatPanel {
             on: {click: () => this.clearConversation()}
         }) as HTMLButtonElement;
 
+        this.saveBtn = el('button', {
+            class: 'chat-save',
+            attrs: {type: 'button', title: 'Save this conversation as a note in your vault'},
+            text: 'Save as note',
+            on: {click: () => void this.saveAsNote()}
+        }) as HTMLButtonElement;
+
         const head = el('div', {class: 'chat-head'},
             el('h2', {class: 'chat-title', text: 'Chat with your notes'}),
-            el('div', {class: 'chat-head-right'}, this.modelLabel, this.clearBtn)
+            el('div', {class: 'chat-head-right'}, this.modelLabel, this.saveBtn, this.clearBtn)
         );
 
+        this.stickyHost = el('div', {class: 'chat-sticky', attrs: {hidden: 'true'}});
         this.thread = el('div', {class: 'chat-thread'});
 
         this.input = el('textarea', {
@@ -97,6 +109,7 @@ export class ChatPanel {
 
         this.element.appendChild(head);
         this.element.appendChild(this.thread);
+        this.element.appendChild(this.stickyHost);
         this.element.appendChild(inputRow);
 
         this.restore();
@@ -122,6 +135,99 @@ export class ChatPanel {
 
     public focusInput(): void {
         this.input.focus();
+    }
+
+    public setStickyContext(label: string, text: string): void {
+        this.stickyContext = {label, text};
+        this.renderSticky();
+    }
+
+    public clearStickyContext(): void {
+        this.stickyContext = null;
+        this.renderSticky();
+    }
+
+    private renderSticky(): void {
+        clear(this.stickyHost);
+
+        if (this.stickyContext === null) {
+            this.stickyHost.setAttribute('hidden', 'true');
+            return;
+        }
+
+        this.stickyHost.removeAttribute('hidden');
+
+        const preview = this.stickyContext.text.length > 200
+            ? `${this.stickyContext.text.slice(0, 200)}…`
+            : this.stickyContext.text;
+
+        this.stickyHost.appendChild(
+            el('div', {class: 'chat-sticky-row'},
+                el('span', {class: 'chat-sticky-icon', text: '↳'}),
+                el('div', {class: 'chat-sticky-main'},
+                    el('div', {class: 'chat-sticky-label', text: this.stickyContext.label}),
+                    el('div', {class: 'chat-sticky-text', text: preview})
+                ),
+                el('button', {
+                    class: 'chat-sticky-clear',
+                    attrs: {type: 'button', 'aria-label': 'remove context'},
+                    text: '×',
+                    on: {click: () => this.clearStickyContext()}
+                })
+            )
+        );
+    }
+
+    private async saveAsNote(): Promise<void> {
+        if (this.cb.onSaveAsNote === undefined) return;
+        if (this.messages.length === 0) return;
+        if (this.streaming) return;
+
+        const markdown = this.toMarkdown();
+
+        try {
+            const result = await this.cb.onSaveAsNote(markdown);
+
+            if (result !== null) {
+                this.saveBtn.textContent = '✓ Saved';
+                window.setTimeout(() => {
+                    this.saveBtn.textContent = 'Save as note';
+                }, 1500);
+            }
+        } catch (cause) {
+            this.saveBtn.textContent = 'Save failed';
+            window.setTimeout(() => {
+                this.saveBtn.textContent = 'Save as note';
+            }, 2000);
+            console.error('save chat failed', cause);
+        }
+    }
+
+    private toMarkdown(): string {
+        const now = new Date();
+        const date = now.toISOString().slice(0, 10);
+        const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        const lines: string[] = [];
+        lines.push(`# Chat — ${date} ${time}`, '');
+
+        for (const msg of this.messages) {
+            if (msg.role === 'user') {
+                lines.push(`## You`, '', msg.text.trim(), '');
+            } else {
+                lines.push(`## Synaipse (${msg.model ?? this.model})`, '', msg.text.trim(), '');
+
+                if (msg.sources !== undefined && msg.sources.length > 0) {
+                    lines.push(`**Sources:**`);
+                    for (const s of msg.sources) {
+                        lines.push(`- [^${s.index}] [[${s.title}]] · \`${s.noteId}\``);
+                    }
+                    lines.push('');
+                }
+            }
+        }
+
+        return lines.join('\n');
     }
 
     private restore(): void {
@@ -246,11 +352,20 @@ export class ChatPanel {
     private async send(): Promise<void> {
         if (!this.enabled || this.streaming) return;
 
-        const question = this.input.value.trim();
+        const rawQuestion = this.input.value.trim();
 
-        if (question.length === 0) return;
+        if (rawQuestion.length === 0) return;
 
         this.input.value = '';
+
+        const sticky = this.stickyContext;
+        const question = sticky === null
+            ? rawQuestion
+            : `Bezug auf folgenden Auszug aus **${sticky.label}**:\n\n> ${sticky.text.replace(/\n/g, '\n> ')}\n\n---\n\n${rawQuestion}`;
+
+        if (sticky !== null) {
+            this.clearStickyContext();
+        }
 
         const history = this.buildHistory();
 

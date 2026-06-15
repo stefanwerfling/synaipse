@@ -36,6 +36,41 @@ export interface ChatProviderConfig {
 
 const SYSTEM_PROMPT = `Du beantwortest Fragen ausschließlich basierend auf den folgenden Notizen aus dem persönlichen Vault des Nutzers. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Notizen. Wenn die Notizen die Frage nicht beantworten, sag das ehrlich — erfinde nichts. Bei Folgefragen berücksichtige den bisherigen Gesprächsverlauf, aber stütze neue Aussagen auf die für DIESE Frage gelieferten Notizen.`;
 
+const SUMMARIZE_PROMPT = `Fasse die folgende Notiz in 2-3 Sätzen zusammen, in der Sprache der Notiz. Antworte ausschließlich mit der reinen Zusammenfassung — keine Einleitung, keine Anführungszeichen, keine Markdown-Formatierung, kein Bullet-List. Behalte konkrete Namen, Zahlen und Entscheidungen bei.`;
+
+export type SummarizeEvent =
+    | {kind: 'token'; text: string}
+    | {kind: 'done'; summary: string}
+    | {kind: 'error'; message: string};
+
+export async function* runSummarize(
+    provider: ChatProviderConfig,
+    noteContent: string,
+    abort?: AbortSignal
+): AsyncGenerator<SummarizeEvent, void, void> {
+    const trimmed = noteContent.replace(/^---[\s\S]*?---\n?/, '').slice(0, 12_000).trim();
+
+    if (trimmed.length === 0) {
+        yield {kind: 'error', message: 'note is empty'};
+        return;
+    }
+
+    let summary = '';
+
+    try {
+        for await (const event of streamOllamaChat(provider, SUMMARIZE_PROMPT, trimmed, abort)) {
+            if (event.token !== undefined) {
+                summary += event.token;
+                yield {kind: 'token', text: event.token};
+            }
+        }
+
+        yield {kind: 'done', summary: summary.trim()};
+    } catch (cause) {
+        yield {kind: 'error', message: String(cause)};
+    }
+}
+
 const buildContext = (sources: ChatSource[]): string => {
     const blocks: string[] = [];
 

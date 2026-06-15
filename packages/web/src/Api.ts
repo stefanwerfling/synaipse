@@ -99,8 +99,52 @@ export const api = {
             body: file
         });
         return json(response);
+    },
+    summarizeNote: async function* (
+        id: string,
+        opts: {save?: boolean; signal?: AbortSignal} = {}
+    ): AsyncGenerator<SummarizeEvent, void, void> {
+        const response = await fetch(`/api/notes/${encodeURIComponent(id)}/summarize`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({save: opts.save === true}),
+            ...(opts.signal !== undefined ? {signal: opts.signal} : {})
+        });
+
+        if (response.body === null) {
+            throw new Error('no response body');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() ?? '';
+
+            for (const block of parts) {
+                const line = block.split('\n').find((l) => l.startsWith('data: '));
+                if (line === undefined) continue;
+
+                try {
+                    yield JSON.parse(line.slice(6)) as SummarizeEvent;
+                } catch {
+                    // ignore malformed
+                }
+            }
+        }
     }
 };
+
+export type SummarizeEvent =
+    | {kind: 'token'; text: string}
+    | {kind: 'done'; summary: string}
+    | {kind: 'error'; message: string};
 
 export interface AssetUploadResult {
     assetId: string;

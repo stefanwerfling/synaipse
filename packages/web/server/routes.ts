@@ -134,6 +134,39 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             return;
         }
 
+        const summarizeMatch = tail.match(/^(.+)\/summarize$/);
+
+        if (summarizeMatch !== null) {
+            if (method !== 'POST') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            const id = summarizeMatch[1] as string;
+            const bodyJson = await readJson<{save?: unknown}>(req).catch(() => ({save: false}));
+            const save = bodyJson.save === true;
+
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                Connection: 'keep-alive'
+            });
+
+            const ctl = new AbortController();
+            req.on('close', () => ctl.abort());
+
+            try {
+                for await (const event of service.summarizeNote(id, {abort: ctl.signal, saveToFrontmatter: save})) {
+                    res.write(`data: ${JSON.stringify(event)}\n\n`);
+                }
+            } catch (error) {
+                res.write(`data: ${JSON.stringify({kind: 'error', message: String(error)})}\n\n`);
+            }
+
+            res.end();
+            return;
+        }
+
         const diffMatch = tail.match(/^(.+)\/diff$/);
 
         if (diffMatch !== null) {

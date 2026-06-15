@@ -1,5 +1,5 @@
 import type {Note} from '@synaipse/core';
-import {api, NoteSummary} from './Api.js';
+import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
 import {Editor} from './Editor.js';
@@ -11,6 +11,7 @@ import {buildWikilinkResolver, slugify, WikilinkResolver} from './Wikilinks.js';
 
 export interface NotesPanelOptions {
     onNotesChanged: () => void;
+    onAskAboutSelection?: (noteId: string, selection: string) => void;
 }
 
 type GroupMode = 'folder' | 'tag' | 'recent';
@@ -171,6 +172,10 @@ export class NotesPanel {
     private currentEditor: Editor | null = null;
     private historyPanel: HistoryPanel | null = null;
     private historyEnabled = false;
+    private chatEnabled = false;
+    private selectionBtn: HTMLButtonElement | null = null;
+    private summarizeAbort: AbortController | null = null;
+    private selectionListenersAttached = false;
 
     // virtualised list state
     private flatRows: VirtualRow[] = [];
@@ -181,6 +186,12 @@ export class NotesPanel {
     public setHistoryEnabled(enabled: boolean): void {
         if (this.historyEnabled === enabled) return;
         this.historyEnabled = enabled;
+        this.renderViewer();
+    }
+
+    public setChatEnabled(enabled: boolean): void {
+        if (this.chatEnabled === enabled) return;
+        this.chatEnabled = enabled;
         this.renderViewer();
     }
 
@@ -229,6 +240,11 @@ export class NotesPanel {
         this.disposeEditor();
         this.unsubscribeGroupMode();
         this.unsubscribeCollapsed();
+
+        if (this.selectionBtn !== null) {
+            this.selectionBtn.remove();
+            this.selectionBtn = null;
+        }
     }
 
     private build(): void {
@@ -656,6 +672,15 @@ export class NotesPanel {
 
         const actions: HTMLElement[] = [];
 
+        if (this.chatEnabled) {
+            actions.push(el('button', {
+                class: 'btn',
+                attrs: {type: 'button', title: 'Generate an LLM summary of this note'},
+                text: 'Summarize',
+                on: {click: () => void this.openSummarizeModal()}
+            }));
+        }
+
         if (this.historyEnabled) {
             actions.push(el('button', {
                 class: 'btn',
@@ -716,6 +741,193 @@ export class NotesPanel {
         this.viewer.appendChild(this.viewerPreview.element);
         this.viewerPreview.update(this.active.content);
         this.renderLinks();
+        this.attachSelectionListener();
+    }
+
+    private attachSelectionListener(): void {
+        if (this.viewerPreview === null) return;
+        if (this.opts.onAskAboutSelection === undefined) return;
+        if (!this.chatEnabled) return;
+        if (this.selectionListenersAttached) return;
+
+        this.selectionListenersAttached = true;
+
+        const onUp = (): void => {
+            if (this.viewerPreview === null) return;
+            const host = this.viewerPreview.element;
+            window.setTimeout(() => this.showSelectionButton(host), 0);
+        };
+
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('keyup', onUp);
+        document.addEventListener('selectionchange', () => {
+            const sel = window.getSelection();
+            if (sel === null || sel.toString().trim().length === 0) {
+                this.hideSelectionButton();
+            }
+        });
+    }
+
+    private showSelectionButton(host: HTMLElement): void {
+        const sel = window.getSelection();
+        if (sel === null) return;
+
+        const text = sel.toString().trim();
+        if (text.length < 4) {
+            this.hideSelectionButton();
+            return;
+        }
+
+        if (sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+
+        // selection must be inside the preview host
+        if (!host.contains(range.commonAncestorContainer)) {
+            this.hideSelectionButton();
+            return;
+        }
+
+        const rect = range.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return;
+
+        if (this.selectionBtn === null) {
+            this.selectionBtn = el('button', {
+                class: 'selection-action',
+                attrs: {type: 'button'},
+                text: '↳ Ask about this',
+                on: {mousedown: (e) => e.preventDefault()}
+            }) as HTMLButtonElement;
+            document.body.appendChild(this.selectionBtn);
+        }
+
+        const btn = this.selectionBtn;
+        btn.onclick = (): void => {
+            if (this.activeId === null || this.opts.onAskAboutSelection === undefined) return;
+            this.opts.onAskAboutSelection(this.activeId, text);
+            this.hideSelectionButton();
+            const live = window.getSelection();
+            if (live !== null) live.removeAllRanges();
+        };
+
+        const top = window.scrollY + rect.top - 40;
+        const left = window.scrollX + rect.left + rect.width / 2 - 80;
+        btn.style.top = `${Math.max(8, top)}px`;
+        btn.style.left = `${Math.max(8, left)}px`;
+        btn.style.display = 'block';
+    }
+
+    private hideSelectionButton(): void {
+        if (this.selectionBtn !== null) {
+            this.selectionBtn.style.display = 'none';
+        }
+    }
+
+    private async openSummarizeModal(): Promise<void> {
+        if (this.active === null) return;
+        const noteId = this.active.id;
+
+        const overlay = el('div', {class: 'summarize-modal-overlay'});
+        const body = el('div', {class: 'summarize-modal-body'});
+        const status = el('div', {class: 'summarize-modal-status', text: 'streaming…'});
+        const closeBtn = el('button', {
+            class: 'btn',
+            attrs: {type: 'button'},
+            text: 'Close',
+            on: {click: () => this.closeSummarizeModal(overlay)}
+        });
+        const saveBtn = el('button', {
+            class: 'btn btn-primary',
+            attrs: {type: 'button', disabled: 'true'},
+            text: 'Save to frontmatter.summary'
+        }) as HTMLButtonElement;
+
+        const modal = el('div', {class: 'summarize-modal'},
+            el('div', {class: 'summarize-modal-head'},
+                el('h3', {text: `Summarize · ${this.active.title}`}),
+                status
+            ),
+            body,
+            el('div', {class: 'summarize-modal-actions'}, closeBtn, saveBtn)
+        );
+
+        overlay.appendChild(modal);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeSummarizeModal(overlay);
+        });
+
+        document.body.appendChild(overlay);
+
+        const ctl = new AbortController();
+        this.summarizeAbort = ctl;
+
+        let finalSummary = '';
+        let acc = '';
+
+        try {
+            for await (const event of api.summarizeNote(noteId, {signal: ctl.signal})) {
+                this.handleSummarizeEvent(event, body, status, (s) => { finalSummary = s; }, (chunk) => { acc += chunk; });
+            }
+
+            if (finalSummary.length > 0) {
+                saveBtn.removeAttribute('disabled');
+                saveBtn.onclick = async (): Promise<void> => {
+                    saveBtn.setAttribute('disabled', 'true');
+                    saveBtn.textContent = 'saving…';
+                    try {
+                        await this.saveSummaryToFrontmatter(noteId, finalSummary);
+                        saveBtn.textContent = '✓ Saved';
+                        window.setTimeout(() => this.closeSummarizeModal(overlay), 800);
+                    } catch (cause) {
+                        saveBtn.textContent = 'Save failed';
+                        status.textContent = String(cause);
+                    }
+                };
+            }
+        } catch (cause) {
+            if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+                status.textContent = `error: ${String(cause)}`;
+            }
+        } finally {
+            this.summarizeAbort = null;
+            if (acc.length > 0 && finalSummary.length === 0) {
+                // stream cut off — show what we got
+                finalSummary = acc.trim();
+            }
+        }
+    }
+
+    private handleSummarizeEvent(
+        event: SummarizeEvent,
+        body: HTMLElement,
+        status: HTMLElement,
+        setFinal: (s: string) => void,
+        addToken: (t: string) => void
+    ): void {
+        if (event.kind === 'token') {
+            addToken(event.text);
+            body.textContent = (body.textContent ?? '') + event.text;
+        } else if (event.kind === 'done') {
+            setFinal(event.summary);
+            body.textContent = event.summary;
+            status.textContent = 'done';
+        } else if (event.kind === 'error') {
+            status.textContent = `error: ${event.message}`;
+        }
+    }
+
+    private async saveSummaryToFrontmatter(noteId: string, summary: string): Promise<void> {
+        const note = await api.getNote(noteId);
+        const nextFrontmatter = {...note.frontmatter, summary};
+        await api.writeNote({path: noteId, content: note.content, frontmatter: nextFrontmatter});
+        this.opts.onNotesChanged();
+    }
+
+    private closeSummarizeModal(overlay: HTMLElement): void {
+        if (this.summarizeAbort !== null) {
+            this.summarizeAbort.abort();
+            this.summarizeAbort = null;
+        }
+        overlay.remove();
     }
 
     private renderLinks(): void {

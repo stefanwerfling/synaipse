@@ -82,6 +82,10 @@ export class App {
             onNotesChanged: () => {
                 this.graph = null;
                 this.loadNotes();
+            },
+            onAskAboutSelection: (noteId, selection) => {
+                this.chatPanel.setStickyContext(`Auszug aus ${noteId}`, selection);
+                void this.switchTab('chat');
             }
         });
 
@@ -89,6 +93,30 @@ export class App {
             onOpenNote: (noteId) => {
                 this.notesPanel.openNote(noteId);
                 void this.switchTab('notes');
+            },
+            onSaveAsNote: async (markdown) => {
+                const now = new Date();
+                const date = now.toISOString().slice(0, 10);
+                const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+                const path = `chats/${date}-${time}.md`;
+
+                try {
+                    const note = await api.writeNote({
+                        path,
+                        content: markdown,
+                        frontmatter: {
+                            title: `Chat ${date} ${time}`,
+                            tags: ['chat'],
+                            type: 'note'
+                        }
+                    });
+                    this.graph = null;
+                    void this.loadNotes();
+                    return {noteId: note.id};
+                } catch (cause) {
+                    console.error('save chat as note failed', cause);
+                    return null;
+                }
             }
         });
 
@@ -294,6 +322,7 @@ export class App {
             semanticEnabled = info.semanticEnabled;
             this.project = info.project;
             this.notesPanel.setHistoryEnabled(info.historyEnabled);
+            this.notesPanel.setChatEnabled(info.chatEnabled);
             this.chatPanel.setInfo(info.chatEnabled, info.chatModel);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode

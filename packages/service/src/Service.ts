@@ -2,9 +2,9 @@ import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, Searc
 import {ProjectScopeError} from '@synaipse/core';
 import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
-import {runChat, type ChatEvent, type ChatOptions} from './Chat.js';
+import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
-export type {ChatEvent, ChatSource, ChatOptions, ChatMessage} from './Chat.js';
+export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {WriteAssetResult} from './Assets.js';
 
 export interface SnapshotEntry {
@@ -371,6 +371,42 @@ export class SynaipseService {
 
     public getChatModel(): string | null {
         return this.chatProvider?.model ?? null;
+    }
+
+    public async *summarizeNote(id: NoteId, opts: {abort?: AbortSignal; saveToFrontmatter?: boolean; projectOverride?: string | null} = {}): AsyncGenerator<SummarizeEvent, void, void> {
+        const provider = this.chatProvider;
+
+        if (provider === null) {
+            yield {kind: 'error', message: 'chat not configured — set SYNAIPSE_CHAT_URL + SYNAIPSE_CHAT_MODEL'};
+            return;
+        }
+
+        const note = this.vault.tryGet(id);
+
+        if (note === undefined) {
+            yield {kind: 'error', message: `note not found: ${id}`};
+            return;
+        }
+
+        let finalSummary = '';
+
+        for await (const event of runSummarize(provider, note.content, opts.abort)) {
+            yield event;
+
+            if (event.kind === 'done') {
+                finalSummary = event.summary;
+            }
+        }
+
+        if (finalSummary.length > 0 && opts.saveToFrontmatter === true) {
+            try {
+                await this.updateNote(id, {frontmatterPatch: {summary: finalSummary}}, {
+                    project: opts.projectOverride ?? null
+                });
+            } catch (cause) {
+                yield {kind: 'error', message: `saved summary failed: ${String(cause)}`};
+            }
+        }
     }
 
     public async *chat(options: ChatOptions): AsyncGenerator<ChatEvent, void, void> {
