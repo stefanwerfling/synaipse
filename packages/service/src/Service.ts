@@ -7,6 +7,12 @@ import {writeAsset, type WriteAssetResult} from './Assets.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {
+    renderRelatedSection,
+    runRelink,
+    stripRelatedSection,
+    type RelinkCandidate
+} from './Relink.js';
+import {
     createWebSearchProvider,
     runResearch,
     type ResearchEvent,
@@ -21,6 +27,7 @@ export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} fr
 export type {WriteAssetResult} from './Assets.js';
 export type {CompileEvent, CompileResult} from './Compile.js';
 export type {LlmConfig, LlmProvider, LlmProviderKind} from './Llm.js';
+export type {RelinkCandidate, RelinkEvent} from './Relink.js';
 export type {ResearchEvent, WebSearchConfig, WebSearchProvider} from './Research.js';
 export type {
     ChatgptImportAttachment,
@@ -780,6 +787,87 @@ export class SynaipseService {
         this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
 
         yield {kind: 'done', result: final, compiledPath: written.id};
+    }
+
+    public async relinkNote(
+        id: NoteId,
+        opts: {useLlm?: boolean; force?: boolean; limit?: number; abort?: AbortSignal} = {}
+    ): Promise<{noteId: NoteId; accepted: string[]; skipped: boolean}> {
+        const note = this.vault.tryGet(id);
+        if (note === undefined) throw new Error(`note not found: ${id}`);
+
+        // Idempotency: if the note already has an explicit ## Related section
+        // and the caller didn't force, treat as no-op.
+        if (!opts.force && /\n## Related\n/.test(note.content)) {
+            return {noteId: id, accepted: [], skipped: true};
+        }
+
+        const query = `${note.title}\n${note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 400)}`;
+        const hits = await this.search(query, 'hybrid', opts.limit ?? 20);
+
+        const candidates: RelinkCandidate[] = [];
+        const titlesSeen = new Set<string>([note.title]);
+
+        for (const hit of hits) {
+            if (hit.noteId === id) continue;
+            if (titlesSeen.has(hit.title)) continue;
+            titlesSeen.add(hit.title);
+
+            candidates.push({
+                noteId: hit.noteId,
+                title: hit.title,
+                score: hit.score,
+                ...(hit.snippet !== undefined ? {snippet: hit.snippet} : {})
+            });
+        }
+
+        if (candidates.length === 0) {
+            return {noteId: id, accepted: [], skipped: false};
+        }
+
+        let accepted: string[];
+
+        if (opts.useLlm === true && this.chatProvider !== null) {
+            const noteSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
+            let finalAccepted: string[] | null = null;
+
+            for await (const event of runRelink(
+                this.chatProvider,
+                note.title,
+                noteSnippet,
+                candidates.slice(0, 10),
+                opts.abort
+            )) {
+                if (event.kind === 'error') {
+                    throw new Error(event.message);
+                }
+
+                if (event.kind === 'done') {
+                    finalAccepted = event.accepted;
+                }
+            }
+
+            const candidateTitles = new Set(candidates.map((c) => c.title));
+            accepted = (finalAccepted ?? []).filter((t) => candidateTitles.has(t));
+        } else {
+            // Deterministic fallback: top-5 by hybrid score, no LLM needed.
+            accepted = candidates.slice(0, 5).map((c) => c.title);
+        }
+
+        const stripped = stripRelatedSection(note.content).trimEnd();
+        const next = `${stripped}\n${renderRelatedSection(accepted)}`;
+
+        const written = await this.vault.write({
+            path: id,
+            content: next,
+            frontmatter: note.frontmatter
+        }, {message: `synaipse: relink ${id}`});
+
+        if (this.index !== null) await this.index.indexNote(written);
+        this.fulltextIndex.addNote(written);
+        this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
+
+        return {noteId: written.id, accepted, skipped: false};
     }
 
     public async clipPage(input: {

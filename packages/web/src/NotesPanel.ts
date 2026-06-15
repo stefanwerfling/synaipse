@@ -56,6 +56,10 @@ const recencyBucket = (mtime: number, now: number): typeof RECENT_BUCKETS[number
 
 const MAX_FOLDER_DEPTH = 2;
 
+// Top-level folders whose immediate subdirs are usually opaque IDs (UUIDs,
+// hashes, dates) that are useless as group keys — flatten them to one entry.
+const FLAT_TOP_LEVEL_FOLDERS = new Set(['chatgpt-import', 'Clipped']);
+
 const folderOf = (id: string): {key: string; label: string} => {
     const slash = id.lastIndexOf('/');
 
@@ -65,6 +69,11 @@ const folderOf = (id: string): {key: string; label: string} => {
 
     const folder = id.slice(0, slash);
     const parts = folder.split('/');
+    const top = parts[0];
+
+    if (top !== undefined && FLAT_TOP_LEVEL_FOLDERS.has(top)) {
+        return {key: top, label: top};
+    }
 
     if (parts.length <= MAX_FOLDER_DEPTH) {
         return {key: folder, label: folder};

@@ -320,11 +320,22 @@ class AnthropicProvider implements LlmProvider {
 }
 
 /**
- * Shells out to the Claude Code CLI (`claude --print`). The CLI reads the
- * prompt from stdin and writes the answer to stdout. Streaming is line-based
- * (no token granularity), which means the UI sees the response in larger
- * chunks but still incrementally.
+ * Shells out to the Claude Code CLI (`claude --print --output-format=
+ * stream-json --include-partial-messages`). The CLI writes NDJSON events
+ * with content_block_delta entries that we map back to token chunks, so
+ * the chat UI sees real per-token streaming.
  */
+interface ClaudeStreamEvent {
+    type?: string;
+    event?: {type?: string; delta?: {type?: string; text?: string}};
+    delta?: {type?: string; text?: string};
+    usage?: {output_tokens?: number; input_tokens?: number};
+    message?: {usage?: {output_tokens?: number}};
+    result?: string;
+    is_error?: boolean;
+    subtype?: string;
+}
+
 class ClaudeShellProvider implements LlmProvider {
     public readonly kind = 'claude-shell' as const;
     public readonly model: string;
@@ -346,7 +357,19 @@ class ClaudeShellProvider implements LlmProvider {
             ? `${opts.system}\n\n${opts.user}`
             : `${opts.system}\n\n${historyText}\n\nUser: ${opts.user}`;
 
-        const args = ['--print'];
+        // stream-json gives us per-token streaming; --verbose is required by
+        // the CLI when stream-json is combined with --print. We strip every
+        // tool from the allowed list so Claude can only emit text — no Bash,
+        // no Edit, no Read.
+        const args = [
+            '--print',
+            '--output-format', 'stream-json',
+            '--include-partial-messages',
+            '--verbose',
+            '--no-session-persistence',
+            '--allowedTools', ''
+        ];
+
         if (this.model.length > 0) args.push('--model', this.model);
         args.push(...this.extraArgs);
 
@@ -364,6 +387,8 @@ class ClaudeShellProvider implements LlmProvider {
 
         const decoder = new TextDecoder();
         let stderr = '';
+        let stdoutBuffer = '';
+        let totalTokens = 0;
 
         child.stderr.on('data', (chunk: Buffer) => {
             stderr += decoder.decode(chunk);
@@ -374,7 +399,16 @@ class ClaudeShellProvider implements LlmProvider {
         let resolveWaiter: (() => void) | null = null;
 
         child.stdout.on('data', (chunk: Buffer) => {
-            stdoutQueue.push(decoder.decode(chunk));
+            stdoutBuffer += decoder.decode(chunk);
+            let nl = stdoutBuffer.indexOf('\n');
+
+            while (nl !== -1) {
+                const line = stdoutBuffer.slice(0, nl).trim();
+                stdoutBuffer = stdoutBuffer.slice(nl + 1);
+                if (line.length > 0) stdoutQueue.push(line);
+                nl = stdoutBuffer.indexOf('\n');
+            }
+
             if (resolveWaiter !== null) {
                 resolveWaiter();
                 resolveWaiter = null;
@@ -383,6 +417,11 @@ class ClaudeShellProvider implements LlmProvider {
 
         const exitPromise = new Promise<number>((resolve, reject) => {
             child.on('exit', (code) => {
+                if (stdoutBuffer.trim().length > 0) {
+                    stdoutQueue.push(stdoutBuffer.trim());
+                    stdoutBuffer = '';
+                }
+
                 stdoutDone = true;
                 if (resolveWaiter !== null) {
                     resolveWaiter();
@@ -401,16 +440,40 @@ class ClaudeShellProvider implements LlmProvider {
                 continue;
             }
 
-            const chunk = stdoutQueue.shift() as string;
-            if (chunk.length > 0) yield {token: chunk};
+            const line = stdoutQueue.shift() as string;
+            let parsed: ClaudeStreamEvent;
+
+            try {
+                parsed = JSON.parse(line) as ClaudeStreamEvent;
+            } catch {
+                continue;
+            }
+
+            // Partial messages arrive as `{type: 'stream_event', event: {type, delta}}`.
+            // The Anthropic SDK shape uses content_block_delta with `delta.text`.
+            const ev = parsed.event;
+            if (ev?.type === 'content_block_delta' && typeof ev.delta?.text === 'string') {
+                yield {token: ev.delta.text};
+            } else if (parsed.type === 'content_block_delta' && typeof parsed.delta?.text === 'string') {
+                yield {token: parsed.delta.text};
+            }
+
+            const out = parsed.usage?.output_tokens
+                ?? parsed.message?.usage?.output_tokens;
+
+            if (typeof out === 'number') totalTokens = out;
+
+            if (parsed.is_error === true || parsed.subtype === 'error') {
+                throw new Error(`claude-shell error: ${parsed.result ?? JSON.stringify(parsed)}`);
+            }
         }
 
         const code = await exitPromise;
         if (code !== 0) {
-            throw new Error(`claude-shell exited ${code}: ${stderr.trim()}`);
+            throw new Error(`claude-shell exited ${code}: ${stderr.trim() || stdoutBuffer.trim()}`);
         }
 
-        yield {done: true};
+        yield {done: true, ...(totalTokens > 0 ? {totalTokens} : {})};
     }
 }
 

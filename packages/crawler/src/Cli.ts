@@ -167,6 +167,61 @@ const runCrawler = async (name: string): Promise<number> => {
         return failed === 0 ? 0 : 1;
     }
 
+    if (name === 'relink') {
+        const prefix = args[1] ?? 'Crawler/';
+        const force = args.includes('--force');
+        const useLlm = args.includes('--llm');
+        const limitArg = args.find((a) => a.startsWith('--limit='));
+        const limit = limitArg !== undefined ? Number.parseInt(limitArg.slice(8), 10) : Number.POSITIVE_INFINITY;
+
+        const service = new SynaipseService(config);
+        await service.start();
+
+        if (useLlm && !service.chatEnabled()) {
+            process.stderr.write('relink --llm requires a configured LLM provider — set SYNAIPSE_CHAT_PROVIDER + model\n');
+            return 2;
+        }
+
+        const all = service.listNotes();
+        const targets = all.filter((n) =>
+            n.id.startsWith(prefix)
+            && !n.id.endsWith('.compiled.md')
+        );
+
+        const mode = useLlm ? `llm (${service.getChatProviderKind()}:${service.getChatModel()})` : 'top-5 fulltext';
+        log(`[relink] ${targets.length} candidates under ${prefix} (mode=${mode})`);
+
+        let done = 0;
+        let skipped = 0;
+        let failed = 0;
+        const started = Date.now();
+
+        for (const note of targets) {
+            if (done + skipped + failed >= limit) break;
+
+            try {
+                const result = await service.relinkNote(note.id, {useLlm, force});
+
+                if (result.skipped) {
+                    skipped += 1;
+                } else if (result.accepted.length === 0) {
+                    skipped += 1;
+                    log(`[relink] ○ ${note.id} (no related)`);
+                } else {
+                    done += 1;
+                    log(`[relink] ✓ ${note.id} → ${result.accepted.length} links`);
+                }
+            } catch (cause) {
+                failed += 1;
+                log(`[relink] ! ${note.id}: ${String(cause)}`);
+            }
+        }
+
+        const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+        log(`[relink] done in ${elapsed}s — linked ${done}, skipped ${skipped}, failed ${failed}`);
+        return failed === 0 ? 0 : 1;
+    }
+
     process.stderr.write(`unknown crawler: ${name}\n`);
     return 2;
 };
