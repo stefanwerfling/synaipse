@@ -4,8 +4,29 @@ import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
+import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
+import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
+import {
+    createWebSearchProvider,
+    runResearch,
+    type ResearchEvent,
+    type WebSearchConfig,
+    type WebSearchProvider
+} from './Research.js';
+import {
+    renderChatgptConversation,
+    type ChatgptImportConversation
+} from './ChatgptImport.js';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {WriteAssetResult} from './Assets.js';
+export type {CompileEvent, CompileResult} from './Compile.js';
+export type {LlmConfig, LlmProvider, LlmProviderKind} from './Llm.js';
+export type {ResearchEvent, WebSearchConfig, WebSearchProvider} from './Research.js';
+export type {
+    ChatgptImportAttachment,
+    ChatgptImportConversation,
+    ChatgptImportMessage
+} from './ChatgptImport.js';
 
 export interface SnapshotEntry {
     name: string;
@@ -109,6 +130,54 @@ const isPathNotFound = (err: unknown): boolean => {
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
 const SEMANTIC_SAMPLE_CHARS = 1500;
 
+type ChatConfigField = NonNullable<Config['chat']>;
+type ResearchConfigField = NonNullable<Config['research']>;
+
+const toWebSearchConfig = (research: ResearchConfigField): WebSearchConfig => {
+    if (research.provider === 'tavily') {
+        return {kind: 'tavily', apiKey: research.apiKey ?? ''};
+    }
+    return {kind: 'searxng', url: research.url ?? ''};
+};
+
+const toLlmConfig = (chat: ChatConfigField): LlmConfig => {
+    if (chat.provider === 'ollama') {
+        return {kind: 'ollama', url: chat.url ?? 'http://localhost:11434', model: chat.model};
+    }
+
+    if (chat.provider === 'openai') {
+        return {
+            kind: 'openai',
+            url: chat.url ?? 'https://api.openai.com',
+            model: chat.model,
+            ...(chat.apiKey !== undefined ? {apiKey: chat.apiKey} : {})
+        };
+    }
+
+    if (chat.provider === 'anthropic') {
+        return {
+            kind: 'anthropic',
+            model: chat.model,
+            apiKey: chat.apiKey ?? '',
+            ...(chat.url !== undefined ? {url: chat.url} : {})
+        };
+    }
+
+    return {kind: 'claude-shell', command: chat.command ?? 'claude', model: chat.model};
+};
+
+const slugifyForPath = (input: string): string => {
+    const out = input
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+
+    return out.length === 0 ? 'chat' : out;
+};
+
 export type VaultChangeListener = (event: VaultEvent & {noteId: NoteId}) => void;
 
 export class SynaipseService {
@@ -119,7 +188,8 @@ export class SynaipseService {
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
-    private readonly chatProvider: {url: string; model: string} | null;
+    private readonly chatProvider: LlmProvider | null;
+    private readonly researchProvider: WebSearchProvider | null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -137,7 +207,11 @@ export class SynaipseService {
         this.project = config.project?.name ?? null;
         this.configProjectExtraTags = config.project?.extraTags ?? [];
         this.chatProvider = config.chat !== undefined
-            ? {url: config.chat.url, model: config.chat.model}
+            ? createLlmProvider(toLlmConfig(config.chat))
+            : null;
+
+        this.researchProvider = config.research !== undefined
+            ? createWebSearchProvider(toWebSearchConfig(config.research))
             : null;
 
         const embedder = createEmbedder(config);
@@ -373,6 +447,40 @@ export class SynaipseService {
         return this.chatProvider?.model ?? null;
     }
 
+    public getChatProviderKind(): LlmProviderKind | null {
+        return this.chatProvider?.kind ?? null;
+    }
+
+    public researchEnabled(): boolean {
+        return this.researchProvider !== null && this.chatProvider !== null;
+    }
+
+    public getResearchProviderKind(): 'tavily' | 'searxng' | null {
+        return this.researchProvider?.kind ?? null;
+    }
+
+    public async *research(question: string, opts: {abort?: AbortSignal} = {}): AsyncGenerator<ResearchEvent, void, void> {
+        if (this.chatProvider === null) {
+            yield {kind: 'error', message: 'chat LLM not configured — set SYNAIPSE_CHAT_PROVIDER'};
+            return;
+        }
+
+        if (this.researchProvider === null) {
+            yield {kind: 'error', message: 'research not configured — set SYNAIPSE_RESEARCH_PROVIDER (tavily or searxng)'};
+            return;
+        }
+
+        yield* runResearch(
+            {llm: this.chatProvider, search: this.researchProvider},
+            {question, ...(opts.abort !== undefined ? {abort: opts.abort} : {})}
+        );
+    }
+
+    /** Exposed so other features (crawler-compile, deep-research) can borrow the configured LLM. */
+    public getChatProvider(): LlmProvider | null {
+        return this.chatProvider;
+    }
+
     public async *summarizeNote(id: NoteId, opts: {abort?: AbortSignal; saveToFrontmatter?: boolean; projectOverride?: string | null} = {}): AsyncGenerator<SummarizeEvent, void, void> {
         const provider = this.chatProvider;
 
@@ -595,6 +703,169 @@ export class SynaipseService {
         this.fulltextIndex.addNote(note);
         this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
         return note;
+    }
+
+    /** Map of ChatGPT conversation UUID → existing vault note id, scanning frontmatter.chatgpt_id. */
+    public listChatgptImports(): Map<string, NoteId> {
+        const out = new Map<string, NoteId>();
+
+        for (const note of this.vault.list()) {
+            const id = note.frontmatter.chatgpt_id;
+
+            if (typeof id === 'string' && id.length > 0) {
+                out.set(id, note.id);
+            }
+        }
+
+        return out;
+    }
+
+    public async *compileNote(
+        id: NoteId,
+        opts: {abort?: AbortSignal; force?: boolean} = {}
+    ): AsyncGenerator<CompileEvent & {compiledPath?: NoteId}, void, void> {
+        const provider = this.chatProvider;
+
+        if (provider === null) {
+            yield {kind: 'error', message: 'chat not configured — set SYNAIPSE_CHAT_PROVIDER + model'};
+            return;
+        }
+
+        const note = this.vault.tryGet(id);
+
+        if (note === undefined) {
+            yield {kind: 'error', message: `note not found: ${id}`};
+            return;
+        }
+
+        // Sibling note path: drop the .md suffix, append .compiled.md
+        const compiledPath = id.replace(/\.md$/i, '.compiled.md');
+        const existing = this.vault.tryGet(compiledPath);
+
+        if (existing !== undefined && opts.force !== true) {
+            const sourceHash = existing.frontmatter.source_hash;
+            if (sourceHash === note.hash) {
+                yield {kind: 'done', result: null, compiledPath};
+                return;
+            }
+        }
+
+        let final: CompileResult | null = null;
+
+        for await (const event of runCompile(provider, note.content, opts.abort)) {
+            yield event;
+            if (event.kind === 'done') final = event.result;
+        }
+
+        if (final === null) return;
+
+        const markdown = renderCompiledMarkdown(note.id, note.title, final);
+
+        const written = await this.vault.write({
+            path: compiledPath,
+            content: markdown,
+            frontmatter: {
+                title: `${note.title} — compiled`,
+                source_note: note.id,
+                source_hash: note.hash,
+                source: 'compiled',
+                tags: ['compiled', ...(note.tags.length > 0 ? [note.tags[0] as string] : [])],
+                compiled_with: `${provider.kind}:${provider.model}`,
+                compiled_at: new Date().toISOString().slice(0, 10)
+            }
+        }, {message: `synaipse: compile ${compiledPath}`});
+
+        if (this.index !== null) await this.index.indexNote(written);
+        this.fulltextIndex.addNote(written);
+        this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
+
+        yield {kind: 'done', result: final, compiledPath: written.id};
+    }
+
+    public async clipPage(input: {
+        url: string;
+        title: string;
+        markdown: string;
+        tags?: readonly string[];
+        excerpt?: string;
+    }): Promise<{noteId: NoteId; isUpdate: boolean}> {
+        // Idempotency by URL: scan vault for an existing clip with the same source URL.
+        let existingId: NoteId | undefined;
+
+        for (const note of this.vault.list()) {
+            if (note.frontmatter.source_url === input.url) {
+                existingId = note.id;
+                break;
+            }
+        }
+
+        const now = new Date();
+        const date = now.toISOString().slice(0, 10);
+        const slug = slugifyForPath(input.title);
+        const writePath = existingId ?? `Clipped/${date}-${slug}.md`;
+
+        const frontmatter: Record<string, unknown> = {
+            title: input.title,
+            source_url: input.url,
+            source: 'web-clipper',
+            created: date,
+            updated: date,
+            tags: [...new Set(['clipped', ...(input.tags ?? [])])]
+        };
+
+        if (input.excerpt !== undefined && input.excerpt.length > 0) {
+            frontmatter.excerpt = input.excerpt;
+        }
+
+        const body = `# ${input.title}\n\n> Source: <${input.url}>\n\n${input.markdown.trim()}\n`;
+
+        const note = await this.vault.write(
+            {path: writePath, content: body, frontmatter},
+            {message: `synaipse: clip ${writePath}`}
+        );
+
+        if (this.index !== null) await this.index.indexNote(note);
+        this.fulltextIndex.addNote(note);
+        this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+
+        return {noteId: note.id, isUpdate: existingId !== undefined};
+    }
+
+    public async importChatgptConversation(
+        conv: ChatgptImportConversation
+    ): Promise<{noteId: NoteId; isUpdate: boolean}> {
+        const existingMap = this.listChatgptImports();
+        const existingId = existingMap.get(conv.id);
+
+        const writePath = existingId ?? `chatgpt-import/${conv.id}/${slugifyForPath(conv.title)}.md`;
+
+        const pointerToRelative = new Map<string, string>();
+
+        for (const att of conv.attachments) {
+            const buf = Buffer.from(att.dataBase64, 'base64');
+            const result = await this.writeNoteAsset(writePath, buf, att.mimeType);
+            pointerToRelative.set(att.assetPointer, result.relativePath);
+        }
+
+        const rendered = renderChatgptConversation(conv, (ptr) => pointerToRelative.get(ptr) ?? null);
+
+        const note = await this.vault.write(
+            {
+                path: writePath,
+                content: rendered.content,
+                frontmatter: rendered.frontmatter
+            },
+            {message: `synaipse: import_chatgpt ${writePath}`}
+        );
+
+        if (this.index !== null) {
+            await this.index.indexNote(note);
+        }
+
+        this.fulltextIndex.addNote(note);
+        this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+
+        return {noteId: note.id, isUpdate: existingId !== undefined};
     }
 
     public async deleteNote(id: NoteId, opts?: ProjectOpts): Promise<void> {

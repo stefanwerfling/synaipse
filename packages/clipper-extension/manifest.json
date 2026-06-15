@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Synaipse Web Clipper",
+  "version": "0.1.0",
+  "description": "Clip the current page into your local Synaipse vault.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Clip to Synaipse",
+    "default_popup": "src/popup.html"
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": false
+  },
+  "icons": {
+    "128": "src/icon-128.png"
+  }
+}

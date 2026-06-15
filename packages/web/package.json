@@ -18,13 +18,16 @@
     "@synaipse/service": "*",
     "@synaipse/vault": "*",
     "@synaipse/vector": "*",
+    "@types/turndown": "^5.0.6",
     "3d-force-graph": "^1.74.0",
     "cytoscape": "^3.30.4",
     "dotenv": "^16.4.7",
     "highlight.js": "^11.11.1",
+    "jszip": "^3.10.1",
     "marked": "^15.0.4",
     "marked-highlight": "^2.2.4",
-    "three": "^0.171.0"
+    "three": "^0.171.0",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.21.8",

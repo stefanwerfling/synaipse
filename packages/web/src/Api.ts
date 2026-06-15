@@ -56,7 +56,17 @@ export const api = {
     getGraph: async (): Promise<Graph> => {
         return json(await fetch('/api/graph'));
     },
-    getInfo: async (): Promise<{semanticEnabled: boolean; notesCount: number; project: string | null; historyEnabled: boolean; chatEnabled: boolean; chatModel: string | null}> => {
+    getInfo: async (): Promise<{
+        semanticEnabled: boolean;
+        notesCount: number;
+        project: string | null;
+        historyEnabled: boolean;
+        chatEnabled: boolean;
+        chatModel: string | null;
+        chatProvider: 'ollama' | 'openai' | 'anthropic' | 'claude-shell' | null;
+        researchEnabled: boolean;
+        researchProvider: 'tavily' | 'searxng' | null;
+    }> => {
         return json(await fetch('/api/info'));
     },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {
@@ -145,6 +155,46 @@ export type SummarizeEvent =
     | {kind: 'token'; text: string}
     | {kind: 'done'; summary: string}
     | {kind: 'error'; message: string};
+
+export interface ChatgptImportAttachment {
+    assetPointer: string;
+    filename: string;
+    mimeType: string | null;
+    dataBase64: string;
+}
+
+export interface ChatgptImportMessage {
+    role: 'user' | 'assistant' | 'system';
+    text: string;
+    createTime: number | null;
+    assetPointers?: string[];
+}
+
+export interface ChatgptImportConversation {
+    id: string;
+    title: string;
+    createTime: number;
+    updateTime: number;
+    model: string | null;
+    messages: ChatgptImportMessage[];
+    attachments: ChatgptImportAttachment[];
+}
+
+export const importApi = {
+    listExisting: async (): Promise<Record<string, string>> => {
+        return json(await fetch('/api/import/chatgpt/existing'));
+    },
+    importConversation: async (
+        conversation: ChatgptImportConversation
+    ): Promise<{noteId: string; isUpdate: boolean}> => {
+        const response = await fetch('/api/import/chatgpt', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({conversation})
+        });
+        return json(response);
+    }
+};
 
 export interface AssetUploadResult {
     assetId: string;

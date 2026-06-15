@@ -1,6 +1,6 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Frontmatter} from '@synaipse/core';
-import type {SynaipseService} from '@synaipse/service';
+import type {ChatgptImportConversation, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
@@ -278,6 +278,117 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
         return;
     }
 
+    if (path === '/api/clip') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        // Permissive CORS so a browser extension content script can POST
+        // without preflight gymnastics. The server only listens on localhost
+        // so this is safe by default.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        const body = await readJson<{
+            url?: unknown;
+            title?: unknown;
+            html?: unknown;
+            markdown?: unknown;
+            selection?: unknown;
+            tags?: unknown;
+            excerpt?: unknown;
+        }>(req);
+
+        const url = asString(body.url, 'url');
+        const title = asString(body.title, 'title');
+
+        let markdown: string;
+
+        if (typeof body.markdown === 'string' && body.markdown.length > 0) {
+            markdown = body.markdown;
+        } else if (typeof body.html === 'string' && body.html.length > 0) {
+            const {default: TurndownService} = await import('turndown');
+            const td = new TurndownService({headingStyle: 'atx', codeBlockStyle: 'fenced'});
+            markdown = td.turndown(body.html);
+        } else {
+            json(res, 400, {error: "either 'markdown' or 'html' must be provided"});
+            return;
+        }
+
+        if (typeof body.selection === 'string' && body.selection.length > 0) {
+            markdown = `> **Selection:**\n> \n> ${body.selection.replace(/\n/g, '\n> ')}\n\n---\n\n${markdown}`;
+        }
+
+        const tags = Array.isArray(body.tags)
+            ? body.tags.filter((t): t is string => typeof t === 'string')
+            : [];
+        const excerpt = typeof body.excerpt === 'string' ? body.excerpt : undefined;
+
+        try {
+            const result = await service.clipPage({
+                url,
+                title,
+                markdown,
+                tags,
+                ...(excerpt !== undefined ? {excerpt} : {})
+            });
+            json(res, 200, result);
+        } catch (error) {
+            json(res, 500, {error: String(error)});
+        }
+
+        return;
+    }
+
+    if (method === 'OPTIONS' && path === '/api/clip') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
+    if (path === '/api/import/chatgpt/existing') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const map: Record<string, string> = {};
+
+        for (const [chatgptId, noteId] of service.listChatgptImports().entries()) {
+            map[chatgptId] = noteId;
+        }
+
+        json(res, 200, map);
+        return;
+    }
+
+    if (path === '/api/import/chatgpt') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const body = await readJson<{conversation?: unknown}>(req);
+        const conv = body.conversation;
+
+        if (typeof conv !== 'object' || conv === null) {
+            json(res, 400, {error: "field 'conversation' must be object"});
+            return;
+        }
+
+        try {
+            const result = await service.importChatgptConversation(conv as ChatgptImportConversation);
+            json(res, 200, result);
+        } catch (error) {
+            json(res, 500, {error: String(error)});
+        }
+
+        return;
+    }
+
     if (path === '/api/sessions/log') {
         if (method !== 'POST') {
             methodNotAllowed(res);
@@ -364,8 +475,41 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             project: service.getProject(),
             historyEnabled: await service.historyEnabled(),
             chatEnabled: service.chatEnabled(),
-            chatModel: service.getChatModel()
+            chatModel: service.getChatModel(),
+            chatProvider: service.getChatProviderKind(),
+            researchEnabled: service.researchEnabled(),
+            researchProvider: service.getResearchProviderKind()
         });
+        return;
+    }
+
+    if (path === '/api/research') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const body = await readJson<{question?: unknown}>(req);
+        const question = asString(body.question, 'question');
+
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive'
+        });
+
+        const ctl = new AbortController();
+        req.on('close', () => ctl.abort());
+
+        try {
+            for await (const event of service.research(question, {abort: ctl.signal})) {
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+        } catch (error) {
+            res.write(`data: ${JSON.stringify({kind: 'error', message: String(error)})}\n\n`);
+        }
+
+        res.end();
         return;
     }
 

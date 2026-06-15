@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Clip to Synaipse</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup">
+        <header>
+            <h1>Synaipse</h1>
+            <span id="server-status" class="status">…</span>
+        </header>
+
+        <label class="field">
+            <span>Title</span>
+            <input id="title" type="text" />
+        </label>
+
+        <label class="field">
+            <span>Tags (comma-separated)</span>
+            <input id="tags" type="text" placeholder="research, ml, ..." />
+        </label>
+
+        <label class="field option">
+            <input id="selection-only" type="checkbox" />
+            <span>Clip selection only (if any)</span>
+        </label>
+
+        <button id="clip" class="primary">Clip page</button>
+
+        <p id="result" class="result"></p>
+    </div>
+    <script src="popup.js" type="module"></script>
+</body>
+</html>

@@ -9,6 +9,7 @@ export interface GraphRendererState {
     showHeat: boolean;
     showRoomGrid: boolean;
     showCluster: boolean;
+    showCommunities: boolean;
 }
 
 export interface GraphRendererCallbacks {

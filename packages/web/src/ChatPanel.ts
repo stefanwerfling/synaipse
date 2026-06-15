@@ -41,9 +41,11 @@ export class ChatPanel {
     private currentAbort: AbortController | null = null;
     private model = '—';
     private enabled = false;
+    private researchEnabled = false;
     private stickyContext: {label: string; text: string} | null = null;
     private stickyHost!: HTMLElement;
     private readonly saveBtn: HTMLButtonElement;
+    private readonly researchBtn: HTMLButtonElement;
 
     public constructor(private readonly cb: ChatPanelCallbacks) {
         this.element = el('div', {class: 'chat-panel'});
@@ -96,6 +98,15 @@ export class ChatPanel {
             on: {click: () => void this.send()}
         }) as HTMLButtonElement;
 
+        this.researchBtn = el('button', {
+            class: 'chat-research',
+            attrs: {type: 'button', title: 'Search the web and answer from those sources instead of the vault'},
+            text: '🔎 Web',
+            on: {click: () => void this.send({research: true})}
+        }) as HTMLButtonElement;
+
+        this.researchBtn.hidden = true;
+
         this.stopBtn = el('button', {
             class: 'chat-stop',
             attrs: {type: 'button', title: 'Stop streaming response'},
@@ -105,7 +116,7 @@ export class ChatPanel {
 
         this.stopBtn.hidden = true;
 
-        const inputRow = el('div', {class: 'chat-input-row'}, this.input, this.stopBtn, this.sendBtn);
+        const inputRow = el('div', {class: 'chat-input-row'}, this.input, this.stopBtn, this.researchBtn, this.sendBtn);
 
         this.element.appendChild(head);
         this.element.appendChild(this.thread);
@@ -115,15 +126,24 @@ export class ChatPanel {
         this.restore();
     }
 
-    public setInfo(enabled: boolean, model: string | null): void {
+    public setInfo(enabled: boolean, model: string | null, provider?: string | null, research?: boolean): void {
         this.enabled = enabled;
+        this.researchEnabled = research === true;
         this.model = model ?? '—';
-        this.modelLabel.textContent = model ?? 'chat disabled';
+
+        const label = enabled
+            ? (provider !== null && provider !== undefined && provider.length > 0
+                ? `${provider} · ${model ?? '—'}`
+                : (model ?? '—'))
+            : 'chat disabled';
+
+        this.modelLabel.textContent = label;
+        this.researchBtn.hidden = !this.researchEnabled;
 
         if (!enabled) {
             clear(this.thread);
             this.thread.appendChild(
-                el('div', {class: 'chat-empty', text: 'Local chat is not configured. Set SYNAIPSE_CHAT_URL and SYNAIPSE_CHAT_MODEL, then start the ollama container.'})
+                el('div', {class: 'chat-empty', text: 'Chat not configured. Set SYNAIPSE_CHAT_PROVIDER + model in your .env (see .env.example for ollama / openai / anthropic / claude-shell).'})
             );
             this.input.disabled = true;
             return;
@@ -349,7 +369,7 @@ export class ChatPanel {
         this.input.disabled = active;
     }
 
-    private async send(): Promise<void> {
+    private async send(opts: {research?: boolean} = {}): Promise<void> {
         if (!this.enabled || this.streaming) return;
 
         const rawQuestion = this.input.value.trim();
@@ -381,10 +401,15 @@ export class ChatPanel {
         this.currentAbort = new AbortController();
 
         try {
-            const response = await fetch('/api/chat', {
+            const endpoint = opts.research === true ? '/api/research' : '/api/chat';
+            const payload = opts.research === true
+                ? {question}
+                : {question, history};
+
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({question, history}),
+                body: JSON.stringify(payload),
                 signal: this.currentAbort.signal
             });
 
@@ -436,7 +461,25 @@ export class ChatPanel {
             if (typeof event.model === 'string') {
                 target.model = event.model;
             }
+        } else if (event.kind === 'sources') {
+            // Research path: web results — represent them as ChatSources with url in title.
+            const raw = (event.sources as Array<{index: number; url: string; title: string; snippet: string}> | undefined) ?? [];
+            target.sources = raw.map((s) => ({
+                index: s.index,
+                noteId: s.url,
+                title: s.title,
+                score: 0,
+                snippet: s.snippet
+            }));
+            target.model = `research · ${this.model}`;
+        } else if (event.kind === 'status') {
+            // Brief inline status — append as italic prefix, then strip on first token.
+            if (target.text.length === 0) {
+                target.text = `_${String(event.message)}_`;
+            }
         } else if (event.kind === 'token') {
+            // First real token: drop the italic status placeholder, if any.
+            if (target.text.startsWith('_') && target.text.endsWith('_')) target.text = '';
             target.text += String(event.text ?? '');
         } else if (event.kind === 'error') {
             target.text += `\n\n[error: ${String(event.message)}]`;

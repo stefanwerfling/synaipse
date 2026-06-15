@@ -1290,8 +1290,26 @@ body {
 }
 
 .chat-stop[hidden],
-.chat-send[hidden] {
+.chat-send[hidden],
+.chat-research[hidden] {
     display: none;
+}
+
+.chat-research {
+    align-self: flex-end;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 8px 12px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--t-fast);
+}
+
+.chat-research:hover {
+    background: var(--accent-soft);
 }
 
 .chat-save {
@@ -1448,6 +1466,291 @@ body {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
+}
+
+.topbar-import {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-2);
+    padding: 6px 14px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.topbar-import:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.import-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.import-dialog {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    width: min(960px, 100%);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+
+.import-head {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.import-head h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-0);
+}
+
+.import-close {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+}
+
+.import-close:hover {
+    color: var(--red);
+}
+
+.import-dropzone {
+    margin: var(--space-4);
+    padding: var(--space-6, 32px) var(--space-4);
+    border: 2px dashed var(--border-soft);
+    border-radius: var(--r-3);
+    text-align: center;
+    cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast);
+}
+
+.import-dropzone:hover,
+.import-dropzone.dragging {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+.import-dropzone-icon {
+    font-size: 32px;
+    color: var(--accent);
+    margin-bottom: var(--space-2);
+}
+
+.import-dropzone-text {
+    margin: 0 0 4px;
+    color: var(--text-1);
+    font-weight: 600;
+}
+
+.import-dropzone-hint {
+    margin: 0;
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.import-loading,
+.import-empty {
+    padding: var(--space-6, 32px) var(--space-4);
+    text-align: center;
+    color: var(--text-3);
+}
+
+.import-error {
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--red);
+}
+
+.import-error h3 {
+    margin: 0 0 var(--space-2);
+}
+
+.import-toolbar {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+.import-filter {
+    flex: 1 1 auto;
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: 6px 10px;
+    color: var(--text-0);
+    font: inherit;
+    font-size: 13px;
+}
+
+.import-filter:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+}
+
+.import-split {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    min-height: 360px;
+    overflow: hidden;
+}
+
+.import-list {
+    overflow-y: auto;
+    border-right: 1px solid var(--border-soft);
+}
+
+.import-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    cursor: pointer;
+}
+
+.import-row:hover {
+    background: var(--bg-0);
+}
+
+.import-row.active {
+    background: var(--accent-soft);
+}
+
+.import-row-check {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.import-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.import-row-title {
+    color: var(--text-0);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-row-meta {
+    color: var(--text-3);
+    font-size: 11px;
+    display: flex;
+    gap: var(--space-2);
+    margin-top: 2px;
+}
+
+.import-row-model {
+    color: var(--accent);
+}
+
+.import-row-badge {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.import-row-badge.new {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.import-row-badge.update {
+    background: rgba(255, 200, 100, 0.15);
+    color: #ffc864;
+}
+
+.import-preview {
+    overflow-y: auto;
+    padding: var(--space-4);
+}
+
+.import-preview-title {
+    margin: 0 0 var(--space-3);
+    color: var(--text-0);
+    font-size: 15px;
+}
+
+.import-preview-meta {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 4px var(--space-3);
+    margin: 0 0 var(--space-3);
+    font-size: 12px;
+}
+
+.import-preview-meta dt {
+    color: var(--text-3);
+}
+
+.import-preview-meta dd {
+    margin: 0;
+    color: var(--text-1);
+    word-break: break-all;
+}
+
+.import-preview-excerpt-label {
+    color: var(--text-3);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--space-2);
+}
+
+.import-preview-excerpt {
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: var(--space-3);
+    color: var(--text-1);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.import-footer {
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.import-status {
+    flex: 1 1 auto;
+    color: var(--text-3);
+    font-size: 12px;
 }
 
 .palette-wrap {

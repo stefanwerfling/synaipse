@@ -11,6 +11,7 @@ dotenvConfig({path: path.join(repoRoot, '.env')});
 
 const {loadConfigFromEnv} = await import('@synaipse/core');
 const {Vault} = await import('@synaipse/vault');
+const {SynaipseService} = await import('@synaipse/service');
 const {GitHubStarsCrawler} = await import('./GitHubStars.js');
 const {DevToCrawler} = await import('./DevTo.js');
 
@@ -95,6 +96,75 @@ const runCrawler = async (name: string): Promise<number> => {
         }
 
         return report.errors.length === 0 ? 0 : 1;
+    }
+
+    if (name === 'compile') {
+        const prefix = args[1] ?? 'Crawler/';
+        const force = args.includes('--force');
+        const limitArg = args.find((a) => a.startsWith('--limit='));
+        const limit = limitArg !== undefined ? Number.parseInt(limitArg.slice(8), 10) : Number.POSITIVE_INFINITY;
+
+        const service = new SynaipseService(config);
+        await service.start();
+
+        if (!service.chatEnabled()) {
+            process.stderr.write('compile requires a configured LLM provider — set SYNAIPSE_CHAT_PROVIDER + model\n');
+            return 2;
+        }
+
+        const all = service.listNotes();
+        const targets = all.filter((n) =>
+            n.id.startsWith(prefix)
+            && !n.id.endsWith('.compiled.md')
+            && (n.frontmatter.source !== 'compiled')
+        );
+
+        log(`[compile] ${targets.length} candidates under ${prefix} (model=${service.getChatProviderKind()}:${service.getChatModel()})`);
+
+        let done = 0;
+        let skipped = 0;
+        let failed = 0;
+        const started = Date.now();
+
+        for (const note of targets) {
+            if (done + skipped + failed >= limit) break;
+
+            try {
+                let compiled = false;
+
+                for await (const event of service.compileNote(note.id, {force})) {
+                    if (event.kind === 'error') {
+                        log(`[compile] ! ${note.id}: ${event.message}`);
+                        failed += 1;
+                        break;
+                    }
+
+                    if (event.kind === 'done') {
+                        if (event.result === null && event.compiledPath !== undefined) {
+                            // skipped (no rebuild needed) or JSON parse failed
+                            skipped += 1;
+                        } else if (event.result !== null) {
+                            done += 1;
+                            compiled = true;
+                            log(`[compile] ✓ ${note.id} → ${event.compiledPath ?? '?'}`);
+                        } else {
+                            failed += 1;
+                            log(`[compile] ! ${note.id}: LLM output did not parse as JSON`);
+                        }
+                        break;
+                    }
+                }
+
+                void compiled;
+            } catch (cause) {
+                failed += 1;
+                log(`[compile] ! ${note.id}: ${String(cause)}`);
+            }
+        }
+
+        const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+        log(`[compile] done in ${elapsed}s — compiled ${done}, skipped ${skipped}, failed ${failed}`);
+        return failed === 0 ? 0 : 1;
     }
 
     process.stderr.write(`unknown crawler: ${name}\n`);

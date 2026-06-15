@@ -13,6 +13,7 @@ export interface TagBarState {
     showHeat: boolean;
     showRoomGrid: boolean;
     showCluster: boolean;
+    showCommunities: boolean;
     threeD: boolean;
     project: string | null;
 }
@@ -25,6 +26,7 @@ export interface TagBarCallbacks {
     onToggleHeat: () => void;
     onToggleRoomGrid: () => void;
     onToggleCluster: () => void;
+    onToggleCommunities: () => void;
     onToggle3D: () => void;
 }
 
@@ -67,7 +69,8 @@ export class TagBar {
             this.segmentToggle('heat', this.state.showHeat, () => this.cb.onToggleHeat()),
             this.segmentToggle('hulls', this.state.showHulls, () => this.cb.onToggleHulls()),
             this.segmentToggle('room', this.state.showRoomGrid, () => this.cb.onToggleRoomGrid()),
-            this.segmentToggle('cluster', this.state.showCluster, () => this.cb.onToggleCluster())
+            this.segmentToggle('cluster', this.state.showCluster, () => this.cb.onToggleCluster()),
+            this.segmentToggle('communities', this.state.showCommunities, () => this.cb.onToggleCommunities())
         );
 
         const filterGroup = el('div', {class: 'control-group', attrs: {role: 'group', 'aria-label': 'filter'}},

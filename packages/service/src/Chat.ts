@@ -1,4 +1,5 @@
 import type {SearchHit} from '@synaipse/core';
+import type {LlmProvider} from './Llm.js';
 
 export interface ChatSource {
     index: number;
@@ -28,6 +29,7 @@ export interface ChatOptions {
     history?: readonly ChatMessage[];
 }
 
+/** @deprecated kept as type alias for tests. Real config now flows through LlmConfig. */
 export interface ChatProviderConfig {
     url: string;
     model: string;
@@ -44,7 +46,7 @@ export type SummarizeEvent =
     | {kind: 'error'; message: string};
 
 export async function* runSummarize(
-    provider: ChatProviderConfig,
+    provider: LlmProvider,
     noteContent: string,
     abort?: AbortSignal
 ): AsyncGenerator<SummarizeEvent, void, void> {
@@ -58,7 +60,11 @@ export async function* runSummarize(
     let summary = '';
 
     try {
-        for await (const event of streamOllamaChat(provider, SUMMARIZE_PROMPT, trimmed, abort)) {
+        for await (const event of provider.stream({
+            system: SUMMARIZE_PROMPT,
+            user: trimmed,
+            ...(abort !== undefined ? {abort} : {})
+        })) {
             if (event.token !== undefined) {
                 summary += event.token;
                 yield {kind: 'token', text: event.token};
@@ -103,125 +109,10 @@ const hitsToSources = (hits: SearchHit[], previews: Map<string, string>): ChatSo
     });
 };
 
-interface OllamaStreamLine {
-    message?: {role: string; content: string};
-    done?: boolean;
-    eval_count?: number;
-}
-
-const parseStreamLines = (chunk: string): OllamaStreamLine[] => {
-    const lines: OllamaStreamLine[] = [];
-
-    for (const raw of chunk.split('\n')) {
-        const line = raw.trim();
-
-        if (line.length === 0) {
-            continue;
-        }
-
-        try {
-            lines.push(JSON.parse(line) as OllamaStreamLine);
-        } catch {
-            // ignore bad JSON fragments — they appear when a chunk splits a line
-        }
-    }
-
-    return lines;
-};
-
-export async function* streamOllamaChat(
-    config: ChatProviderConfig,
-    system: string,
-    user: string,
-    abort?: AbortSignal,
-    history?: readonly ChatMessage[]
-): AsyncGenerator<{token?: string; totalTokens?: number; done?: boolean}, void, void> {
-    const fetchImpl = config.fetch ?? fetch;
-    const messages: Array<{role: string; content: string}> = [{role: 'system', content: system}];
-
-    if (history !== undefined) {
-        for (const m of history) {
-            messages.push({role: m.role, content: m.content});
-        }
-    }
-
-    messages.push({role: 'user', content: user});
-
-    const body = {
-        model: config.model,
-        messages,
-        stream: true
-    };
-
-    const init: RequestInit = {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-    };
-
-    if (abort !== undefined) {
-        init.signal = abort;
-    }
-
-    const response = await fetchImpl(`${config.url.replace(/\/$/, '')}/api/chat`, init);
-
-    if (!response.ok) {
-        throw new Error(`Ollama ${response.status}: ${await response.text()}`);
-    }
-
-    if (response.body === null) {
-        throw new Error('Ollama returned no body');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-        const {value, done} = await reader.read();
-
-        if (done) {
-            break;
-        }
-
-        buffer += decoder.decode(value, {stream: true});
-        const newlineIdx = buffer.lastIndexOf('\n');
-
-        if (newlineIdx === -1) {
-            continue;
-        }
-
-        const ready = buffer.slice(0, newlineIdx);
-        buffer = buffer.slice(newlineIdx + 1);
-
-        for (const parsed of parseStreamLines(ready)) {
-            if (parsed.message?.content !== undefined && parsed.message.content.length > 0) {
-                yield {token: parsed.message.content};
-            }
-
-            if (parsed.done) {
-                yield {done: true, ...(parsed.eval_count !== undefined ? {totalTokens: parsed.eval_count} : {})};
-            }
-        }
-    }
-
-    if (buffer.trim().length > 0) {
-        for (const parsed of parseStreamLines(buffer)) {
-            if (parsed.message?.content !== undefined && parsed.message.content.length > 0) {
-                yield {token: parsed.message.content};
-            }
-
-            if (parsed.done) {
-                yield {done: true, ...(parsed.eval_count !== undefined ? {totalTokens: parsed.eval_count} : {})};
-            }
-        }
-    }
-}
-
 export interface RunChatDeps {
     search: (q: string, prefix: string | undefined, limit: number) => Promise<SearchHit[]>;
     readNote: (id: string) => string | undefined;
-    provider: ChatProviderConfig;
+    provider: LlmProvider;
 }
 
 const SNIPPET_CHARS = 500;
@@ -260,7 +151,12 @@ export async function* runChat(
     let totalTokens = 0;
 
     try {
-        for await (const event of streamOllamaChat(deps.provider, SYSTEM_PROMPT, userPrompt, options.abort, options.history)) {
+        for await (const event of deps.provider.stream({
+            system: SYSTEM_PROMPT,
+            user: userPrompt,
+            ...(options.history !== undefined ? {history: options.history} : {}),
+            ...(options.abort !== undefined ? {abort: options.abort} : {})
+        })) {
             if (event.token !== undefined) {
                 yield {kind: 'token', text: event.token};
             }

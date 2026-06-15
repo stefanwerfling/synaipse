@@ -1,0 +1,9 @@
+{
+  "name": "@synaipse/clipper-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synaipse Web Clipper — Chrome MV3 extension that POSTs the current page to the local Synaipse server.",
+  "scripts": {
+    "pack": "cd packages/clipper-extension && zip -r ../../dist/synaipse-clipper.zip manifest.json src"
+  }
+}

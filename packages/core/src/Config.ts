@@ -37,6 +37,98 @@ const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'none' =
     throw new ConfigError(`EMBEDDINGS_PROVIDER must be one of voyage|ollama|none, got: ${raw}`);
 };
 
+const buildResearchConfig = (env: NodeJS.ProcessEnv): {
+    provider: 'tavily' | 'searxng';
+    apiKey?: string;
+    url?: string;
+} | null => {
+    const raw = env.SYNAIPSE_RESEARCH_PROVIDER?.trim().toLowerCase();
+    if (raw === undefined || raw === '' || raw === 'none') return null;
+
+    if (raw === 'tavily') {
+        const apiKey = env.SYNAIPSE_TAVILY_API_KEY?.trim();
+        if (apiKey === undefined || apiKey.length === 0) {
+            throw new ConfigError('SYNAIPSE_TAVILY_API_KEY is required for SYNAIPSE_RESEARCH_PROVIDER=tavily');
+        }
+        return {provider: 'tavily', apiKey};
+    }
+
+    if (raw === 'searxng') {
+        const url = env.SYNAIPSE_SEARXNG_URL?.trim();
+        if (url === undefined || url.length === 0) {
+            throw new ConfigError('SYNAIPSE_SEARXNG_URL is required for SYNAIPSE_RESEARCH_PROVIDER=searxng');
+        }
+        return {provider: 'searxng', url};
+    }
+
+    throw new ConfigError(`SYNAIPSE_RESEARCH_PROVIDER must be one of tavily|searxng|none, got: ${raw}`);
+};
+
+type ChatProviderKind = 'ollama' | 'openai' | 'anthropic' | 'claude-shell';
+
+const resolveChatProvider = (env: NodeJS.ProcessEnv): ChatProviderKind => {
+    const raw = (env.SYNAIPSE_CHAT_PROVIDER ?? 'ollama').toLowerCase();
+
+    if (raw === 'ollama' || raw === 'openai' || raw === 'anthropic' || raw === 'claude-shell') {
+        return raw;
+    }
+
+    throw new ConfigError(
+        `SYNAIPSE_CHAT_PROVIDER must be one of ollama|openai|anthropic|claude-shell, got: ${raw}`
+    );
+};
+
+const buildChatConfig = (env: NodeJS.ProcessEnv): {
+    provider: ChatProviderKind;
+    model: string;
+    url?: string;
+    apiKey?: string;
+    command?: string;
+} => {
+    const provider = resolveChatProvider(env);
+    const explicit = env.SYNAIPSE_CHAT_MODEL?.trim();
+    const apiKey = env.SYNAIPSE_CHAT_API_KEY?.trim();
+    const url = env.SYNAIPSE_CHAT_URL?.trim();
+    const command = env.SYNAIPSE_CHAT_COMMAND?.trim();
+
+    if (provider === 'ollama') {
+        return {
+            provider,
+            model: explicit !== undefined && explicit.length > 0 ? explicit : 'gemma3:4b',
+            url: url ?? env.OLLAMA_URL ?? 'http://localhost:11434'
+        };
+    }
+
+    if (provider === 'openai') {
+        return {
+            provider,
+            model: explicit !== undefined && explicit.length > 0 ? explicit : 'gpt-4o-mini',
+            url: url ?? 'https://api.openai.com',
+            ...(apiKey !== undefined && apiKey.length > 0 ? {apiKey} : {})
+        };
+    }
+
+    if (provider === 'anthropic') {
+        if (apiKey === undefined || apiKey.length === 0) {
+            throw new ConfigError('SYNAIPSE_CHAT_API_KEY is required for provider=anthropic');
+        }
+
+        return {
+            provider,
+            model: explicit !== undefined && explicit.length > 0 ? explicit : 'claude-sonnet-4-6',
+            apiKey,
+            ...(url !== undefined ? {url} : {})
+        };
+    }
+
+    // claude-shell: model is optional (CLI alias like 'sonnet' or 'opus'); command defaults to 'claude'
+    return {
+        provider,
+        model: explicit ?? '',
+        command: command !== undefined && command.length > 0 ? command : 'claude'
+    };
+};
+
 export const parseGitAuthor = (raw: string): {name: string; email: string} => {
     const match = raw.match(/^\s*(.+?)\s*<\s*(\S+@\S+)\s*>\s*$/);
 
@@ -117,11 +209,8 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
             }
             : {}),
         git: {autoCommit: gitEnabled, author: gitAuthor},
-        chat: {
-            provider: 'ollama' as const,
-            url: env.SYNAIPSE_CHAT_URL ?? env.OLLAMA_URL ?? 'http://localhost:11434',
-            model: env.SYNAIPSE_CHAT_MODEL ?? 'gemma3:4b'
-        }
+        chat: buildChatConfig(env),
+        ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {})
     };
 
     const errors: SchemaErrors = [];

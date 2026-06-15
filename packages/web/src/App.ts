@@ -7,6 +7,7 @@ import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
+import {ImportDialog} from './ImportDialog.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
@@ -20,6 +21,7 @@ const STORAGE_SHOW_HEAT = 'synaipse.graph.showHeat';
 const STORAGE_HEAT_STATE = 'synaipse.graph.heatState';
 const STORAGE_SHOW_ROOM_GRID = 'synaipse.graph.showRoomGrid';
 const STORAGE_SHOW_CLUSTER = 'synaipse.graph.showCluster';
+const STORAGE_SHOW_COMMUNITIES = 'synaipse.graph.showCommunities';
 const STORAGE_THREE_D = 'synaipse.graph.threeD';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
@@ -51,6 +53,7 @@ export class App {
     private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
+    private importDialog!: ImportDialog;
 
     private selectedTags: PersistentValue<ReadonlySet<string>>;
     private hideIsolated: PersistentValue<boolean>;
@@ -59,6 +62,7 @@ export class App {
     private heatState: PersistentValue<HeatState>;
     private showRoomGrid: PersistentValue<boolean>;
     private showCluster: PersistentValue<boolean>;
+    private showCommunities: PersistentValue<boolean>;
     private threeD: PersistentValue<boolean>;
     private heatTickTimer: number | null = null;
     private heatRaf: number | null = null;
@@ -76,6 +80,7 @@ export class App {
         this.heatState = new PersistentValue<HeatState>(STORAGE_HEAT_STATE, {});
         this.showRoomGrid = new PersistentValue<boolean>(STORAGE_SHOW_ROOM_GRID, false);
         this.showCluster = new PersistentValue<boolean>(STORAGE_SHOW_CLUSTER, false);
+        this.showCommunities = new PersistentValue<boolean>(STORAGE_SHOW_COMMUNITIES, false);
         this.threeD = new PersistentValue<boolean>(STORAGE_THREE_D, false);
 
         this.notesPanel = new NotesPanel({
@@ -91,6 +96,12 @@ export class App {
 
         this.chatPanel = new ChatPanel({
             onOpenNote: (noteId) => {
+                // Research results put the URL into noteId — open it externally.
+                if (noteId.startsWith('http://') || noteId.startsWith('https://')) {
+                    window.open(noteId, '_blank', 'noopener,noreferrer');
+                    return;
+                }
+
                 this.notesPanel.openNote(noteId);
                 void this.switchTab('notes');
             },
@@ -126,6 +137,13 @@ export class App {
                 void this.switchTab('notes');
             },
             onSwitchTab: (tab) => void this.switchTab(tab)
+        });
+
+        this.importDialog = new ImportDialog({
+            onNotesChanged: () => {
+                this.graph = null;
+                void this.loadNotes();
+            }
         });
 
         this.body = el('div', {style: {display: 'contents'}});
@@ -187,6 +205,13 @@ export class App {
         });
 
         this.showRoomGrid.subscribe(() => {
+            if (this.tab === 'graph') {
+                this.applyGraphFilter();
+                this.renderTagBar();
+            }
+        });
+
+        this.showCommunities.subscribe(() => {
             if (this.tab === 'graph') {
                 this.applyGraphFilter();
                 this.renderTagBar();
@@ -323,7 +348,7 @@ export class App {
             this.project = info.project;
             this.notesPanel.setHistoryEnabled(info.historyEnabled);
             this.notesPanel.setChatEnabled(info.chatEnabled);
-            this.chatPanel.setInfo(info.chatEnabled, info.chatModel);
+            this.chatPanel.setInfo(info.chatEnabled, info.chatModel, info.chatProvider, info.researchEnabled);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }
@@ -392,11 +417,19 @@ export class App {
             el('kbd', {text: '⌘K'})
         );
 
+        const importBtn = el('button', {
+            class: 'topbar-import',
+            attrs: {type: 'button', title: 'Import notes from external source'},
+            text: 'Import',
+            on: {click: () => void this.importDialog.open()}
+        });
+
         return el('header', {class: 'topbar'},
             brand,
             el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
+            importBtn,
             this.activityBtn
         );
     }
@@ -498,7 +531,8 @@ export class App {
             showHulls: this.showHulls.get(),
             showHeat: this.showHeat.get(),
             showRoomGrid: this.showRoomGrid.get(),
-            showCluster: this.showCluster.get()
+            showCluster: this.showCluster.get(),
+            showCommunities: this.showCommunities.get()
         };
 
         const callbacks = {
@@ -549,6 +583,7 @@ export class App {
             onToggleHeat: () => this.showHeat.update((v) => !v),
             onToggleRoomGrid: () => this.showRoomGrid.update((v) => !v),
             onToggleCluster: () => this.showCluster.update((v) => !v),
+            onToggleCommunities: () => this.showCommunities.update((v) => !v),
             onToggle3D: () => this.threeD.update((v) => !v)
         };
 
@@ -560,6 +595,7 @@ export class App {
             showHeat: this.showHeat.get(),
             showRoomGrid: this.showRoomGrid.get(),
             showCluster: this.showCluster.get(),
+            showCommunities: this.showCommunities.get(),
             threeD: this.threeD.get(),
             project: this.project
         };
@@ -589,7 +625,8 @@ export class App {
             showHulls: this.showHulls.get(),
             showHeat: this.showHeat.get(),
             showRoomGrid: this.showRoomGrid.get(),
-            showCluster: this.showCluster.get()
+            showCluster: this.showCluster.get(),
+            showCommunities: this.showCommunities.get()
         });
         this.scheduleHeatApply();
     }

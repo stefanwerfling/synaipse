@@ -1,6 +1,10 @@
 import {describe, it, expect} from 'vitest';
 import type {SearchHit} from '@synaipse/core';
 import {runChat, type ChatEvent} from '../src/Chat.js';
+import {createLlmProvider} from '../src/Llm.js';
+
+const ollamaProvider = (model: string, fetchImpl: typeof fetch) =>
+    createLlmProvider({kind: 'ollama', url: 'http://x', model, fetch: fetchImpl});
 
 const hit = (id: string, title: string, score: number, snippet?: string): SearchHit => ({
     noteId: id,
@@ -53,7 +57,7 @@ describe('runChat', () => {
         const events = await collect(runChat({
             search: async () => hits,
             readNote: () => undefined,
-            provider: {url: 'http://x', model: 'gemma3:4b', fetch: fakeFetch}
+            provider: ollamaProvider('gemma3:4b', fakeFetch)
         }, {question: 'what?'}));
 
         expect(events[0]?.kind).toBe('start');
@@ -88,7 +92,7 @@ describe('runChat', () => {
                 reads.push(id);
                 return '---\ntitle: Foo\n---\nThis is the body.';
             },
-            provider: {url: 'http://x', model: 'm', fetch: fakeFetch}
+            provider: ollamaProvider('m', fakeFetch)
         }, {question: 'q'}));
 
         expect(reads).toEqual(['Memory/foo.md']);
@@ -102,7 +106,7 @@ describe('runChat', () => {
         const events = await collect(runChat({
             search: async () => [hit('a.md', 'A', 1)],
             readNote: () => undefined,
-            provider: {url: 'http://x', model: 'm', fetch: failFetch}
+            provider: ollamaProvider('m', failFetch)
         }, {question: 'q'}));
 
         const last = events[events.length - 1];
@@ -127,7 +131,7 @@ describe('runChat', () => {
         await collect(runChat({
             search: async () => [],
             readNote: () => undefined,
-            provider: {url: 'http://x', model: 'm', fetch: fakeFetch}
+            provider: ollamaProvider('m', fakeFetch)
         }, {
             question: 'follow-up?',
             history: [
@@ -155,7 +159,7 @@ describe('runChat', () => {
         const events = await collect(runChat({
             search: async () => [],
             readNote: () => undefined,
-            provider: {url: 'http://x', model: 'm', fetch: fakeFetch}
+            provider: ollamaProvider('m', fakeFetch)
         }, {question: 'q'}));
 
         const tokens = events.filter((e) => e.kind === 'token') as Extract<ChatEvent, {kind: 'token'}>[];

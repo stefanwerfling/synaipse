@@ -137,9 +137,24 @@ export const ConfigSchema = Vts.object({
         })
     })),
     chat: Vts.optional(Vts.object({
-        provider: Vts.equal('ollama' as const),
-        url: Vts.string(),
-        model: Vts.string()
+        provider: Vts.or([
+            Vts.equal('ollama' as const),
+            Vts.equal('openai' as const),
+            Vts.equal('anthropic' as const),
+            Vts.equal('claude-shell' as const)
+        ]),
+        model: Vts.string(),
+        url: Vts.optional(Vts.string()),
+        apiKey: Vts.optional(Vts.string()),
+        command: Vts.optional(Vts.string())
+    })),
+    research: Vts.optional(Vts.object({
+        provider: Vts.or([
+            Vts.equal('tavily' as const),
+            Vts.equal('searxng' as const)
+        ]),
+        apiKey: Vts.optional(Vts.string()),
+        url: Vts.optional(Vts.string())
     }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

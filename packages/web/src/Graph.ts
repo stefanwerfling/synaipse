@@ -1,6 +1,7 @@
 import cytoscape, {Core, ElementDefinition} from 'cytoscape';
 import type {Graph as GraphData} from '@synaipse/core';
 import {colorForNode, tagColor} from './Colors.js';
+import {communityColor, detectCommunities, type CommunityResult} from './Communities.js';
 import {clear, el} from './Dom.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
@@ -45,9 +46,10 @@ interface FilterResult {
     elements: ElementDefinition[];
     visibleNodeCount: number;
     visibleEdgeCount: number;
+    communityCount: number;
 }
 
-const buildElements = (state: GraphState): FilterResult => {
+const buildElements = (state: GraphState, communities: CommunityResult | null): FilterResult => {
     const tagOk = (nodeTags: string[]): boolean => {
         if (state.selectedTags.size === 0) {
             return true;
@@ -82,16 +84,25 @@ const buildElements = (state: GraphState): FilterResult => {
         }
     }
 
+    const useCommunity = state.showCommunities && communities !== null;
+
     const nodes: ElementDefinition[] = state.data.nodes
         .filter((n) => visibleIds.has(n.id))
-        .map((n) => ({
-            data: {
-                id: n.id,
-                label: n.title,
-                color: colorForNode(n.tags),
-                tagCount: n.tags.length
-            }
-        }));
+        .map((n) => {
+            const community = communities?.partition.get(n.id);
+            const color = useCommunity && community !== undefined
+                ? communityColor(community)
+                : colorForNode(n.tags);
+
+            return {
+                data: {
+                    id: n.id,
+                    label: n.title,
+                    color,
+                    tagCount: n.tags.length
+                }
+            };
+        });
 
     const edges: ElementDefinition[] = filteredEdges
         .filter((e) => visibleIds.has(e.from) && visibleIds.has(e.to))
@@ -102,7 +113,8 @@ const buildElements = (state: GraphState): FilterResult => {
     return {
         elements: [...nodes, ...edges],
         visibleNodeCount: nodes.length,
-        visibleEdgeCount: edges.length
+        visibleEdgeCount: edges.length,
+        communityCount: communities?.count ?? 0
     };
 };
 
@@ -119,6 +131,7 @@ export class GraphView implements GraphRenderer {
     private trailRaf: number | null = null;
     private waveRaf: number | null = null;
     private nodeIndex: Map<string, GraphData['nodes'][number]> = new Map();
+    private cachedCommunities: {data: GraphData; result: CommunityResult} | null = null;
     private trails: TrailRecord[] = [];
     private waves: WaveRecord[] = [];
 
@@ -430,15 +443,34 @@ export class GraphView implements GraphRenderer {
         this.waveRaf = requestAnimationFrame(tick);
     }
 
+    private getCommunities(): CommunityResult | null {
+        if (!this.state.showCommunities) return null;
+
+        if (this.cachedCommunities !== null && this.cachedCommunities.data === this.state.data) {
+            return this.cachedCommunities.result;
+        }
+
+        const result = detectCommunities(this.state.data.nodes, this.state.data.edges);
+        this.cachedCommunities = {data: this.state.data, result};
+        return result;
+    }
+
     private render(): void {
         if (this.cy !== null) {
             this.cy.destroy();
             this.cy = null;
         }
 
-        const filter = buildElements(this.state);
+        const communities = this.getCommunities();
+        const filter = buildElements(this.state, communities);
         clear(this.stats);
-        this.stats.textContent = `${filter.visibleNodeCount} nodes · ${filter.visibleEdgeCount} edges`;
+        const statsParts = [`${filter.visibleNodeCount} nodes`, `${filter.visibleEdgeCount} edges`];
+
+        if (this.state.showCommunities && filter.communityCount > 0) {
+            statsParts.push(`${filter.communityCount} communities`);
+        }
+
+        this.stats.textContent = statsParts.join(' · ');
 
         const savedPositions = positionsStore.get();
         const nodeIds = filter.elements
