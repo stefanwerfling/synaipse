@@ -1848,7 +1848,37 @@ body {
 
 .job-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.job-start-btn {
+    flex: 1 1 auto;
+    padding: 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.job-options-toggle {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-3);
+    padding: 8px 12px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.job-options-toggle:hover {
+    color: var(--text-1);
+    border-color: var(--accent);
+}
+
+.job-form[hidden] {
+    display: none;
 }
 
 .jobs-section-title {

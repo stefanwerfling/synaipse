@@ -24,15 +24,15 @@ interface LaunchSpec {
 const LAUNCHERS: readonly LaunchSpec[] = [
     {
         type: 'relink',
-        title: 'Relink',
-        description: 'Find related notes via hybrid search and write a "## Related" section with score + reason.',
-        defaults: {prefix: 'Crawler/'},
+        title: 'Relink all notes',
+        description: 'Add a "## Related" section with score + reason to any note that hasn\'t got one yet. Safe to run any time — already-linked notes are skipped.',
+        defaults: {prefix: ''},
         showLlm: true
     },
     {
         type: 'compile',
-        title: 'Compile',
-        description: 'Extract summary, key concepts and entities from a note into a sibling .compiled.md.',
+        title: 'Compile crawler content',
+        description: 'Run dev.to + GitHub-stars articles through the LLM and write structured summaries as sibling .compiled.md notes. Quota-heavy — uses your configured chat provider.',
         defaults: {prefix: 'Crawler/'},
         showLlm: false
     }
@@ -104,7 +104,7 @@ export class JobsPanel {
     private renderLauncherCard(spec: LaunchSpec): HTMLElement {
         const prefixInput = el('input', {
             class: 'job-input',
-            attrs: {type: 'text', placeholder: spec.defaults.prefix}
+            attrs: {type: 'text', placeholder: spec.defaults.prefix || 'leave empty for all notes'}
         }) as HTMLInputElement;
         prefixInput.value = spec.defaults.prefix;
 
@@ -117,13 +117,13 @@ export class JobsPanel {
         const llmBox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
 
         const startBtn = el('button', {
-            class: 'btn btn-primary',
+            class: 'btn btn-primary job-start-btn',
             attrs: {type: 'button'},
-            text: `Start ${spec.title}`
+            text: 'Start'
         }) as HTMLButtonElement;
 
         startBtn.addEventListener('click', () => {
-            const prefix = prefixInput.value.trim() || spec.defaults.prefix;
+            const prefix = prefixInput.value.trim();
             const limitRaw = limitInput.value.trim();
             const limit = limitRaw === '' ? undefined : Number.parseInt(limitRaw, 10);
             void this.launch(spec.type, {
@@ -134,26 +134,40 @@ export class JobsPanel {
             });
         });
 
+        const optionsHost = el('div', {class: 'job-form', attrs: {hidden: 'true'}},
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Prefix (empty = all notes)'}),
+                prefixInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Limit'}),
+                limitInput
+            ),
+            el('label', {class: 'job-checkbox'}, forceBox, el('span', {text: 'force (rebuild even if already done)'})),
+            ...(spec.showLlm
+                ? [el('label', {class: 'job-checkbox'}, llmBox, el('span', {text: 'use LLM (smarter filter, costs quota)'}))]
+                : [])
+        );
+
+        const optionsToggle = el('button', {
+            class: 'job-options-toggle',
+            attrs: {type: 'button'},
+            text: '⚙ Options'
+        });
+
+        optionsToggle.addEventListener('click', () => {
+            const hidden = optionsHost.hasAttribute('hidden');
+            if (hidden) optionsHost.removeAttribute('hidden');
+            else optionsHost.setAttribute('hidden', 'true');
+        });
+
         const card = el('div', {class: 'job-card'},
             el('div', {class: 'job-card-head'},
                 el('h3', {text: spec.title}),
                 el('p', {text: spec.description})
             ),
-            el('div', {class: 'job-form'},
-                el('label', {class: 'job-field'},
-                    el('span', {text: 'Prefix'}),
-                    prefixInput
-                ),
-                el('label', {class: 'job-field'},
-                    el('span', {text: 'Limit'}),
-                    limitInput
-                ),
-                el('label', {class: 'job-checkbox'}, forceBox, el('span', {text: 'force (rebuild even if already done)'})),
-                ...(spec.showLlm
-                    ? [el('label', {class: 'job-checkbox'}, llmBox, el('span', {text: 'use LLM (smarter filter, costs quota)'}))]
-                    : [])
-            ),
-            el('div', {class: 'job-actions'}, startBtn)
+            el('div', {class: 'job-actions'}, optionsToggle, startBtn),
+            optionsHost
         );
 
         return card;
