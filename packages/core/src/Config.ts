@@ -64,6 +64,11 @@ const buildResearchConfig = (env: NodeJS.ProcessEnv): {
     throw new ConfigError(`SYNAIPSE_RESEARCH_PROVIDER must be one of tavily|searxng|none, got: ${raw}`);
 };
 
+const parseExcludePrefixes = (raw: string | undefined): string[] => {
+    if (raw === undefined) return [];
+    return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+};
+
 type ChatProviderKind = 'ollama' | 'openai' | 'anthropic' | 'claude-shell';
 
 const resolveChatProvider = (env: NodeJS.ProcessEnv): ChatProviderKind => {
@@ -210,7 +215,10 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
             : {}),
         git: {autoCommit: gitEnabled, author: gitAuthor},
         chat: buildChatConfig(env),
-        ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {})
+        ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {}),
+        ...(parseExcludePrefixes(env.SYNAIPSE_EMBED_EXCLUDE_PREFIXES).length > 0
+            ? {embedExcludePrefixes: parseExcludePrefixes(env.SYNAIPSE_EMBED_EXCLUDE_PREFIXES)}
+            : {})
     };
 
     const errors: SchemaErrors = [];

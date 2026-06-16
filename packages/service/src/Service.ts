@@ -197,6 +197,7 @@ export class SynaipseService {
     private readonly configProjectExtraTags: readonly string[];
     private readonly chatProvider: LlmProvider | null;
     private readonly researchProvider: WebSearchProvider | null;
+    private readonly embedExcludePrefixes: readonly string[];
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -220,6 +221,8 @@ export class SynaipseService {
         this.researchProvider = config.research !== undefined
             ? createWebSearchProvider(toWebSearchConfig(config.research))
             : null;
+
+        this.embedExcludePrefixes = config.embedExcludePrefixes ?? [];
 
         const embedder = createEmbedder(config);
 
@@ -247,6 +250,16 @@ export class SynaipseService {
         });
     }
 
+    private shouldEmbed(noteId: NoteId): boolean {
+        return !this.embedExcludePrefixes.some((p) => noteId.startsWith(p));
+    }
+
+    private async maybeIndexNote(note: Note): Promise<void> {
+        if (this.index !== null && this.shouldEmbed(note.id)) {
+            await this.index.indexNote(note);
+        }
+    }
+
     public async start(): Promise<void> {
         await Promise.all([this.vault.load(), this.cache.load()]);
         this.fulltextIndex.build(this.vault.list());
@@ -258,13 +271,23 @@ export class SynaipseService {
             return;
         }
 
+        if (this.embedExcludePrefixes.length > 0) {
+            process.stderr.write(`[synaipse] embed exclude prefixes: ${this.embedExcludePrefixes.join(', ')}\n`);
+        }
+
         const stats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
         const liveIds = new Set<NoteId>();
         const toReindex: Note[] = [];
+        let excluded = 0;
 
         for (const note of this.vault.list()) {
             stats.total += 1;
             liveIds.add(note.id);
+
+            if (!this.shouldEmbed(note.id)) {
+                excluded += 1;
+                continue;
+            }
 
             const cached = this.cache.get(note.id);
 
@@ -274,6 +297,10 @@ export class SynaipseService {
             }
 
             toReindex.push(note);
+        }
+
+        if (excluded > 0) {
+            process.stderr.write(`[synaipse] embed: skipped ${excluded} notes by exclude-prefix\n`);
         }
 
         const orphans: NoteId[] = this.cache.ids().filter((id) => !liveIds.has(id));
@@ -703,12 +730,10 @@ export class SynaipseService {
             ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
         });
 
-        if (this.index !== null) {
-            await this.index.indexNote(note);
-        }
-
+        await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
         this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+        await this.cache.flush();
         return note;
     }
 
@@ -782,16 +807,25 @@ export class SynaipseService {
             }
         }, {message: `synaipse: compile ${compiledPath}`});
 
-        if (this.index !== null) await this.index.indexNote(written);
+        await this.maybeIndexNote(written);
         this.fulltextIndex.addNote(written);
         this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
+        await this.cache.flush();
 
         yield {kind: 'done', result: final, compiledPath: written.id};
     }
 
     public async relinkNote(
         id: NoteId,
-        opts: {useLlm?: boolean; force?: boolean; limit?: number; abort?: AbortSignal} = {}
+        opts: {
+            useLlm?: boolean;
+            force?: boolean;
+            limit?: number;
+            abort?: AbortSignal;
+            /** Note IDs starting with one of these prefixes are excluded from
+             * the candidate pool. Defaults to the high-noise dumping folders. */
+            excludePrefixes?: readonly string[];
+        } = {}
     ): Promise<{noteId: NoteId; accepted: string[]; skipped: boolean}> {
         const note = this.vault.tryGet(id);
         if (note === undefined) throw new Error(`note not found: ${id}`);
@@ -802,8 +836,11 @@ export class SynaipseService {
             return {noteId: id, accepted: [], skipped: true};
         }
 
+        const excludePrefixes = opts.excludePrefixes ?? ['chatgpt-import/', 'Clipped/'];
+        // Over-fetch because we'll filter out exclude-prefix hits before LLM/ranking.
+        const fetchLimit = Math.max(opts.limit ?? 20, 40);
         const query = `${note.title}\n${note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 400)}`;
-        const hits = await this.search(query, 'hybrid', opts.limit ?? 20);
+        const hits = await this.search(query, 'hybrid', fetchLimit);
 
         const candidates: RelinkCandidate[] = [];
         const titlesSeen = new Set<string>([note.title]);
@@ -811,6 +848,7 @@ export class SynaipseService {
         for (const hit of hits) {
             if (hit.noteId === id) continue;
             if (titlesSeen.has(hit.title)) continue;
+            if (excludePrefixes.some((p) => hit.noteId.startsWith(p))) continue;
             titlesSeen.add(hit.title);
 
             candidates.push({
@@ -819,6 +857,8 @@ export class SynaipseService {
                 score: hit.score,
                 ...(hit.snippet !== undefined ? {snippet: hit.snippet} : {})
             });
+
+            if (candidates.length >= (opts.limit ?? 20)) break;
         }
 
         if (candidates.length === 0) {
@@ -863,9 +903,10 @@ export class SynaipseService {
             frontmatter: note.frontmatter
         }, {message: `synaipse: relink ${id}`});
 
-        if (this.index !== null) await this.index.indexNote(written);
+        await this.maybeIndexNote(written);
         this.fulltextIndex.addNote(written);
         this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
+        await this.cache.flush();
 
         return {noteId: written.id, accepted, skipped: false};
     }
@@ -912,9 +953,10 @@ export class SynaipseService {
             {message: `synaipse: clip ${writePath}`}
         );
 
-        if (this.index !== null) await this.index.indexNote(note);
+        await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
         this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+        await this.cache.flush();
 
         return {noteId: note.id, isUpdate: existingId !== undefined};
     }
@@ -946,12 +988,10 @@ export class SynaipseService {
             {message: `synaipse: import_chatgpt ${writePath}`}
         );
 
-        if (this.index !== null) {
-            await this.index.indexNote(note);
-        }
-
+        await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
         this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+        await this.cache.flush();
 
         return {noteId: note.id, isUpdate: existingId !== undefined};
     }
@@ -1491,16 +1531,17 @@ export class SynaipseService {
             return;
         }
 
+        // Pick up cache updates from a parallel CLI process so we don't
+        // re-embed a file that the relink/compile CLI just wrote.
+        await this.cache.reloadIfChanged();
+
         const cached = this.cache.get(id);
 
         if (cached && cached.hash === note.hash) {
             return;
         }
 
-        if (this.index !== null) {
-            await this.index.indexNote(note);
-        }
-
+        await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
         this.cache.set(id, {hash: note.hash, mtime: note.mtime});
         this.notifyVaultChange({kind, path, noteId: id});

@@ -155,6 +155,7 @@ export const ConfigSchema = Vts.object({
         ]),
         apiKey: Vts.optional(Vts.string()),
         url: Vts.optional(Vts.string())
-    }))
+    })),
+    embedExcludePrefixes: Vts.optional(Vts.array(Vts.string()))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

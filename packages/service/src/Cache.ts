@@ -1,5 +1,5 @@
 import {existsSync} from 'node:fs';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
 export interface CacheEntry {
@@ -19,6 +19,7 @@ export class HashCache {
     private dirty = false;
     private flushTimer: NodeJS.Timeout | null = null;
     private flushing: Promise<void> | null = null;
+    private knownMtime: number | null = null;
 
     public constructor(
         private readonly file: string,
@@ -34,8 +35,31 @@ export class HashCache {
             const raw = await readFile(this.file, 'utf8');
             const parsed = JSON.parse(raw) as Record<string, CacheEntry>;
             this.data = new Map(Object.entries(parsed));
+            this.knownMtime = await this.diskMtime();
         } catch {
             this.data = new Map();
+        }
+    }
+
+    /**
+     * Re-read the cache file if its mtime changed since we last loaded — used
+     * by the watcher to pick up writes made by a parallel CLI process (e.g.
+     * `npm run relink`) before deciding whether to re-embed.
+     */
+    public async reloadIfChanged(): Promise<boolean> {
+        const mtime = await this.diskMtime();
+        if (mtime === null || mtime === this.knownMtime) return false;
+
+        await this.load();
+        return true;
+    }
+
+    private async diskMtime(): Promise<number | null> {
+        try {
+            const s = await stat(this.file);
+            return s.mtimeMs;
+        } catch {
+            return null;
         }
     }
 
@@ -151,5 +175,6 @@ export class HashCache {
         await mkdir(path.dirname(this.file), {recursive: true});
         const obj: Record<string, CacheEntry> = Object.fromEntries(this.data);
         await writeFile(this.file, JSON.stringify(obj, null, 2), 'utf8');
+        this.knownMtime = await this.diskMtime();
     }
 }

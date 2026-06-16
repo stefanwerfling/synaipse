@@ -48,6 +48,15 @@ const main = async (): Promise<void> => {
     });
 };
 
+process.on('uncaughtException', (error: Error) => {
+    process.stderr.write(`[synaipse-web-api] uncaughtException: ${error.stack ?? error.message}\n`);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+    const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    process.stderr.write(`[synaipse-web-api] unhandledRejection: ${detail}\n`);
+});
+
 main().catch((error: unknown) => {
     process.stderr.write(`[synaipse-web-api] fatal: ${String(error)}\n`);
     process.exit(1);
