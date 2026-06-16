@@ -10,6 +10,7 @@ import {
     renderRelatedSection,
     runRelink,
     stripRelatedSection,
+    type AcceptedLink,
     type RelinkCandidate
 } from './Relink.js';
 import {
@@ -826,7 +827,7 @@ export class SynaipseService {
              * the candidate pool. Defaults to the high-noise dumping folders. */
             excludePrefixes?: readonly string[];
         } = {}
-    ): Promise<{noteId: NoteId; accepted: string[]; skipped: boolean}> {
+    ): Promise<{noteId: NoteId; accepted: AcceptedLink[]; skipped: boolean}> {
         const note = this.vault.tryGet(id);
         if (note === undefined) throw new Error(`note not found: ${id}`);
 
@@ -865,11 +866,11 @@ export class SynaipseService {
             return {noteId: id, accepted: [], skipped: false};
         }
 
-        let accepted: string[];
+        let accepted: AcceptedLink[];
 
         if (opts.useLlm === true && this.chatProvider !== null) {
             const noteSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
-            let finalAccepted: string[] | null = null;
+            let finalAccepted: AcceptedLink[] | null = null;
 
             for await (const event of runRelink(
                 this.chatProvider,
@@ -887,11 +888,16 @@ export class SynaipseService {
                 }
             }
 
-            const candidateTitles = new Set(candidates.map((c) => c.title));
-            accepted = (finalAccepted ?? []).filter((t) => candidateTitles.has(t));
+            accepted = finalAccepted ?? [];
         } else {
-            // Deterministic fallback: top-5 by hybrid score, no LLM needed.
-            accepted = candidates.slice(0, 5).map((c) => c.title);
+            // Deterministic fallback: top-5 by hybrid score. Use the search
+            // snippet (first ~140 chars) as the reason so the reader sees
+            // *what* matched, not just *that* something matched.
+            accepted = candidates.slice(0, 5).map((c) => ({
+                title: c.title,
+                reason: c.snippet?.slice(0, 140).trim() ?? '',
+                score: c.score
+            }));
         }
 
         const stripped = stripRelatedSection(note.content).trimEnd();
