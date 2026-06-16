@@ -13,6 +13,7 @@ const {loadConfigFromEnv} = await import('@synaipse/core');
 const {SynaipseService} = await import('@synaipse/service');
 const {routes} = await import('./routes.js');
 const {EventBroadcaster} = await import('./events.js');
+const {JobManager} = await import('./jobs.js');
 
 const config = loadConfigFromEnv();
 
@@ -21,7 +22,8 @@ const main = async (): Promise<void> => {
     await service.start();
 
     const broadcaster = new EventBroadcaster();
-    const handle = routes(service, broadcaster);
+    const jobs = new JobManager(service);
+    const handle = routes(service, broadcaster, jobs);
 
     service.onVaultChange((event) => {
         broadcaster.publish({

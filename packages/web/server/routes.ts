@@ -2,6 +2,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Frontmatter} from '@synaipse/core';
 import type {ChatgptImportConversation, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
+ import type {JobManager, JobParams, JobType} from './jobs.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -55,7 +56,11 @@ const asFrontmatter = (value: unknown): Frontmatter | undefined => {
     return value as Frontmatter;
 };
 
-export const routes = (service: SynaipseService, broadcaster: EventBroadcaster): Handler => async (req, res, url) => {
+export const routes = (
+    service: SynaipseService,
+    broadcaster: EventBroadcaster,
+    jobs: JobManager
+): Handler => async (req, res, url) => {
     const path = url.pathname;
     const method = req.method ?? 'GET';
 
@@ -275,6 +280,111 @@ export const routes = (service: SynaipseService, broadcaster: EventBroadcaster):
             json(res, 500, {error: String(error)});
         }
 
+        return;
+    }
+
+    if (path === '/api/jobs') {
+        if (method === 'GET') {
+            json(res, 200, jobs.listJobs());
+            return;
+        }
+
+        if (method === 'POST') {
+            const body = await readJson<{type?: unknown; params?: unknown}>(req);
+
+            if (body.type !== 'relink' && body.type !== 'compile') {
+                json(res, 400, {error: "field 'type' must be 'relink' or 'compile'"});
+                return;
+            }
+
+            if (typeof body.params !== 'object' || body.params === null) {
+                json(res, 400, {error: "field 'params' must be object"});
+                return;
+            }
+
+            const params = body.params as Record<string, unknown>;
+
+            if (typeof params.prefix !== 'string' || params.prefix.length === 0) {
+                json(res, 400, {error: "params.prefix is required"});
+                return;
+            }
+
+            const record = jobs.startJob(body.type as JobType, body.params as JobParams);
+            json(res, 200, record);
+            return;
+        }
+
+        methodNotAllowed(res);
+        return;
+    }
+
+    if (path.startsWith('/api/jobs/')) {
+        const tail = path.slice('/api/jobs/'.length);
+        const streamMatch = tail.match(/^([^/]+)\/stream$/);
+        const stopMatch = tail.match(/^([^/]+)\/stop$/);
+
+        if (streamMatch !== null) {
+            if (method !== 'GET') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            const jobId = streamMatch[1] as string;
+            const job = jobs.getJob(jobId);
+
+            if (job === undefined) {
+                notFound(res);
+                return;
+            }
+
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                Connection: 'keep-alive'
+            });
+
+            // Replay current state so the client doesn't need a separate GET first.
+            res.write(`data: ${JSON.stringify({
+                kind: 'snapshot',
+                job
+            })}\n\n`);
+
+            const unsubscribe = jobs.subscribe(jobId, (event) => {
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+                if (event.kind === 'done' || event.kind === 'failed' || event.kind === 'stopped') {
+                    res.end();
+                }
+            });
+
+            req.on('close', unsubscribe);
+            return;
+        }
+
+        if (stopMatch !== null) {
+            if (method !== 'POST') {
+                methodNotAllowed(res);
+                return;
+            }
+
+            const ok = jobs.stopJob(stopMatch[1] as string);
+            json(res, ok ? 200 : 404, {ok});
+            return;
+        }
+
+        if (method === 'GET') {
+            const job = jobs.getJob(tail);
+
+            if (job === undefined) {
+                notFound(res);
+                return;
+            }
+
+            json(res, 200, job);
+            return;
+        }
+
+        methodNotAllowed(res);
         return;
     }
 

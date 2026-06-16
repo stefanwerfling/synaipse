@@ -8,6 +8,7 @@ import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
 import {ImportDialog} from './ImportDialog.js';
+import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
@@ -26,7 +27,7 @@ const STORAGE_THREE_D = 'synaipse.graph.threeD';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
-type Tab = 'notes' | 'graph' | 'chat';
+type Tab = 'notes' | 'graph' | 'chat' | 'jobs';
 
 export class App {
     public readonly element: HTMLElement;
@@ -49,7 +50,9 @@ export class App {
     private notesTabBtn!: HTMLButtonElement;
     private graphTabBtn!: HTMLButtonElement;
     private chatTabBtn!: HTMLButtonElement;
+    private jobsTabBtn!: HTMLButtonElement;
     private chatPanel!: ChatPanel;
+    private jobsPanel!: JobsPanel;
     private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
@@ -141,6 +144,13 @@ export class App {
 
         this.importDialog = new ImportDialog({
             onNotesChanged: () => {
+                this.graph = null;
+                void this.loadNotes();
+            }
+        });
+
+        this.jobsPanel = new JobsPanel({
+            onChange: () => {
                 this.graph = null;
                 void this.loadNotes();
             }
@@ -391,6 +401,13 @@ export class App {
             on: {click: () => void this.switchTab('chat')}
         }) as HTMLButtonElement;
 
+        this.jobsTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button'},
+            text: 'Jobs',
+            on: {click: () => void this.switchTab('jobs')}
+        }) as HTMLButtonElement;
+
         const brand = el('div', {class: 'brand'});
         const logo = el('span', {class: 'brand-logo'});
         logo.innerHTML = logoSvg;
@@ -426,7 +443,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             importBtn,
@@ -454,6 +471,7 @@ export class App {
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
         this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
+        this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
 
         if (tab === 'notes') {
             this.showNotes();
@@ -465,6 +483,11 @@ export class App {
             return;
         }
 
+        if (tab === 'jobs') {
+            void this.showJobs();
+            return;
+        }
+
         await this.showGraph();
     }
 
@@ -472,6 +495,12 @@ export class App {
         clear(this.body);
         this.body.appendChild(this.chatPanel.element);
         this.chatPanel.focusInput();
+    }
+
+    private async showJobs(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.jobsPanel.element);
+        await this.jobsPanel.onShow();
     }
 
     private async loadNotes(): Promise<void> {

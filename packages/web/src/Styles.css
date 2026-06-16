@@ -1753,6 +1753,212 @@ body {
     font-size: 12px;
 }
 
+.jobs-panel {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-4);
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.jobs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
+}
+
+.jobs-head h2 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-0);
+}
+
+.jobs-launcher {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+}
+
+.job-card {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.job-card-head h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: var(--text-0);
+}
+
+.job-card-head p {
+    margin: 0;
+    color: var(--text-3);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.job-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.job-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.job-field span {
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.job-input {
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: 5px 8px;
+    color: var(--text-0);
+    font: inherit;
+    font-size: 12px;
+}
+
+.job-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.job-checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.job-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.jobs-section-title {
+    margin: 0 0 var(--space-2);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-3);
+}
+
+.jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.job-record {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.job-record-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.job-record-type {
+    font-weight: 600;
+    color: var(--text-0);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.job-record-prefix {
+    flex: 1 1 auto;
+    color: var(--text-2);
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+}
+
+.job-record-status {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-running { background: var(--accent-soft); color: var(--accent); }
+.status-done { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.status-failed { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+.status-stopped { background: rgba(140, 147, 164, 0.15); color: var(--text-3); }
+
+.job-progress {
+    height: 8px;
+    background: var(--bg-0);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.job-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.2s ease;
+}
+
+.job-progress-fill.done { background: #34d399; }
+.job-progress-fill.failed { background: var(--red); }
+.job-progress-fill.stopped { background: var(--text-3); }
+
+.job-progress-label {
+    color: var(--text-2);
+    font-size: 12px;
+}
+
+.job-current {
+    color: var(--text-3);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    word-break: break-all;
+}
+
+.job-log {
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: var(--space-2);
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    color: var(--text-2);
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.job-log-line {
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .palette-wrap {
     position: fixed;
     inset: 0;

@@ -180,6 +180,59 @@ export interface ChatgptImportConversation {
     attachments: ChatgptImportAttachment[];
 }
 
+export type JobType = 'relink' | 'compile';
+
+export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
+
+export interface JobRecord {
+    id: string;
+    type: JobType;
+    params: {prefix: string; force?: boolean; useLlm?: boolean; limit?: number};
+    status: JobStatus;
+    progress: {done: number; total: number; failed: number; current?: string};
+    startedAt: number;
+    finishedAt?: number;
+    error?: string;
+    summary?: string;
+    logs: string[];
+}
+
+export type JobEvent =
+    | {kind: 'snapshot'; job: JobRecord}
+    | {kind: 'progress'; done: number; total: number; failed: number; current?: string}
+    | {kind: 'log'; message: string}
+    | {kind: 'done'; summary: string}
+    | {kind: 'failed'; error: string}
+    | {kind: 'stopped'};
+
+export const jobsApi = {
+    list: async (): Promise<JobRecord[]> => json(await fetch('/api/jobs')),
+    get: async (id: string): Promise<JobRecord> => json(await fetch(`/api/jobs/${encodeURIComponent(id)}`)),
+    start: async (type: JobType, params: JobRecord['params']): Promise<JobRecord> => {
+        const response = await fetch('/api/jobs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type, params})
+        });
+        return json(response);
+    },
+    stop: async (id: string): Promise<void> => {
+        await fetch(`/api/jobs/${encodeURIComponent(id)}/stop`, {method: 'POST'});
+    },
+    stream: (id: string, onEvent: (event: JobEvent) => void, onError?: (e: Event) => void): () => void => {
+        const es = new EventSource(`/api/jobs/${encodeURIComponent(id)}/stream`);
+        es.onmessage = (evt) => {
+            try {
+                onEvent(JSON.parse(evt.data) as JobEvent);
+            } catch {
+                // ignore malformed
+            }
+        };
+        if (onError !== undefined) es.onerror = onError;
+        return () => es.close();
+    }
+};
+
 export const importApi = {
     listExisting: async (): Promise<Record<string, string>> => {
         return json(await fetch('/api/import/chatgpt/existing'));
