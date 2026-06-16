@@ -69,55 +69,76 @@ const buildMcpServer = (
     return server;
 };
 
+/**
+ * Build a plain `(req, res) => void` request handler that serves the MCP
+ * StreamableHTTP transport on a given basePath. Lets us mount MCP under an
+ * existing http.Server (e.g. the synaipse web API) and share a single
+ * SynaipseService instance instead of spawning a second process.
+ */
+export const buildMcpHttpHandler = (
+    config: Config,
+    service: SynaipseService,
+    options: {basePath: string; eventsUrl: string | null}
+): http.RequestListener => {
+    const publisher = new EventPublisher(options.eventsUrl);
+    const tools = buildTools(service);
+
+    return (req, res) => {
+        if (req.url === undefined || !req.url.startsWith(options.basePath)) {
+            res.statusCode = 404;
+            res.end('not found');
+            return;
+        }
+
+        void (async () => {
+            const transport = new StreamableHTTPServerTransport({} as never);
+            const ctx: ToolContext = resolveContextFromRequest({
+                url: req.url ?? '/',
+                headers: req.headers,
+                basePath: options.basePath
+            });
+            const server = buildMcpServer(config, tools, publisher, ctx);
+
+            res.on('close', () => {
+                void transport.close();
+                void server.close();
+            });
+
+            try {
+                await server.connect(transport as unknown as Transport);
+                await transport.handleRequest(req, res);
+            } catch (error: unknown) {
+                process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+
+                if (!res.headersSent) {
+                    res.statusCode = 500;
+                    res.end('internal error');
+                }
+            }
+        })();
+    };
+};
+
 export const startServer = async (config: Config, options: StartServerOptions): Promise<void> => {
     const service = new SynaipseService(config);
     await service.start();
 
-    const publisher = new EventPublisher(options.eventsUrl);
-    const tools = buildTools(service);
-
     let httpServer: http.Server | null = null;
 
     if (options.transport === 'http') {
-        httpServer = http.createServer((req, res) => {
-            if (req.url === undefined || !req.url.startsWith(options.httpPath)) {
-                res.statusCode = 404;
-                res.end('not found');
-                return;
-            }
-
-            void (async () => {
-                const transport = new StreamableHTTPServerTransport({} as never);
-                const ctx: ToolContext = resolveContextFromRequest({
-                    url: req.url,
-                    headers: req.headers,
-                    basePath: options.httpPath
-                });
-                const server = buildMcpServer(config, tools, publisher, ctx);
-
-                res.on('close', () => {
-                    void transport.close();
-                    void server.close();
-                });
-
-                try {
-                    await server.connect(transport as unknown as Transport);
-                    await transport.handleRequest(req, res);
-                } catch (error: unknown) {
-                    process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-
-                    if (!res.headersSent) {
-                        res.statusCode = 500;
-                        res.end('internal error');
-                    }
-                }
-            })();
+        const handler = buildMcpHttpHandler(config, service, {
+            basePath: options.httpPath,
+            eventsUrl: options.eventsUrl
         });
+
+        httpServer = http.createServer(handler);
 
         await new Promise<void>((resolve) => {
             httpServer?.listen(options.httpPort, () => resolve());
         });
     } else {
+        const publisher = new EventPublisher(options.eventsUrl);
+        const tools = buildTools(service);
         const server = buildMcpServer(config, tools, publisher);
         const transport = new StdioServerTransport();
         await server.connect(transport);

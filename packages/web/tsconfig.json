@@ -9,6 +9,7 @@
   "include": ["src/**/*", "server/**/*"],
   "references": [
     { "path": "../core" },
+    { "path": "../mcp-server" },
     { "path": "../service" },
     { "path": "../vault" },
     { "path": "../vector" }

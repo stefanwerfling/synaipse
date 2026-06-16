@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@synaipse/core": "*",
+    "@synaipse/mcp-server": "*",
     "@synaipse/service": "*",
     "@synaipse/vault": "*",
     "@synaipse/vector": "*",

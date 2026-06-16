@@ -11,6 +11,10 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/Lib.d.ts",
+      "import": "./dist/Lib.js"
+    },
+    "./cli": {
       "types": "./dist/Index.d.ts",
       "import": "./dist/Index.js"
     }
