@@ -150,11 +150,31 @@ export const stripRelatedSection = (content: string): string => {
     return content.replace(/\n+## Related\n[\s\S]*?(?=\n## |$)/g, '\n');
 };
 
+/**
+ * The reason text often comes from another note's body and can contain
+ * markdown that breaks the surrounding document — triple-backtick code
+ * fences eat everything until the next fence, `[[…]]` mints unwanted
+ * wikilinks, leading `#` is parsed as a heading. Flatten to a single safe
+ * line before embedding it back into our list.
+ */
+const sanitizeReason = (raw: string): string => {
+    return raw
+        .replace(/\s+/g, ' ')
+        .replace(/```/g, "'''")
+        .replace(/`/g, "'")
+        .replace(/\[\[/g, '⟦')
+        .replace(/\]\]/g, '⟧')
+        .replace(/^\s*[#>\-*+]\s*/, '')
+        .replace(/\|/g, '∣')
+        .trim()
+        .slice(0, 140);
+};
+
 export const renderRelatedSection = (links: readonly AcceptedLink[]): string => {
     if (links.length === 0) return '';
 
     const lines = links.map((link) => {
-        const reason = link.reason.length > 0 ? ` — ${link.reason}` : '';
+        const reason = link.reason.length > 0 ? ` — ${sanitizeReason(link.reason)}` : '';
         return `- [[${link.title}]] *(score ${link.score.toFixed(2)})*${reason}`;
     });
 
