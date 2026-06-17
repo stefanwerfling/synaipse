@@ -20,6 +20,7 @@
     "mcp:http": "npm --workspace @synaipse/mcp-server run start:http",
     "web": "npm --workspace @synaipse/web run dev",
     "vault:init": "node scripts/init-vault.mjs",
+    "install-skill": "node scripts/install-skill.mjs",
     "crawl": "npm --workspace @synaipse/crawler run start --silent --",
     "crawl:github-stars": "npm --workspace @synaipse/crawler run start --silent -- github-stars",
     "crawl:devto": "npm --workspace @synaipse/crawler run start --silent -- devto",
