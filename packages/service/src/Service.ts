@@ -205,6 +205,7 @@ export class SynaipseService {
     private readonly embedExcludePrefixes: readonly string[];
     private cachedLayout: GraphLayout | null = null;
     private cachedLayoutKey: string | null = null;
+    private cachedGraph: Graph | null = null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -267,9 +268,10 @@ export class SynaipseService {
         }
 
         // Topology might have changed (new note or new wikilinks). Drop the
-        // memoised Atlas layout; the next /api/graph/layout call rebuilds it.
+        // memoised graph + Atlas layout; the next request rebuilds them.
         this.cachedLayout = null;
         this.cachedLayoutKey = null;
+        this.cachedGraph = null;
     }
 
     public async start(): Promise<void> {
@@ -280,6 +282,7 @@ export class SynaipseService {
         if (this.index === null) {
             process.stderr.write(`[synaipse] embeddings disabled (provider=none) — fulltext only, ${this.vault.list().length} notes loaded\n`);
             this.attachWatcher();
+            this.warmGraphCaches();
             return;
         }
 
@@ -345,6 +348,18 @@ export class SynaipseService {
         );
 
         this.attachWatcher();
+        this.warmGraphCaches();
+    }
+
+    /** Build graph + Atlas layout so the first request after startup is instant. */
+    private warmGraphCaches(): void {
+        const started = Date.now();
+        const graph = this.graph();
+        this.graphLayout();
+        const ms = Date.now() - started;
+        process.stderr.write(
+            `[synaipse] graph cache warmed: ${graph.nodes.length} nodes, ${graph.edges.length} edges in ${ms}ms\n`
+        );
     }
 
     public async stop(): Promise<void> {
@@ -1170,10 +1185,12 @@ export class SynaipseService {
     }
 
     public graph(): Graph {
+        if (this.cachedGraph !== null) return this.cachedGraph;
+
         const notes = this.vault.list();
         const titleToId = new Map(notes.map((n) => [n.title, n.id]));
 
-        return {
+        const built: Graph = {
             nodes: notes.map((n) => ({id: n.id, title: n.title, tags: n.tags})),
             edges: notes.flatMap((n) =>
                 n.wikilinks
@@ -1182,6 +1199,9 @@ export class SynaipseService {
                     .map((target) => ({from: n.id, to: target, kind: 'wikilink' as const}))
             )
         };
+
+        this.cachedGraph = built;
+        return built;
     }
 
     public graphLayout(): GraphLayout {

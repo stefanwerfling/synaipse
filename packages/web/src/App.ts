@@ -553,10 +553,14 @@ export class App {
 
         if (this.graph === null) {
             clear(this.graphWrap);
-            this.graphWrap.appendChild(el('p', {class: 'loading', text: 'loading graph…'}));
+            const loadingMsg = el('p', {class: 'loading', text: 'fetching graph…'});
+            this.graphWrap.appendChild(loadingMsg);
+
+            const started = Date.now();
 
             try {
                 this.graph = await api.getGraph();
+                loadingMsg.textContent = `fetched ${this.graph.nodes.length} nodes / ${this.graph.edges.length} edges in ${Date.now() - started}ms`;
             } catch (error) {
                 console.error('failed to load graph', error);
                 return;

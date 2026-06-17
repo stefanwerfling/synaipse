@@ -106,7 +106,10 @@ export class GraphAtlasView implements GraphRenderer {
     private async refreshLayout(): Promise<void> {
         if (this.pendingFetch !== null) return;
 
-        this.stats.textContent = 'computing layout…';
+        const nodeCount = this.state.data.nodes.length;
+        const edgeCount = this.state.data.edges.length;
+        const started = Date.now();
+        this.stats.textContent = `computing layout for ${nodeCount} nodes / ${edgeCount} edges…`;
 
         this.pendingFetch = (async () => {
             try {
@@ -114,6 +117,8 @@ export class GraphAtlasView implements GraphRenderer {
                 this.edges = [...this.state.data.edges];
                 this.nodeIndex = new Map(this.layout.nodes.map((n) => [n.id, n]));
                 this.fitToContent();
+                const ms = Date.now() - started;
+                this.stats.textContent = `${this.layout.nodes.length} nodes · ${this.edges.length} edges · ${this.layout.communities.length} communities · ${ms}ms`;
             } catch (cause) {
                 this.stats.textContent = `layout failed: ${String(cause)}`;
             } finally {
