@@ -304,8 +304,8 @@ export const routes = (
 
             const params = body.params as Record<string, unknown>;
 
-            if (typeof params.prefix !== 'string' || params.prefix.length === 0) {
-                json(res, 400, {error: "params.prefix is required"});
+            if (typeof params.prefix !== 'string') {
+                json(res, 400, {error: "params.prefix must be a string (empty = all notes)"});
                 return;
             }
 
@@ -496,6 +496,24 @@ export const routes = (
             json(res, 500, {error: String(error)});
         }
 
+        return;
+    }
+
+    if (path === '/api/activity') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const sinceDays = Number.parseInt(url.searchParams.get('days') ?? '7', 10);
+        const limit = Number.parseInt(url.searchParams.get('limit') ?? '1000', 10);
+
+        const report = await service.getActivity({
+            ...(Number.isFinite(sinceDays) && sinceDays > 0 ? {sinceDays} : {}),
+            ...(Number.isFinite(limit) && limit > 0 ? {limit} : {})
+        });
+
+        json(res, 200, report);
         return;
     }
 

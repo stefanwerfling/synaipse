@@ -180,6 +180,45 @@ export interface ChatgptImportConversation {
     attachments: ChatgptImportAttachment[];
 }
 
+export interface ActivityCommit {
+    sha: string;
+    ts: number;
+    author: string;
+    project: string | null;
+    tool: string;
+    noteId: string | null;
+    subject: string;
+}
+
+export interface ActivityBucket {
+    date: string;
+    commits: number;
+    notes: number;
+}
+
+export interface ActivityCount {
+    key: string;
+    count: number;
+}
+
+export interface ActivityReport {
+    total: number;
+    commits: ActivityCommit[];
+    timeline: ActivityBucket[];
+    hotNotes: Array<{noteId: string; edits: number}>;
+    byTool: ActivityCount[];
+    byProject: ActivityCount[];
+}
+
+export const activityApi = {
+    get: async (days = 7, limit = 1000): Promise<ActivityReport> => {
+        const url = new URL('/api/activity', window.location.origin);
+        url.searchParams.set('days', String(days));
+        url.searchParams.set('limit', String(limit));
+        return json(await fetch(url));
+    }
+};
+
 export type JobType = 'relink' | 'compile';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';

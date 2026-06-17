@@ -4,6 +4,7 @@ import {Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
+import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {
@@ -26,6 +27,7 @@ import {
 } from './ChatgptImport.js';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {WriteAssetResult} from './Assets.js';
+export type {ActivityReport, ActivityCommit, ActivityBucket, ActivityCount} from './Activity.js';
 export type {CompileEvent, CompileResult} from './Compile.js';
 export type {LlmConfig, LlmProvider, LlmProviderKind} from './Llm.js';
 export type {RelinkCandidate, RelinkEvent} from './Relink.js';
@@ -420,6 +422,32 @@ export class SynaipseService {
             },
             parents: e.parents
         }));
+    }
+
+    public async getActivity(opts: {sinceDays?: number; limit?: number} = {}): Promise<ActivityReport> {
+        const repo = await this.vault.getRepo();
+
+        if (repo === null) {
+            return {total: 0, commits: [], timeline: [], hotNotes: [], byTool: [], byProject: []};
+        }
+
+        // Overfetch — log has no time filter, so we just pull the most recent
+        // N commits and filter by date in buildActivityReport.
+        const fetchLimit = opts.limit ?? 1000;
+        const entries = await repo.log({limit: fetchLimit});
+
+        return buildActivityReport(
+            entries.map((e) => ({
+                sha: e.sha,
+                author: {name: e.author.name, date: isoDate(e.author.timestamp)},
+                message: e.message
+            })),
+            {
+                ...(opts.sinceDays !== undefined ? {sinceDays: opts.sinceDays} : {}),
+                commitsCap: 100,
+                hotNotesTop: 10
+            }
+        );
     }
 
     public async noteVersion(id: NoteId, commitSha: string): Promise<string> {

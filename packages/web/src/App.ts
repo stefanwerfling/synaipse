@@ -7,6 +7,7 @@ import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
+import {ActivityPanel} from './ActivityPanel.js';
 import {ImportDialog} from './ImportDialog.js';
 import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
@@ -27,7 +28,7 @@ const STORAGE_THREE_D = 'synaipse.graph.threeD';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
-type Tab = 'notes' | 'graph' | 'chat' | 'jobs';
+type Tab = 'notes' | 'graph' | 'chat' | 'jobs' | 'activity';
 
 export class App {
     public readonly element: HTMLElement;
@@ -51,8 +52,10 @@ export class App {
     private graphTabBtn!: HTMLButtonElement;
     private chatTabBtn!: HTMLButtonElement;
     private jobsTabBtn!: HTMLButtonElement;
+    private activityTabBtn!: HTMLButtonElement;
     private chatPanel!: ChatPanel;
     private jobsPanel!: JobsPanel;
+    private activityPanel!: ActivityPanel;
     private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
@@ -153,6 +156,13 @@ export class App {
             onChange: () => {
                 this.graph = null;
                 void this.loadNotes();
+            }
+        });
+
+        this.activityPanel = new ActivityPanel({
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
             }
         });
 
@@ -408,6 +418,13 @@ export class App {
             on: {click: () => void this.switchTab('jobs')}
         }) as HTMLButtonElement;
 
+        this.activityTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button'},
+            text: 'Activity',
+            on: {click: () => void this.switchTab('activity')}
+        }) as HTMLButtonElement;
+
         const brand = el('div', {class: 'brand'});
         const logo = el('span', {class: 'brand-logo'});
         logo.innerHTML = logoSvg;
@@ -443,7 +460,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             importBtn,
@@ -472,6 +489,7 @@ export class App {
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
         this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
         this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
+        this.activityTabBtn.className = tab === 'activity' ? 'tab active' : 'tab';
 
         if (tab === 'notes') {
             this.showNotes();
@@ -488,7 +506,18 @@ export class App {
             return;
         }
 
+        if (tab === 'activity') {
+            void this.showActivity();
+            return;
+        }
+
         await this.showGraph();
+    }
+
+    private async showActivity(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.activityPanel.element);
+        await this.activityPanel.onShow();
     }
 
     private showChat(): void {

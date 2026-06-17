@@ -1989,6 +1989,241 @@ body {
     text-overflow: ellipsis;
 }
 
+.activity-panel {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-4);
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.activity-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+}
+
+.activity-head h2 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-0);
+}
+
+.activity-ranges {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.range-btn {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-3);
+    padding: 4px 12px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.range-btn:hover { color: var(--text-1); }
+.range-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+.activity-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.activity-stat-tile {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3);
+    text-align: center;
+}
+
+.activity-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-0);
+}
+
+.activity-stat-label {
+    font-size: 11px;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+.activity-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.activity-section {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3);
+}
+
+.activity-section-title {
+    margin: 0 0 var(--space-2);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-3);
+}
+
+.activity-chart {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.activity-svg {
+    display: block;
+    height: 180px;
+    width: 100%;
+}
+
+.activity-chart-labels {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-3);
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.activity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--space-3);
+}
+
+.activity-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.activity-bar-row {
+    position: relative;
+    padding: 6px 8px;
+    border-radius: var(--r-2);
+    cursor: pointer;
+}
+
+.activity-bar-row[role="button"]:hover { background: var(--bg-0); }
+
+.activity-bar-bg {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    border-radius: var(--r-2);
+    overflow: hidden;
+}
+
+.activity-bar-fill {
+    height: 100%;
+    background: var(--accent-soft);
+    opacity: 0.5;
+}
+
+.activity-bar-content {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.activity-bar-label {
+    color: var(--text-1);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-bar-value {
+    color: var(--text-3);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.activity-commits {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.activity-commit-row {
+    display: grid;
+    grid-template-columns: 110px 1fr auto;
+    gap: var(--space-3);
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: var(--r-2);
+}
+
+.activity-commit-row:hover { background: var(--bg-0); }
+
+.activity-commit-tool {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--bg-0);
+    padding: 2px 8px;
+    border-radius: 10px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.activity-commit-note {
+    color: var(--text-1);
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.activity-commit-note[role="button"] { cursor: pointer; }
+.activity-commit-note[role="button"]:hover { color: var(--accent); }
+
+.activity-commit-meta {
+    color: var(--text-3);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.activity-loading,
+.activity-error,
+.activity-empty {
+    padding: var(--space-6, 24px);
+    text-align: center;
+    color: var(--text-3);
+}
+
+.activity-empty h3 {
+    margin: 0 0 var(--space-2);
+    color: var(--text-1);
+}
+
 .palette-wrap {
     position: fixed;
     inset: 0;
