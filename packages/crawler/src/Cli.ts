@@ -14,6 +14,7 @@ const {Vault} = await import('@synaipse/vault');
 const {SynaipseService} = await import('@synaipse/service');
 const {GitHubStarsCrawler} = await import('./GitHubStars.js');
 const {DevToCrawler} = await import('./DevTo.js');
+const {CodeCrawler} = await import('./Code.js');
 
 const args = process.argv.slice(2);
 const crawlerName = args[0] ?? 'github-stars';
@@ -88,6 +89,37 @@ const runCrawler = async (name: string): Promise<number> => {
         log(`[crawler] starting ${crawler.name}`);
         const report = await crawler.run(ctx);
         log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
+
+        if (report.errors.length > 0) {
+            for (const err of report.errors.slice(0, 10)) {
+                log(`  ! ${err.item}: ${err.error}`);
+            }
+        }
+
+        return report.errors.length === 0 ? 0 : 1;
+    }
+
+    if (name === 'code') {
+        const repoPath = args[1];
+
+        if (repoPath === undefined || repoPath.length === 0) {
+            process.stderr.write('usage: npm run crawl:code -- <repo-path> [--with-source] [--name <repoName>]\n');
+            return 2;
+        }
+
+        const withSource = args.includes('--with-source');
+        const nameIdx = args.indexOf('--name');
+        const repoName = nameIdx >= 0 ? args[nameIdx + 1] : undefined;
+
+        const crawler = new CodeCrawler({
+            repoPath,
+            withSource,
+            ...(repoName !== undefined ? {repoName} : {})
+        });
+
+        log(`[crawler] starting ${crawler.name} (${repoPath}${withSource ? ', with source' : ''})`);
+        const report = await crawler.run(ctx);
+        log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — walked ${report.walked}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
 
         if (report.errors.length > 0) {
             for (const err of report.errors.slice(0, 10)) {

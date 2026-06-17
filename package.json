@@ -23,6 +23,7 @@
     "crawl": "npm --workspace @synaipse/crawler run start --silent --",
     "crawl:github-stars": "npm --workspace @synaipse/crawler run start --silent -- github-stars",
     "crawl:devto": "npm --workspace @synaipse/crawler run start --silent -- devto",
+    "crawl:code": "npm --workspace @synaipse/crawler run start --silent -- code",
     "compile": "npm --workspace @synaipse/crawler run start --silent -- compile",
     "relink": "npm --workspace @synaipse/crawler run start --silent -- relink",
     "docker:up:voyage": "docker-compose --profile voyage up -d",
