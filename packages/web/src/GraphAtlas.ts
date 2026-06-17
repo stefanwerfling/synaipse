@@ -4,6 +4,7 @@ import {communityColor} from './Communities.js';
 import {el} from './Dom.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
+import {Quadtree} from './Quadtree.js';
 
 /**
  * Atlas view — server-precomputed Louvain layout, rendered on a plain canvas.
@@ -17,8 +18,10 @@ import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './
 
 const NODE_BASE_RADIUS = 3;
 const NODE_HIT_PADDING = 4;
-const EDGE_VISIBLE_ZOOM = 0.4;
-const LABEL_VISIBLE_ZOOM = 1.2;
+/** Below this zoom we only draw aggregated community super-nodes. */
+const COMMUNITY_AGGREGATE_ZOOM = 0.5;
+const EDGE_VISIBLE_ZOOM = 1.0;
+const LABEL_VISIBLE_ZOOM = 1.5;
 
 interface ViewState {
     scale: number;
@@ -35,6 +38,8 @@ export class GraphAtlasView implements GraphRenderer {
     private layout: GraphLayout | null = null;
     private edges: GraphData['edges'] = [];
     private nodeIndex = new Map<string, GraphLayout['nodes'][number]>();
+    private nodeTree: Quadtree<string> | null = null;
+    private communityTree: Quadtree<number> | null = null;
     private view: ViewState = {scale: 1, offsetX: 0, offsetY: 0};
     private rafHandle: number | null = null;
     private dragging = false;
@@ -116,6 +121,7 @@ export class GraphAtlasView implements GraphRenderer {
                 this.layout = await api.getGraphLayout();
                 this.edges = [...this.state.data.edges];
                 this.nodeIndex = new Map(this.layout.nodes.map((n) => [n.id, n]));
+                this.buildSpatialIndex();
                 this.fitToContent();
                 const ms = Date.now() - started;
                 this.stats.textContent = `${this.layout.nodes.length} nodes · ${this.edges.length} edges · ${this.layout.communities.length} communities · ${ms}ms`;
@@ -128,6 +134,18 @@ export class GraphAtlasView implements GraphRenderer {
         })();
 
         await this.pendingFetch;
+    }
+
+    private buildSpatialIndex(): void {
+        if (this.layout === null) return;
+        const b = this.layout.bounds;
+        const nodes = new Quadtree<string>({minX: -50, minY: -50, maxX: b.width + 50, maxY: b.height + 50});
+        for (const n of this.layout.nodes) nodes.add({x: n.x, y: n.y, payload: n.id});
+        this.nodeTree = nodes;
+
+        const communities = new Quadtree<number>({minX: -50, minY: -50, maxX: b.width + 50, maxY: b.height + 50});
+        for (const c of this.layout.communities) communities.add({x: c.cx, y: c.cy, payload: c.id});
+        this.communityTree = communities;
     }
 
     private fitToContent(): void {
@@ -203,7 +221,16 @@ export class GraphAtlasView implements GraphRenderer {
             this.renderHoverTooltip(mx, my);
         });
 
-        canvas.addEventListener('click', () => {
+        canvas.addEventListener('click', (event) => {
+            // At low zoom we hit-test communities → zoom into the tile rather
+            // than firing onSelectNote (we don't have a note to open).
+            if (this.view.scale < COMMUNITY_AGGREGATE_ZOOM) {
+                const rect = canvas.getBoundingClientRect();
+                const cid = this.hitTestCommunity(event.clientX - rect.left, event.clientY - rect.top);
+                if (cid !== null) this.zoomToCommunity(cid);
+                return;
+            }
+
             if (this.hoverId !== null) this.cb.onSelectNote(this.hoverId);
         });
 
@@ -229,6 +256,18 @@ export class GraphAtlasView implements GraphRenderer {
         this.view.offsetY = rect.height / 2 - worldY * this.view.scale;
     }
 
+    private zoomToCommunity(communityId: number): void {
+        if (this.layout === null) return;
+        const c = this.layout.communities.find((x) => x.id === communityId);
+        if (c === undefined) return;
+        const rect = this.canvas.getBoundingClientRect();
+        // Zoom enough so the community fills ~60% of the smaller viewport edge.
+        const target = (Math.min(rect.width, rect.height) * 0.6) / (c.radius * 2);
+        this.view.scale = Math.max(target, EDGE_VISIBLE_ZOOM + 0.05);
+        this.centreOn(c.cx, c.cy);
+        this.scheduleRender();
+    }
+
     private project(x: number, y: number): {x: number; y: number} {
         return {
             x: x * this.view.scale + this.view.offsetX,
@@ -244,20 +283,25 @@ export class GraphAtlasView implements GraphRenderer {
     }
 
     private hitTest(sx: number, sy: number): string | null {
-        if (this.layout === null) return null;
-        const radius = (NODE_BASE_RADIUS + NODE_HIT_PADDING) / this.view.scale;
+        if (this.nodeTree === null) return null;
         const world = this.unproject(sx, sy);
-        let best: {id: string; d: number} | null = null;
+        const radius = (NODE_BASE_RADIUS + NODE_HIT_PADDING) / this.view.scale;
+        return this.nodeTree.nearest(world.x, world.y, radius)?.point.payload ?? null;
+    }
 
-        for (const n of this.layout.nodes) {
-            const dx = n.x - world.x;
-            const dy = n.y - world.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > radius) continue;
-            if (best === null || dist < best.d) best = {id: n.id, d: dist};
-        }
+    private hitTestCommunity(sx: number, sy: number): number | null {
+        if (this.communityTree === null || this.layout === null) return null;
+        const world = this.unproject(sx, sy);
+        // Each community is drawn with `r = sqrt(size) * scale`. Query big.
+        const maxRadius = Math.max(...this.layout.communities.map((c) => Math.sqrt(c.size) * 8 + 6));
+        const hit = this.communityTree.nearest(world.x, world.y, maxRadius / this.view.scale);
+        if (hit === null) return null;
 
-        return best?.id ?? null;
+        // Verify the click is actually within the rendered radius of the closest community.
+        const community = this.layout.communities.find((c) => c.id === hit.point.payload);
+        if (community === undefined) return null;
+        const renderRadius = (Math.sqrt(community.size) * 8 + 6) / this.view.scale;
+        return hit.distance <= renderRadius ? hit.point.payload : null;
     }
 
     private renderHoverTooltip(sx: number, sy: number): void {
@@ -296,8 +340,16 @@ export class GraphAtlasView implements GraphRenderer {
         const rect = this.canvas.getBoundingClientRect();
         ctx.clearRect(0, 0, rect.width, rect.height);
 
+        // LOD: at low zoom we draw aggregated community super-nodes instead of
+        // every individual one. 50 circles + a handful of inter-community
+        // edges is constant-time render regardless of vault size.
+        if (this.view.scale < COMMUNITY_AGGREGATE_ZOOM) {
+            this.renderCommunityOverview(ctx);
+            this.stats.textContent = `overview · ${this.layout.communities.length} communities · mod ${this.layout.modularity.toFixed(2)} · zoom ${this.view.scale.toFixed(2)}× (zoom in for nodes)`;
+            return;
+        }
+
         const visibleNodes = this.collectVisibleNodes(rect);
-        this.stats.textContent = `${this.layout.nodes.length} nodes · ${this.edges.length} edges · ${visibleNodes.size} visible · mod ${this.layout.modularity.toFixed(2)} · zoom ${this.view.scale.toFixed(2)}×`;
 
         if (this.view.scale >= EDGE_VISIBLE_ZOOM) {
             this.renderEdges(ctx, visibleNodes);
@@ -308,6 +360,53 @@ export class GraphAtlasView implements GraphRenderer {
         if (this.view.scale >= LABEL_VISIBLE_ZOOM) {
             this.renderLabels(ctx, visibleNodes);
         }
+
+        this.stats.textContent = `${this.layout.nodes.length} nodes · ${this.edges.length} edges · ${visibleNodes.size} visible · mod ${this.layout.modularity.toFixed(2)} · zoom ${this.view.scale.toFixed(2)}×`;
+    }
+
+    private renderCommunityOverview(ctx: CanvasRenderingContext2D): void {
+        if (this.layout === null) return;
+
+        // Inter-community edges first (thickness ∝ weight), so node circles overlap them.
+        const maxWeight = Math.max(1, ...this.layout.interCommunityEdges.map((e) => e.weight));
+        const communityById = new Map(this.layout.communities.map((c) => [c.id, c]));
+
+        ctx.strokeStyle = 'rgba(140, 147, 164, 0.35)';
+
+        for (const e of this.layout.interCommunityEdges) {
+            const a = communityById.get(e.from);
+            const b = communityById.get(e.to);
+            if (a === undefined || b === undefined) continue;
+
+            const pa = this.project(a.cx, a.cy);
+            const pb = this.project(b.cx, b.cy);
+            ctx.lineWidth = Math.max(0.5, (e.weight / maxWeight) * 4);
+            ctx.beginPath();
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+        }
+
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+
+        for (const c of this.layout.communities) {
+            const p = this.project(c.cx, c.cy);
+            const r = Math.sqrt(c.size) * 8 + 6;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = communityColor(c.id);
+            ctx.globalAlpha = 0.7;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            ctx.fillStyle = '#0b0d12';
+            ctx.fillText(String(c.size), p.x, p.y);
+        }
+
+        ctx.textAlign = 'start';
     }
 
     private collectVisibleNodes(rect: DOMRect): Set<string> {

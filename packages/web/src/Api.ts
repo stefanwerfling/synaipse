@@ -199,10 +199,17 @@ export interface GraphLayoutCommunity {
     radius: number;
 }
 
+export interface InterCommunityEdge {
+    from: number;
+    to: number;
+    weight: number;
+}
+
 export interface GraphLayout {
     hash: string;
     nodes: GraphLayoutNode[];
     communities: GraphLayoutCommunity[];
+    interCommunityEdges: InterCommunityEdge[];
     bounds: {width: number; height: number};
     modularity: number;
 }

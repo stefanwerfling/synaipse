@@ -31,11 +31,20 @@ export interface LayoutCommunity {
     radius: number;
 }
 
+export interface InterCommunityEdge {
+    from: number;
+    to: number;
+    /** Number of inter-community edges aggregated into this one. */
+    weight: number;
+}
+
 export interface GraphLayout {
     /** SHA-1 of the source graph; clients use this to bust their position cache. */
     hash: string;
     nodes: LayoutNode[];
     communities: LayoutCommunity[];
+    /** Aggregated edges between communities, used at low zoom levels. */
+    interCommunityEdges: InterCommunityEdge[];
     /** Logical canvas dimensions (positions stay inside [0..bounds] in both axes). */
     bounds: {width: number; height: number};
     modularity: number;
@@ -121,7 +130,7 @@ export const computeLayout = (input: GraphInput): GraphLayout => {
     const hash = computeHash(input.nodes, input.edges);
 
     if (input.nodes.length === 0) {
-        return {hash, nodes: [], communities: [], bounds: {width: 0, height: 0}, modularity: 0};
+        return {hash, nodes: [], communities: [], interCommunityEdges: [], bounds: {width: 0, height: 0}, modularity: 0};
     }
 
     const communities = detectCommunities(input.nodes, input.edges);
@@ -183,10 +192,33 @@ export const computeLayout = (input: GraphInput): GraphLayout => {
     const maxX = Math.max(0, ...layoutNodes.map((n) => n.x));
     const maxY = Math.max(0, ...layoutNodes.map((n) => n.y));
 
+    // Aggregate edges between communities so the client can show a thin
+    // skeleton at zoomed-out level (50 super-nodes + their links) instead
+    // of all 17k individual lines.
+    const interEdges = new Map<string, InterCommunityEdge>();
+
+    for (const e of input.edges) {
+        const ca = communities.partition.get(e.from);
+        const cb = communities.partition.get(e.to);
+        if (ca === undefined || cb === undefined) continue;
+        if (ca === cb) continue;
+
+        const lo = Math.min(ca, cb);
+        const hi = Math.max(ca, cb);
+        const key = `${lo}|${hi}`;
+        const existing = interEdges.get(key);
+        if (existing === undefined) {
+            interEdges.set(key, {from: lo, to: hi, weight: 1});
+        } else {
+            existing.weight += 1;
+        }
+    }
+
     return {
         hash,
         nodes: layoutNodes,
         communities: communityRecords,
+        interCommunityEdges: [...interEdges.values()],
         bounds: {width: maxX + TILE_PADDING, height: maxY + TILE_PADDING},
         modularity: communities.modularity
     };
