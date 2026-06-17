@@ -56,6 +56,9 @@ export const api = {
     getGraph: async (): Promise<Graph> => {
         return json(await fetch('/api/graph'));
     },
+    getGraphLayout: async (): Promise<GraphLayout> => {
+        return json(await fetch('/api/graph/layout'));
+    },
     getInfo: async (): Promise<{
         semanticEnabled: boolean;
         notesCount: number;
@@ -178,6 +181,30 @@ export interface ChatgptImportConversation {
     model: string | null;
     messages: ChatgptImportMessage[];
     attachments: ChatgptImportAttachment[];
+}
+
+export interface GraphLayoutNode {
+    id: string;
+    x: number;
+    y: number;
+    community: number;
+    degree: number;
+}
+
+export interface GraphLayoutCommunity {
+    id: number;
+    size: number;
+    cx: number;
+    cy: number;
+    radius: number;
+}
+
+export interface GraphLayout {
+    hash: string;
+    nodes: GraphLayoutNode[];
+    communities: GraphLayoutCommunity[];
+    bounds: {width: number; height: number};
+    modularity: number;
 }
 
 export interface ActivityCommit {

@@ -5,6 +5,7 @@ import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
 import {buildActivityReport, type ActivityReport} from './Activity.js';
+import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {
@@ -28,6 +29,7 @@ import {
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {WriteAssetResult} from './Assets.js';
 export type {ActivityReport, ActivityCommit, ActivityBucket, ActivityCount} from './Activity.js';
+export type {GraphLayout, LayoutNode, LayoutCommunity} from './Layout.js';
 export type {CompileEvent, CompileResult} from './Compile.js';
 export type {LlmConfig, LlmProvider, LlmProviderKind} from './Llm.js';
 export type {RelinkCandidate, RelinkEvent} from './Relink.js';
@@ -201,6 +203,8 @@ export class SynaipseService {
     private readonly chatProvider: LlmProvider | null;
     private readonly researchProvider: WebSearchProvider | null;
     private readonly embedExcludePrefixes: readonly string[];
+    private cachedLayout: GraphLayout | null = null;
+    private cachedLayoutKey: string | null = null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -261,6 +265,11 @@ export class SynaipseService {
         if (this.index !== null && this.shouldEmbed(note.id)) {
             await this.index.indexNote(note);
         }
+
+        // Topology might have changed (new note or new wikilinks). Drop the
+        // memoised Atlas layout; the next /api/graph/layout call rebuilds it.
+        this.cachedLayout = null;
+        this.cachedLayoutKey = null;
     }
 
     public async start(): Promise<void> {
@@ -1173,6 +1182,20 @@ export class SynaipseService {
                     .map((target) => ({from: n.id, to: target, kind: 'wikilink' as const}))
             )
         };
+    }
+
+    public graphLayout(): GraphLayout {
+        const data = this.graph();
+        const cacheKey = `${data.nodes.length}:${data.edges.length}`;
+
+        if (this.cachedLayout !== null && this.cachedLayoutKey === cacheKey) {
+            return this.cachedLayout;
+        }
+
+        const layout = computeLayout(data);
+        this.cachedLayout = layout;
+        this.cachedLayoutKey = cacheKey;
+        return layout;
     }
 
     public async related(id: NoteId, limit = 10): Promise<RelatedNote[]> {

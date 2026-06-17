@@ -716,6 +716,16 @@ export const routes = (
         return;
     }
 
+    if (path === '/api/graph/layout') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        json(res, 200, service.graphLayout());
+        return;
+    }
+
     if (path === '/api/tags') {
         if (method !== 'GET') {
             methodNotAllowed(res);

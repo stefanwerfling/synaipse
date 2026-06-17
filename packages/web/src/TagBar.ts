@@ -14,7 +14,7 @@ export interface TagBarState {
     showRoomGrid: boolean;
     showCluster: boolean;
     showCommunities: boolean;
-    threeD: boolean;
+    viewMode: '2d' | '3d' | 'atlas';
     project: string | null;
 }
 
@@ -27,7 +27,7 @@ export interface TagBarCallbacks {
     onToggleRoomGrid: () => void;
     onToggleCluster: () => void;
     onToggleCommunities: () => void;
-    onToggle3D: () => void;
+    onSetViewMode: (mode: '2d' | '3d' | 'atlas') => void;
 }
 
 export class TagBar {
@@ -79,15 +79,14 @@ export class TagBar {
         );
 
         const modeToggle = el('div', {class: 'mode-switch', attrs: {role: 'group', 'aria-label': 'view mode'}},
-            this.modeButton('2D', !this.state.threeD, () => {
-                if (this.state.threeD) {
-                    this.cb.onToggle3D();
-                }
+            this.modeButton('2D', this.state.viewMode === '2d', () => {
+                if (this.state.viewMode !== '2d') this.cb.onSetViewMode('2d');
             }),
-            this.modeButton('3D', this.state.threeD, () => {
-                if (!this.state.threeD) {
-                    this.cb.onToggle3D();
-                }
+            this.modeButton('3D', this.state.viewMode === '3d', () => {
+                if (this.state.viewMode !== '3d') this.cb.onSetViewMode('3d');
+            }),
+            this.modeButton('Atlas', this.state.viewMode === 'atlas', () => {
+                if (this.state.viewMode !== 'atlas') this.cb.onSetViewMode('atlas');
             })
         );
 

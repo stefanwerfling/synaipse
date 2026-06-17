@@ -24,7 +24,7 @@ const STORAGE_HEAT_STATE = 'synaipse.graph.heatState';
 const STORAGE_SHOW_ROOM_GRID = 'synaipse.graph.showRoomGrid';
 const STORAGE_SHOW_CLUSTER = 'synaipse.graph.showCluster';
 const STORAGE_SHOW_COMMUNITIES = 'synaipse.graph.showCommunities';
-const STORAGE_THREE_D = 'synaipse.graph.threeD';
+const STORAGE_VIEW_MODE = 'synaipse.graph.viewMode';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
@@ -40,7 +40,7 @@ export class App {
     private notesPanel: NotesPanel;
     private tagBar: TagBar | null = null;
     private graphView: GraphRenderer | null = null;
-    private graphViewMode: '2d' | '3d' | null = null;
+    private graphViewMode: '2d' | '3d' | 'atlas' | null = null;
     private search: Search | null = null;
     private activityLog: ActivityLog;
     private events: EventStream;
@@ -69,7 +69,7 @@ export class App {
     private showRoomGrid: PersistentValue<boolean>;
     private showCluster: PersistentValue<boolean>;
     private showCommunities: PersistentValue<boolean>;
-    private threeD: PersistentValue<boolean>;
+    private viewMode: PersistentValue<'2d' | '3d' | 'atlas'>;
     private heatTickTimer: number | null = null;
     private heatRaf: number | null = null;
     private reloadTimer: number | null = null;
@@ -87,7 +87,7 @@ export class App {
         this.showRoomGrid = new PersistentValue<boolean>(STORAGE_SHOW_ROOM_GRID, false);
         this.showCluster = new PersistentValue<boolean>(STORAGE_SHOW_CLUSTER, false);
         this.showCommunities = new PersistentValue<boolean>(STORAGE_SHOW_COMMUNITIES, false);
-        this.threeD = new PersistentValue<boolean>(STORAGE_THREE_D, false);
+        this.viewMode = new PersistentValue<'2d' | '3d' | 'atlas'>(STORAGE_VIEW_MODE, '2d');
 
         this.notesPanel = new NotesPanel({
             onNotesChanged: () => {
@@ -209,7 +209,7 @@ export class App {
             }
         });
 
-        this.threeD.subscribe(() => {
+        this.viewMode.subscribe(() => {
             if (this.tab === 'graph') {
                 void this.renderGraphTab();
                 this.renderTagBar();
@@ -575,7 +575,7 @@ export class App {
 
         this.renderTagBar();
 
-        const wantMode: '2d' | '3d' = this.threeD.get() ? '3d' : '2d';
+        const wantMode = this.viewMode.get();
 
         if (this.graphView !== null) {
             this.graphView.destroy();
@@ -603,6 +603,9 @@ export class App {
         if (wantMode === '3d') {
             const {GraphView3D} = await import('./Graph3D.js');
             this.graphView = new GraphView3D(state, callbacks);
+        } else if (wantMode === 'atlas') {
+            const {GraphAtlasView} = await import('./GraphAtlas.js');
+            this.graphView = new GraphAtlasView(state, callbacks);
         } else {
             const {GraphView} = await import('./Graph.js');
             this.graphView = new GraphView(state, callbacks);
@@ -642,7 +645,7 @@ export class App {
             onToggleRoomGrid: () => this.showRoomGrid.update((v) => !v),
             onToggleCluster: () => this.showCluster.update((v) => !v),
             onToggleCommunities: () => this.showCommunities.update((v) => !v),
-            onToggle3D: () => this.threeD.update((v) => !v)
+            onSetViewMode: (mode: '2d' | '3d' | 'atlas') => this.viewMode.set(mode)
         };
 
         const state = {
@@ -654,7 +657,7 @@ export class App {
             showRoomGrid: this.showRoomGrid.get(),
             showCluster: this.showCluster.get(),
             showCommunities: this.showCommunities.get(),
-            threeD: this.threeD.get(),
+            viewMode: this.viewMode.get(),
             project: this.project
         };
 
