@@ -157,7 +157,7 @@ export const stripRelatedSection = (content: string): string => {
  * wikilinks, leading `#` is parsed as a heading. Flatten to a single safe
  * line before embedding it back into our list.
  */
-const sanitizeReason = (raw: string): string => {
+export const sanitizeReason = (raw: string): string => {
     return raw
         .replace(/\s+/g, ' ')
         .replace(/```/g, "'''")
