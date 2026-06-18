@@ -253,25 +253,30 @@ No arguments. Returns `{nodes, edges}` for visualisation.
 
 ## `synaipse_prime`
 
-| Arg     | Type    | Default | Notes                                                  |
+| Arg              | Type     | Default | Notes                                                              |
 |---|---|---|---|
-| `limit` | number? | `15`    | Max entries in the context list                        |
-| `topic` | string? | `""`    | Optional query that adds topic-relevant notes via hybrid search |
+| `limit`          | number?  | `15`    | Max entries in the context list                                    |
+| `topic`          | string?  | `""`    | Optional query that adds topic-relevant notes via hybrid search    |
+| `includeCrawler` | boolean? | `false` | Include `Crawler/**` notes in hot/recent/topic/todos               |
 
 Returns a curated context bundle scoped to the active project. Each entry carries a `reason` so Claude can prioritise; pinned notes always come first.
 
-Selection buckets, deduped and capped at `limit`:
+Selection buckets, deduped and capped at `limit` — applied in this priority order:
 
-| Reason             | Source                                                                                  |
-|--------------------|-----------------------------------------------------------------------------------------|
-| `pinned`           | Frontmatter `prime: true` or `pinned: true`                                             |
-| `recent_session`   | Top 2 by mtime from `Memory/<project>/sessions/` (or `Memory/sessions/` if no project)  |
-| `project_decision` | All from `Memory/<project>/decisions/` (or `Memory/decisions/`), newest first           |
-| `hot`              | Top 3 by backlink count, project-scoped                                                 |
-| `recent`           | Top 5 by mtime within the last 14 days, project-scoped                                  |
-| `topic`            | Up to 3 hybrid-search hits when `topic` is given                                        |
+| # | Reason             | Source                                                                                  |
+|---|--------------------|-----------------------------------------------------------------------------------------|
+| 1 | `pinned`           | Frontmatter `prime: true` or `pinned: true`                                             |
+| 2 | `recent_session`   | Top 2 by mtime from `Memory/<project>/sessions/` (or `Memory/sessions/` if no project)  |
+| 3 | `project_decision` | All from `Memory/<project>/decisions/` (or `Memory/decisions/`), newest first           |
+| 4 | `topic`            | Up to 5 hybrid-search hits when `topic` is given — **prioritised above hot/recent**     |
+| 5 | `hot`              | Top 3 by backlink count, project-scoped                                                 |
+| 6 | `recent`           | Top 5 by mtime within the last 14 days, project-scoped                                  |
 
 A separate `todoCount` + 3-sample `todoSample` digest is included, scoped to the same project.
+
+**`Crawler/` exclusion** — externally-imported notes (GitHub stars, dev.to articles, etc.) are dropped from `hot`, `recent` and the TODO digest by default, because they tend to dominate (large indexes have very high backlink counts and TODOs from imported articles aren't your work). Pass `includeCrawler: true` to opt them back in. `recent_session`, `project_decision` and `pinned` are unaffected — they live under `Memory/`.
+
+**Topic always includes Crawler/** — when `topic` is given, Crawler hits are kept regardless of `includeCrawler`. Rationale: an explicit topic query is a precise signal; silently dropping e.g. `Crawler/code/<project>/SomeFile.md` (your own source code crawled into vault form) would hide legitimate hits.
 
 Returns:
 

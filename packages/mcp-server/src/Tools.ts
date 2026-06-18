@@ -530,19 +530,21 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_prime',
-            description: 'Return a curated context bundle for the current project: pinned notes, recent sessions, project decisions, hot notes (by backlink count), recently-edited notes, optional topic-relevant notes, and a TODO digest. Each entry carries a "reason" tag so you can prioritise. Call this once at session start (or when switching context) to prime yourself with what matters most before doing anything else.',
+            description: 'Return a curated context bundle for the current project: pinned notes, recent sessions, project decisions, topic-relevant notes (when topic is given), hot notes (by backlink count), and recently-edited notes — plus a TODO digest. Each entry carries a "reason" tag so you can prioritise. Crawler/ content (external imports — GitHub stars, dev.to articles) is excluded from hot/recent/todos by default; pass includeCrawler:true to include it. Topic search always includes Crawler/ — if you ask for a topic, you want hits. Call this once at session start (or when switching context) to prime yourself with what matters most before doing anything else.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     limit: {type: 'number', description: 'Max entries in the context list (default: 15). Pinned notes always count toward the limit but are added first.'},
-                    topic: {type: 'string', description: 'Optional query to bias selection — adds up to a few topic-relevant notes via hybrid search.'}
+                    topic: {type: 'string', description: 'Optional query to bias selection — adds up to 5 topic-relevant notes via hybrid search, prioritised above hot/recent. Topic always includes Crawler/ hits.'},
+                    includeCrawler: {type: 'boolean', description: 'Include crawler-imported notes (Crawler/**) in hot/recent/todos. Default false — these tend to dominate (large indexes, third-party TODOs). Does not affect topic search, which always considers Crawler/.'}
                 }
             }
         },
         handle: async (args, ctx) => {
             const limit = asNumber(args.limit, 15);
             const topic = typeof args.topic === 'string' ? args.topic : '';
-            const result = await service.prime({project: ctx?.project ?? null, limit, topic});
+            const includeCrawler = args.includeCrawler === true;
+            const result = await service.prime({project: ctx?.project ?? null, limit, topic, includeCrawler});
             return {
                 response: ok(result),
                 event: {kind: 'list', touched: result.context.slice(0, 5).map((e) => e.id)}

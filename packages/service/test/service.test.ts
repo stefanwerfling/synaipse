@@ -963,4 +963,60 @@ describe('SynaipseService.prime', () => {
         const sessions = result.context.filter((e) => e.reason === 'recent_session').map((e) => e.id);
         expect(sessions).toEqual(['Memory/sessions/2026-06-18.md']);
     });
+
+    it('excludes Crawler/ from hot, recent and todos by default but keeps it with includeCrawler', async () => {
+        await writeNote(vaultDir, 'Crawler/github/_index.md', '- [ ] crawler todo\n- [ ] another');
+        await writeNote(vaultDir, 'Crawler/github/repo-a.md', '---\ntitle: Repo A\n---\nLinks to [[_index]].');
+        await writeNote(vaultDir, 'Crawler/github/repo-b.md', '---\ntitle: Repo B\n---\nLinks to [[_index]].');
+        await writeNote(vaultDir, 'Crawler/github/repo-c.md', '---\ntitle: Repo C\n---\nLinks to [[_index]].');
+        await writeNote(vaultDir, 'Memory/note.md', '---\ntitle: Note\n---\n- [ ] real todo');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const def = await service.prime({limit: 10});
+        expect(def.context.map((e) => e.id).every((id) => !id.startsWith('Crawler/'))).toBe(true);
+        expect(def.todoCount).toBe(1);
+        expect(def.todoSample[0]?.text).toBe('real todo');
+
+        const opted = await service.prime({limit: 10, includeCrawler: true});
+        expect(opted.context.some((e) => e.id.startsWith('Crawler/'))).toBe(true);
+        expect(opted.todoCount).toBe(3);
+    });
+
+    it('places topic results above hot and recent when topic is given', async () => {
+        await writeNote(vaultDir, 'Memory/hot.md', '---\ntitle: Hot\n---\nUnrelated central node.');
+        await writeNote(vaultDir, 'Memory/a.md', '---\ntitle: A\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/b.md', '---\ntitle: B\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/c.md', '---\ntitle: C\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/qdrant.md', '---\ntitle: Qdrant Setup\n---\nDocker compose for qdrant vector store.');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const result = await service.prime({limit: 10, topic: 'qdrant'});
+        const reasons = result.context.map((e) => e.reason);
+        const topicIdx = reasons.indexOf('topic');
+        const hotIdx = reasons.indexOf('hot');
+
+        expect(topicIdx).toBeGreaterThanOrEqual(0);
+        expect(hotIdx).toBeGreaterThanOrEqual(0);
+        expect(topicIdx).toBeLessThan(hotIdx);
+        expect(result.context.find((e) => e.reason === 'topic')?.id).toBe('Memory/qdrant.md');
+    });
+
+    it('topic search includes Crawler/ hits even when includeCrawler is false', async () => {
+        await writeNote(vaultDir, 'Memory/unrelated.md', '---\ntitle: Unrelated\n---\nNothing to see.');
+        await writeNote(vaultDir, 'Crawler/code/synaipse/qdrant-client.md', '---\ntitle: Qdrant client\n---\nThe qdrant vector store client implementation.');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const result = await service.prime({limit: 10, topic: 'qdrant'});
+        const topicHits = result.context.filter((e) => e.reason === 'topic').map((e) => e.id);
+        expect(topicHits).toContain('Crawler/code/synaipse/qdrant-client.md');
+
+        const hotHits = result.context.filter((e) => e.reason === 'hot').map((e) => e.id);
+        expect(hotHits.every((id) => !id.startsWith('Crawler/'))).toBe(true);
+    });
 });

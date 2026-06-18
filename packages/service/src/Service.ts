@@ -139,6 +139,7 @@ export interface PrimeOptions {
     project?: string | null;
     limit?: number;
     topic?: string;
+    includeCrawler?: boolean;
 }
 
 export interface PrimeResult {
@@ -1689,12 +1690,15 @@ export class SynaipseService {
         const project = this.getProject(opts.project ?? null);
         const limit = Math.max(1, opts.limit ?? 15);
         const topic = (opts.topic ?? '').trim();
+        const includeCrawler = opts.includeCrawler === true;
 
         const projectPrefix = project === null ? null : `Memory/${project}/`;
         const sessionPrefix = project === null ? 'Memory/sessions/' : `Memory/${project}/sessions/`;
         const decisionPrefix = project === null ? 'Memory/decisions/' : `Memory/${project}/decisions/`;
 
         const all = this.vault.list();
+
+        const isCrawler = (note: Note): boolean => note.id.startsWith('Crawler/');
 
         const inProject = (note: Note): boolean => {
             if (projectPrefix === null) return true;
@@ -1744,7 +1748,21 @@ export class SynaipseService {
             push(n, 'project_decision');
         }
 
-        const projectNotes = all.filter(inProject);
+        if (topic.length > 0) {
+            // Topic always passes Crawler through — if the user asked for a topic
+            // explicitly, they want hits. Filtering Crawler here would silently drop
+            // legitimate code-crawler results (e.g. Crawler/code/<project>/...).
+            const hits = await this.search(topic, 'hybrid', 5);
+            for (const hit of hits) {
+                if (context.length >= limit) break;
+                const note = this.vault.tryGet(hit.noteId);
+                if (note === undefined) continue;
+                if (!inProject(note)) continue;
+                push(note, 'topic');
+            }
+        }
+
+        const projectNotes = all.filter((n) => inProject(n) && (includeCrawler || !isCrawler(n)));
 
         const hot = [...projectNotes]
             .filter((n) => n.backlinks.length > 0)
@@ -1765,19 +1783,9 @@ export class SynaipseService {
             push(n, 'recent');
         }
 
-        if (topic.length > 0 && context.length < limit) {
-            const hits = await this.search(topic, 'hybrid', 5);
-            for (const hit of hits) {
-                if (context.length >= limit) break;
-                const note = this.vault.tryGet(hit.noteId);
-                if (note === undefined) continue;
-                if (!inProject(note)) continue;
-                push(note, 'topic');
-            }
-        }
-
         const todoPrefix = projectPrefix ?? '';
-        const allTodos = this.todos(todoPrefix, false);
+        const todoSource = this.todos(todoPrefix, false);
+        const allTodos = includeCrawler ? todoSource : todoSource.filter((t) => !t.noteId.startsWith('Crawler/'));
 
         return {
             project,
