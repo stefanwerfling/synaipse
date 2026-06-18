@@ -899,3 +899,68 @@ describe('SynaipseService.chat end-to-end (mocked Ollama)', () => {
         }
     });
 });
+
+describe('SynaipseService.prime', () => {
+    it('includes pinned, recent session, decision, hot and recent notes with reasons', async () => {
+        await writeNote(vaultDir, 'Memory/foo/sessions/2026-06-18.md', '---\ntitle: Session 2026-06-18\n---\nWorked on prime tool.');
+        await writeNote(vaultDir, 'Memory/foo/decisions/dolt-vs-md.md', '---\ntitle: Dolt vs Markdown\n---\nWe stay on Markdown.');
+        await writeNote(vaultDir, 'Memory/foo/hot.md', '---\ntitle: Hot\n---\nCentral node.');
+        await writeNote(vaultDir, 'Memory/foo/a.md', '---\ntitle: A\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/foo/b.md', '---\ntitle: B\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/foo/c.md', '---\ntitle: C\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/foo/pinned.md', '---\ntitle: Pinned\npinned: true\n---\nAlways read me.');
+        await writeNote(vaultDir, 'Memory/foo/recent.md', '---\ntitle: Recent\n---\nFresh edit.');
+        await writeNote(vaultDir, 'Memory/other/leak.md', '---\ntitle: Leak\n---\nShould not appear in foo prime.');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'foo'));
+        await service.start();
+
+        const result = await service.prime({limit: 10});
+
+        const byReason = new Map<string, string[]>();
+        for (const entry of result.context) {
+            const list = byReason.get(entry.reason) ?? [];
+            list.push(entry.id);
+            byReason.set(entry.reason, list);
+        }
+
+        expect(result.project).toBe('foo');
+        expect(byReason.get('pinned')).toEqual(['Memory/foo/pinned.md']);
+        expect(byReason.get('recent_session')).toEqual(['Memory/foo/sessions/2026-06-18.md']);
+        expect(byReason.get('project_decision')).toEqual(['Memory/foo/decisions/dolt-vs-md.md']);
+        expect(byReason.get('hot')?.[0]).toBe('Memory/foo/hot.md');
+        expect(result.context.map((e) => e.id)).not.toContain('Memory/other/leak.md');
+
+        const hot = result.context.find((e) => e.reason === 'hot' && e.id === 'Memory/foo/hot.md');
+        expect(hot?.backlinkCount).toBe(3);
+        expect(hot?.excerpt.length).toBeGreaterThan(0);
+    });
+
+    it('includes a todo digest scoped to the project', async () => {
+        await writeNote(vaultDir, 'Memory/foo/work.md', '- [ ] first\n- [ ] second\n- [x] done');
+        await writeNote(vaultDir, 'Memory/bar/work.md', '- [ ] other-project');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'foo'));
+        await service.start();
+
+        const result = await service.prime();
+        expect(result.todoCount).toBe(2);
+        expect(result.todoSample.map((t) => t.text)).toEqual(['first', 'second']);
+    });
+
+    it('returns global view when no project is set', async () => {
+        await writeNote(vaultDir, 'Memory/sessions/2026-06-18.md', '---\ntitle: Global session\n---\nNo project.');
+        await writeNote(vaultDir, 'Memory/decisions/global.md', '---\ntitle: Global decision\n---\nglobal.');
+        await writeNote(vaultDir, 'Memory/foo/decisions/scoped.md', '---\ntitle: Scoped decision\n---\nproject-only.');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const result = await service.prime({limit: 10});
+        expect(result.project).toBeNull();
+        const decisions = result.context.filter((e) => e.reason === 'project_decision').map((e) => e.id);
+        expect(decisions).toEqual(['Memory/decisions/global.md']);
+        const sessions = result.context.filter((e) => e.reason === 'recent_session').map((e) => e.id);
+        expect(sessions).toEqual(['Memory/sessions/2026-06-18.md']);
+    });
+});

@@ -109,12 +109,43 @@ export interface StaleNotesOptions {
 
 const MS_PER_DAY = 86_400_000;
 
+const extractExcerpt = (content: string, max: number): string => {
+    const body = content.replace(/^---[\s\S]*?---\s*/, '').trim();
+    const flat = body.replace(/[#*_`>[\]()]/g, ' ').replace(/\s+/g, ' ').trim();
+    return flat.length <= max ? flat : `${flat.slice(0, max).trimEnd()}…`;
+};
+
 export interface TodoItem {
     noteId: NoteId;
     title: string;
     line: number;
     text: string;
     done: boolean;
+}
+
+export type PrimerReason = 'pinned' | 'recent_session' | 'project_decision' | 'hot' | 'recent' | 'topic';
+
+export interface PrimerEntry {
+    id: NoteId;
+    title: string;
+    reason: PrimerReason;
+    excerpt: string;
+    tags: string[];
+    mtime: number;
+    backlinkCount: number;
+}
+
+export interface PrimeOptions {
+    project?: string | null;
+    limit?: number;
+    topic?: string;
+}
+
+export interface PrimeResult {
+    project: string | null;
+    todoCount: number;
+    todoSample: TodoItem[];
+    context: PrimerEntry[];
 }
 
 export interface UpdateNoteInput {
@@ -1652,6 +1683,108 @@ export class SynaipseService {
         }
 
         return result;
+    }
+
+    public async prime(opts: PrimeOptions = {}): Promise<PrimeResult> {
+        const project = this.getProject(opts.project ?? null);
+        const limit = Math.max(1, opts.limit ?? 15);
+        const topic = (opts.topic ?? '').trim();
+
+        const projectPrefix = project === null ? null : `Memory/${project}/`;
+        const sessionPrefix = project === null ? 'Memory/sessions/' : `Memory/${project}/sessions/`;
+        const decisionPrefix = project === null ? 'Memory/decisions/' : `Memory/${project}/decisions/`;
+
+        const all = this.vault.list();
+
+        const inProject = (note: Note): boolean => {
+            if (projectPrefix === null) return true;
+            if (note.id.startsWith(projectPrefix)) return true;
+            if (note.frontmatter['project'] === project) return true;
+            if (note.tags.includes(`project/${project}`)) return true;
+            return false;
+        };
+
+        const seen = new Set<NoteId>();
+        const context: PrimerEntry[] = [];
+
+        const push = (note: Note, reason: PrimerReason): void => {
+            if (seen.has(note.id)) return;
+            seen.add(note.id);
+            context.push({
+                id: note.id,
+                title: note.title,
+                reason,
+                excerpt: extractExcerpt(note.content, 240),
+                tags: note.tags,
+                mtime: note.mtime,
+                backlinkCount: note.backlinks.length
+            });
+        };
+
+        for (const note of all) {
+            if (note.frontmatter['prime'] === true || note.frontmatter['pinned'] === true) {
+                push(note, 'pinned');
+            }
+        }
+
+        const sessions = all
+            .filter((n) => n.id.startsWith(sessionPrefix))
+            .sort((a, b) => b.mtime - a.mtime)
+            .slice(0, 2);
+        for (const n of sessions) {
+            if (context.length >= limit) break;
+            push(n, 'recent_session');
+        }
+
+        const decisions = all
+            .filter((n) => n.id.startsWith(decisionPrefix))
+            .sort((a, b) => b.mtime - a.mtime);
+        for (const n of decisions) {
+            if (context.length >= limit) break;
+            push(n, 'project_decision');
+        }
+
+        const projectNotes = all.filter(inProject);
+
+        const hot = [...projectNotes]
+            .filter((n) => n.backlinks.length > 0)
+            .sort((a, b) => b.backlinks.length - a.backlinks.length)
+            .slice(0, 3);
+        for (const n of hot) {
+            if (context.length >= limit) break;
+            push(n, 'hot');
+        }
+
+        const cutoff = Date.now() - 14 * MS_PER_DAY;
+        const recent = [...projectNotes]
+            .filter((n) => n.mtime >= cutoff)
+            .sort((a, b) => b.mtime - a.mtime)
+            .slice(0, 5);
+        for (const n of recent) {
+            if (context.length >= limit) break;
+            push(n, 'recent');
+        }
+
+        if (topic.length > 0 && context.length < limit) {
+            const hits = await this.search(topic, 'hybrid', 5);
+            for (const hit of hits) {
+                if (context.length >= limit) break;
+                const note = this.vault.tryGet(hit.noteId);
+                if (note === undefined) continue;
+                if (!inProject(note)) continue;
+                push(note, 'topic');
+            }
+        }
+
+        const todoPrefix = projectPrefix ?? '';
+        const allTodos = this.todos(todoPrefix, false);
+
+        return {
+            project,
+            todoCount: allTodos.length,
+            todoSample: allTodos.slice(0, 3),
+            context
+        };
     }
 
     public async linkNote(fromId: NoteId, toTitles: readonly string[], section = 'References', opts?: ProjectOpts): Promise<{note: Note; added: string[]}> {

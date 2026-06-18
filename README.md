@@ -65,7 +65,7 @@ Index: [doc/README.md](doc/README.md).
 
 The repo ships a project-level [`.mcp.json`](.mcp.json). After `npm run build`, launch Claude Code from the repository root — the `synaipse` MCP server starts automatically over stdio and reads `.env`. See [doc/claude-code-setup.md](doc/claude-code-setup.md).
 
-Available tools: `synaipse_get_project`, `_verify_history`, `_snapshot_list`, `_search`, `_read_note`, `_write_note`, `_update_note`, `_delete_note`, `_list_notes`, `_list_tags`, `_notes_by_tag`, `_backlinks`, `_outgoing_links`, `_link_note`, `_related`, `_suggest_links`, `_graph`, `_recent`, `_stale`, `_todos`, `_log_session`. Full reference: [doc/mcp-tools.md](doc/mcp-tools.md).
+Available tools: `synaipse_get_project`, `_verify_history`, `_snapshot_list`, `_search`, `_read_note`, `_write_note`, `_update_note`, `_delete_note`, `_list_notes`, `_list_tags`, `_notes_by_tag`, `_backlinks`, `_outgoing_links`, `_link_note`, `_related`, `_suggest_links`, `_graph`, `_recent`, `_prime`, `_stale`, `_todos`, `_log_session`. Full reference: [doc/mcp-tools.md](doc/mcp-tools.md).
 
 For shared multi-project vaults, set `SYNAIPSE_PROJECT=<name>` per Claude Code session — writes are then auto-scoped to `Memory/<name>/` and tagged `project/<name>`. See [doc/configuration.md](doc/configuration.md#project-scope).
 

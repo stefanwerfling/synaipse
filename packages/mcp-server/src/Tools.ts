@@ -526,5 +526,27 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
             const notes = sorted.map((n) => ({id: n.id, title: n.title, mtime: n.mtime}));
             return {response: ok({notes}), event: {kind: 'list', touched: sorted.slice(0, 5).map((n) => n.id)}};
         }
+    },
+    {
+        definition: {
+            name: 'synaipse_prime',
+            description: 'Return a curated context bundle for the current project: pinned notes, recent sessions, project decisions, hot notes (by backlink count), recently-edited notes, optional topic-relevant notes, and a TODO digest. Each entry carries a "reason" tag so you can prioritise. Call this once at session start (or when switching context) to prime yourself with what matters most before doing anything else.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    limit: {type: 'number', description: 'Max entries in the context list (default: 15). Pinned notes always count toward the limit but are added first.'},
+                    topic: {type: 'string', description: 'Optional query to bias selection — adds up to a few topic-relevant notes via hybrid search.'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const limit = asNumber(args.limit, 15);
+            const topic = typeof args.topic === 'string' ? args.topic : '';
+            const result = await service.prime({project: ctx?.project ?? null, limit, topic});
+            return {
+                response: ok(result),
+                event: {kind: 'list', touched: result.context.slice(0, 5).map((e) => e.id)}
+            };
+        }
     }
 ];

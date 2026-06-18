@@ -22,6 +22,7 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | [`synaipse_suggest_links`](#synaipse_suggest_links)   | Missing-links finder — related pairs without a wikilink |
 | [`synaipse_graph`](#synaipse_graph)                   | Knowledge graph (nodes + edges)                        |
 | [`synaipse_recent`](#synaipse_recent)                 | Most recently modified notes                           |
+| [`synaipse_prime`](#synaipse_prime)                   | Curated context bundle for the active project          |
 | [`synaipse_stale`](#synaipse_stale)                   | Notes that gathered dust — knowledge decay              |
 | [`synaipse_todos`](#synaipse_todos)                   | Open `- [ ]` items across the vault                    |
 | [`synaipse_log_session`](#synaipse_log_session)       | Append to today's session log                          |
@@ -247,6 +248,53 @@ No arguments. Returns `{nodes, edges}` for visualisation.
 | Arg     | Type    | Default |
 |---|---|---|
 | `limit` | number? | `20`    |
+
+---
+
+## `synaipse_prime`
+
+| Arg     | Type    | Default | Notes                                                  |
+|---|---|---|---|
+| `limit` | number? | `15`    | Max entries in the context list                        |
+| `topic` | string? | `""`    | Optional query that adds topic-relevant notes via hybrid search |
+
+Returns a curated context bundle scoped to the active project. Each entry carries a `reason` so Claude can prioritise; pinned notes always come first.
+
+Selection buckets, deduped and capped at `limit`:
+
+| Reason             | Source                                                                                  |
+|--------------------|-----------------------------------------------------------------------------------------|
+| `pinned`           | Frontmatter `prime: true` or `pinned: true`                                             |
+| `recent_session`   | Top 2 by mtime from `Memory/<project>/sessions/` (or `Memory/sessions/` if no project)  |
+| `project_decision` | All from `Memory/<project>/decisions/` (or `Memory/decisions/`), newest first           |
+| `hot`              | Top 3 by backlink count, project-scoped                                                 |
+| `recent`           | Top 5 by mtime within the last 14 days, project-scoped                                  |
+| `topic`            | Up to 3 hybrid-search hits when `topic` is given                                        |
+
+A separate `todoCount` + 3-sample `todoSample` digest is included, scoped to the same project.
+
+Returns:
+
+```json
+{
+  "project": "synaipse",
+  "todoCount": 4,
+  "todoSample": [{"noteId":"…","title":"…","line":12,"text":"add metrics","done":false}],
+  "context": [
+    {
+      "id": "Memory/synaipse/decisions/dolt-vs-md.md",
+      "title": "Dolt vs Markdown",
+      "reason": "project_decision",
+      "excerpt": "We keep Markdown so the vault stays Obsidian-readable…",
+      "tags": ["decision"],
+      "mtime": 1729000000000,
+      "backlinkCount": 4
+    }
+  ]
+}
+```
+
+Call once at session start (or after switching `SYNAIPSE_PROJECT`) to load what matters before doing other tool calls.
 
 ---
 
