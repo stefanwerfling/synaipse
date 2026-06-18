@@ -143,7 +143,15 @@ export async function* runChat(
 
     const sources = hitsToSources(hits, previews);
 
-    yield {kind: 'start', sources, model: deps.provider.model};
+    // Display label: fall back to the provider kind when the model field
+    // is empty (e.g. claude-shell without an explicit alias — the CLI uses
+    // its own default but we still need *something* identifying for the
+    // chat badge and the persisted `<!--chat:assistant model="…"-->` attr).
+    const modelLabel = deps.provider.model.length > 0
+        ? deps.provider.model
+        : deps.provider.kind;
+
+    yield {kind: 'start', sources, model: modelLabel};
 
     const context = buildContext(sources);
     const userPrompt = buildUserPrompt(options.question, context);

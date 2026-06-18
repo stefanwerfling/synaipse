@@ -8,6 +8,7 @@ import type {ChatEvent} from '../src/Chat.js';
 const buildConfig = (vaultPath: string, indexCachePath: string) => ({
     vaultPath,
     indexCachePath,
+    chatStoreDir: path.join(vaultPath, '..', 'chats'),
     embeddings: {provider: 'none' as const},
     qdrant: {url: 'http://localhost:6333', collection: 'test'},
     server: {name: 'synaipse-test', version: '0.0.0'},

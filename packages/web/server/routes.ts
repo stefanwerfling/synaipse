@@ -1,6 +1,6 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Frontmatter} from '@synaipse/core';
-import type {ChatgptImportConversation, SynaipseService} from '@synaipse/service';
+import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
 
@@ -42,6 +42,46 @@ const asString = (value: unknown, field: string): string => {
     }
 
     return value;
+};
+
+const parseTurnsForRequest = (raw: unknown): ChatTurn[] => {
+    if (!Array.isArray(raw)) {
+        throw new Error("field 'turns' must be an array");
+    }
+
+    const out: ChatTurn[] = [];
+
+    for (const item of raw) {
+        if (typeof item !== 'object' || item === null) continue;
+        const t = item as Record<string, unknown>;
+        if (t.role !== 'user' && t.role !== 'assistant') continue;
+        if (typeof t.content !== 'string') continue;
+
+        const turn: ChatTurn = {role: t.role, content: t.content};
+
+        if (typeof t.model === 'string') turn.model = t.model;
+
+        if (Array.isArray(t.sources)) {
+            const sources: ChatSourceRef[] = [];
+            for (const s of t.sources) {
+                if (typeof s !== 'object' || s === null) continue;
+                const src = s as Record<string, unknown>;
+                if (typeof src.target !== 'string') continue;
+                if (typeof src.title !== 'string') continue;
+                if (typeof src.index !== 'number') continue;
+
+                const ref: ChatSourceRef = {target: src.target, title: src.title, index: src.index};
+                if (typeof src.score === 'number') ref.score = src.score;
+                if (typeof src.snippet === 'string') ref.snippet = src.snippet;
+                sources.push(ref);
+            }
+            if (sources.length > 0) turn.sources = sources;
+        }
+
+        out.push(turn);
+    }
+
+    return out;
 };
 
 const asFrontmatter = (value: unknown): Frontmatter | undefined => {
@@ -689,6 +729,103 @@ export const routes = (
         }
 
         res.end();
+        return;
+    }
+
+    if (path === '/api/chats') {
+        if (method === 'GET') {
+            json(res, 200, await service.listChats());
+            return;
+        }
+
+        if (method === 'POST') {
+            try {
+                const body = await readJson<{
+                    title?: unknown;
+                    lastModel?: unknown;
+                    turns?: unknown;
+                }>(req);
+
+                const title = asString(body.title, 'title');
+                const turns = parseTurnsForRequest(body.turns);
+                const lastModel = typeof body.lastModel === 'string' ? body.lastModel : undefined;
+
+                const session = await service.createChat(
+                    lastModel !== undefined ? {title, turns, lastModel} : {title, turns}
+                );
+                json(res, 201, session);
+            } catch (error) {
+                json(res, 400, {error: String(error)});
+            }
+            return;
+        }
+
+        methodNotAllowed(res);
+        return;
+    }
+
+    if (path.startsWith('/api/chats/')) {
+        const tail = decodeURIComponent(path.slice('/api/chats/'.length));
+
+        // POST /api/chats/<id>/save-as-note — promote a stored chat into
+        // a real vault note. Body is empty / optional.
+        const saveAsNoteMatch = tail.match(/^(.+)\/save-as-note$/);
+        if (saveAsNoteMatch !== null && method === 'POST') {
+            const id = saveAsNoteMatch[1] as string;
+            try {
+                const noteId = await service.saveChatAsNote(id);
+                json(res, 201, {noteId});
+            } catch (error) {
+                json(res, 400, {error: String(error)});
+            }
+            return;
+        }
+
+        const id = tail;
+
+        if (method === 'GET') {
+            try {
+                json(res, 200, await service.getChat(id));
+            } catch (error) {
+                json(res, 404, {error: String(error)});
+            }
+            return;
+        }
+
+        if (method === 'PUT') {
+            try {
+                const body = await readJson<{
+                    title?: unknown;
+                    lastModel?: unknown;
+                    turns?: unknown;
+                }>(req);
+
+                const title = asString(body.title, 'title');
+                const turns = parseTurnsForRequest(body.turns);
+                const lastModel = typeof body.lastModel === 'string' ? body.lastModel : undefined;
+
+                const updated = await service.updateChat(
+                    id,
+                    lastModel !== undefined ? {title, turns, lastModel} : {title, turns}
+                );
+                json(res, 200, updated);
+            } catch (error) {
+                json(res, 400, {error: String(error)});
+            }
+            return;
+        }
+
+        if (method === 'DELETE') {
+            try {
+                await service.deleteChat(id);
+                json(res, 200, {ok: true});
+            } catch (error) {
+                json(res, 400, {error: String(error)});
+            }
+            return;
+        }
+
+        methodNotAllowed(res);
         return;
     }
 

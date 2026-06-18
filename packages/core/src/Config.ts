@@ -126,7 +126,11 @@ const buildChatConfig = (env: NodeJS.ProcessEnv): {
         };
     }
 
-    // claude-shell: model is optional (CLI alias like 'sonnet' or 'opus'); command defaults to 'claude'
+    // claude-shell: model is optional (CLI alias like 'sonnet' or 'opus').
+    // If unset, we leave it empty so the CLI picks its own default — passing
+    // a fake alias here would error out at the Claude CLI ("model X does not
+    // exist"). The chat layer falls back to provider.kind for the display
+    // label when this is empty, so the badge still shows something useful.
     return {
         provider,
         model: explicit ?? '',
@@ -159,9 +163,18 @@ export const parseProjectTags = (raw: string | undefined): string[] => {
 export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config => {
     const provider = resolveProvider(env);
 
+    const vaultPath = path.resolve(env.SYNAIPSE_VAULT_PATH ?? './vault');
+
+    // Chat storage defaults to a hidden sidecar inside the vault
+    // (`<vaultPath>/.synaipse-chats/`). The walker skips this folder so
+    // chats stay out of the notes list / graph / search index, and the
+    // user always has write permission since they own the vault dir.
+    // `./data/` is typically root-owned (Docker volumes for Ollama /
+    // Qdrant), so it's a bad default for app state.
     const base = {
-        vaultPath: path.resolve(env.SYNAIPSE_VAULT_PATH ?? './vault'),
+        vaultPath,
         indexCachePath: path.resolve(env.SYNAIPSE_INDEX_CACHE ?? './data/synaipse-index.json'),
+        chatStoreDir: path.resolve(env.SYNAIPSE_CHAT_STORE_DIR ?? path.join(vaultPath, '.synaipse-chats')),
         embeddings: {provider},
         qdrant: {
             url: env.QDRANT_URL ?? 'http://localhost:6333',

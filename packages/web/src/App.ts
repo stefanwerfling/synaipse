@@ -95,7 +95,7 @@ export class App {
                 this.loadNotes();
             },
             onAskAboutSelection: (noteId, selection) => {
-                this.chatPanel.setStickyContext(`Auszug aus ${noteId}`, selection);
+                this.chatPanel.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
                 void this.switchTab('chat');
             }
         });
@@ -110,30 +110,6 @@ export class App {
 
                 this.notesPanel.openNote(noteId);
                 void this.switchTab('notes');
-            },
-            onSaveAsNote: async (markdown) => {
-                const now = new Date();
-                const date = now.toISOString().slice(0, 10);
-                const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-                const path = `chats/${date}-${time}.md`;
-
-                try {
-                    const note = await api.writeNote({
-                        path,
-                        content: markdown,
-                        frontmatter: {
-                            title: `Chat ${date} ${time}`,
-                            tags: ['chat'],
-                            type: 'note'
-                        }
-                    });
-                    this.graph = null;
-                    void this.loadNotes();
-                    return {noteId: note.id};
-                } catch (cause) {
-                    console.error('save chat as note failed', cause);
-                    return null;
-                }
             }
         });
 
@@ -486,6 +462,12 @@ export class App {
             return;
         }
 
+        // Lifecycle: tell the panel we're leaving so it can snapshot
+        // any state that won't survive a DOM detach (chat: scroll pos).
+        if (this.tab === 'chat') {
+            this.chatPanel.onHide();
+        }
+
         this.tab = tab;
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
@@ -525,6 +507,7 @@ export class App {
     private showChat(): void {
         clear(this.body);
         this.body.appendChild(this.chatPanel.element);
+        this.chatPanel.onShow();
         this.chatPanel.focusInput();
     }
 

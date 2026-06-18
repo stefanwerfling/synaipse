@@ -1,7 +1,7 @@
 import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 
-const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', '.trash']);
+const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', '.trash', '.synaipse-chats']);
 
 export async function* walkMarkdown(root: string): AsyncIterableIterator<string> {
     const entries = await readdir(root, {withFileTypes: true});

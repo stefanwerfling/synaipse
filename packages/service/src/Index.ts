@@ -7,3 +7,9 @@ export type {
     ChatgptImportConversation,
     ChatgptImportMessage
 } from './ChatgptImport.js';
+export type {
+    ChatSession,
+    ChatSummary,
+    ChatTurn,
+    ChatSourceRef
+} from './ChatStore.js';

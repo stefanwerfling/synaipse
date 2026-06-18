@@ -53,6 +53,17 @@ const renderMarkdown = (content: string): string => {
     return marked.parse(content, {async: false, gfm: true}) as string;
 };
 
+/**
+ * One-shot render of a markdown string into a host element, with the
+ * same code highlighting as the note viewer. Useful for short markdown
+ * snippets (chat messages, hover previews) where a full MarkdownPreview
+ * instance is overkill. Wikilinks are NOT transformed — caller can run
+ * a separate pass if needed.
+ */
+export const renderMarkdownInto = (host: HTMLElement, content: string): void => {
+    host.innerHTML = renderMarkdown(content);
+};
+
 const isInsideCode = (node: Node): boolean => {
     let parent: Node | null = node.parentNode;
 

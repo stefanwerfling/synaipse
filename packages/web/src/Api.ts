@@ -102,6 +102,37 @@ export const api = {
 
         return json(await fetch(url));
     },
+    listChats: async (): Promise<ChatSummary[]> => {
+        return json(await fetch('/api/chats'));
+    },
+    getChat: async (id: string): Promise<ChatSession> => {
+        return json(await fetch(`/api/chats/${encodeURIComponent(id)}`));
+    },
+    createChat: async (input: ChatSessionInput): Promise<ChatSession> => {
+        const response = await fetch('/api/chats', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(input)
+        });
+        return json(response);
+    },
+    updateChat: async (id: string, input: ChatSessionInput): Promise<ChatSession> => {
+        const response = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(input)
+        });
+        return json(response);
+    },
+    deleteChat: async (id: string): Promise<void> => {
+        await noContent(await fetch(`/api/chats/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+    },
+    saveChatAsNote: async (id: string): Promise<{noteId: string}> => {
+        const response = await fetch(`/api/chats/${encodeURIComponent(id)}/save-as-note`, {
+            method: 'POST'
+        });
+        return json(response);
+    },
     uploadAsset: async (noteId: string, file: File): Promise<AssetUploadResult> => {
         const response = await fetch('/api/assets/upload', {
             method: 'POST',
@@ -158,6 +189,44 @@ export type SummarizeEvent =
     | {kind: 'token'; text: string}
     | {kind: 'done'; summary: string}
     | {kind: 'error'; message: string};
+
+export interface ChatSourceRef {
+    target: string;
+    title: string;
+    index: number;
+    score?: number;
+    snippet?: string;
+}
+
+export interface ChatTurnDto {
+    role: 'user' | 'assistant';
+    content: string;
+    model?: string;
+    sources?: ChatSourceRef[];
+}
+
+export interface ChatSession {
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    lastModel?: string;
+    turns: ChatTurnDto[];
+}
+
+export interface ChatSummary {
+    id: string;
+    title: string;
+    updatedAt: string;
+    lastModel?: string;
+    turnCount: number;
+}
+
+export interface ChatSessionInput {
+    title: string;
+    lastModel?: string;
+    turns: ChatTurnDto[];
+}
 
 export interface ChatgptImportAttachment {
     assetPointer: string;
