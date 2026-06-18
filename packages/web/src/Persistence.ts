@@ -84,11 +84,17 @@ export class PersistentValue<T> {
     private current: T;
     private readonly listeners = new Set<(value: T) => void>();
     private readonly storageHandler: (event: StorageEvent) => void;
+    private readonly unloadHandler: (() => void) | null = null;
+    private persistTimer: number | null = null;
 
     public constructor(
         private readonly key: string,
         private readonly initial: T,
-        private readonly codec: StorageCodec<T> = defaultCodec<T>()
+        private readonly codec: StorageCodec<T> = defaultCodec<T>(),
+        /** When > 0, persist() coalesces writes via a leading-edge timer.
+         * Useful for high-frequency updates (e.g. live heat bumps) so we
+         * don't JSON-stringify + localStorage.setItem on every call. */
+        private readonly persistDebounceMs: number = 0
     ) {
         this.current = readInitial(key, initial, codec);
 
@@ -106,6 +112,11 @@ export class PersistentValue<T> {
 
         if (typeof window !== 'undefined') {
             window.addEventListener('storage', this.storageHandler);
+
+            if (this.persistDebounceMs > 0) {
+                this.unloadHandler = () => this.flush();
+                window.addEventListener('beforeunload', this.unloadHandler);
+            }
         }
     }
 
@@ -130,14 +141,50 @@ export class PersistentValue<T> {
         };
     }
 
+    /** Force any pending debounced write to flush synchronously. */
+    public flush(): void {
+        if (this.persistTimer !== null) {
+            if (typeof window !== 'undefined') {
+                window.clearTimeout(this.persistTimer);
+            }
+            this.persistTimer = null;
+        }
+        this.persistNow();
+    }
+
     public destroy(): void {
+        this.flush();
+
         if (typeof window !== 'undefined') {
             window.removeEventListener('storage', this.storageHandler);
+
+            if (this.unloadHandler !== null) {
+                window.removeEventListener('beforeunload', this.unloadHandler);
+            }
         }
         this.listeners.clear();
     }
 
     private persist(): void {
+        if (this.persistDebounceMs <= 0 || typeof window === 'undefined') {
+            this.persistNow();
+            return;
+        }
+
+        // Leading-edge throttle: the first call schedules; subsequent calls
+        // are no-ops until the timer fires. When it does, it serialises the
+        // latest `this.current`, so no state is lost.
+        if (this.persistTimer !== null) {
+            return;
+        }
+
+        this.persistTimer = window.setTimeout(() => {
+            this.persistTimer = null;
+            this.persistNow();
+        }, this.persistDebounceMs);
+    }
+
+    private persistNow(): void {
         if (typeof localStorage === 'undefined') {
             return;
         }

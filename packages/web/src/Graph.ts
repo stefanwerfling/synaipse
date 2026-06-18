@@ -49,6 +49,91 @@ interface FilterResult {
     communityCount: number;
 }
 
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const SPIRAL_SPACING = 32;
+
+/**
+ * Place all visible nodes deterministically without running a force layout.
+ * - Nodes with a saved position use it verbatim.
+ * - Nodes without one are placed at the centroid of their already-placed
+ *   neighbours (with a small index-based jitter so coincident nodes don't
+ *   pile up exactly on top of each other).
+ * - Orphan new nodes are dropped on a golden-angle spiral around (0,0).
+ *
+ * This replaces the previous cose-on-missing-positions path that blocked
+ * the main thread for seconds on large vaults.
+ */
+export const resolvePositions = (
+    elements: readonly ElementDefinition[],
+    savedPositions: Readonly<Record<string, {x: number; y: number}>>
+): Map<string, {x: number; y: number}> => {
+    const out = new Map<string, {x: number; y: number}>();
+    const nodeIds: string[] = [];
+    const neighbours = new Map<string, string[]>();
+
+    for (const e of elements) {
+        const id = e.data.id;
+        if (typeof id !== 'string') continue;
+
+        if (e.data.source === undefined) {
+            nodeIds.push(id);
+            const saved = savedPositions[id];
+            if (saved !== undefined) {
+                out.set(id, {x: saved.x, y: saved.y});
+            }
+        } else {
+            const source = e.data.source as string;
+            const target = e.data.target as string;
+            const a = neighbours.get(source) ?? [];
+            a.push(target);
+            neighbours.set(source, a);
+            const b = neighbours.get(target) ?? [];
+            b.push(source);
+            neighbours.set(target, b);
+        }
+    }
+
+    let orphanIndex = 0;
+
+    for (const id of nodeIds) {
+        if (out.has(id)) continue;
+
+        const neighbourIds = neighbours.get(id) ?? [];
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+
+        for (const n of neighbourIds) {
+            if (n === id) continue;
+            const pos = out.get(n);
+            if (pos !== undefined) {
+                sumX += pos.x;
+                sumY += pos.y;
+                count += 1;
+            }
+        }
+
+        if (count > 0) {
+            // Centroid of placed neighbours, plus a deterministic jitter on
+            // a tiny golden-angle ring so multiple new siblings don't overlap.
+            const jitterAngle = orphanIndex * GOLDEN_ANGLE;
+            out.set(id, {
+                x: sumX / count + Math.cos(jitterAngle) * 18,
+                y: sumY / count + Math.sin(jitterAngle) * 18
+            });
+        } else {
+            // No neighbour anchor — spiral around origin.
+            const r = SPIRAL_SPACING * Math.sqrt(orphanIndex + 1);
+            const theta = orphanIndex * GOLDEN_ANGLE;
+            out.set(id, {x: r * Math.cos(theta), y: r * Math.sin(theta)});
+        }
+
+        orphanIndex += 1;
+    }
+
+    return out;
+};
+
 const buildElements = (state: GraphState, communities: CommunityResult | null): FilterResult => {
     const tagOk = (nodeTags: string[]): boolean => {
         if (state.selectedTags.size === 0) {
@@ -473,15 +558,17 @@ export class GraphView implements GraphRenderer {
         this.stats.textContent = statsParts.join(' · ');
 
         const savedPositions = positionsStore.get();
-        const nodeIds = filter.elements
-            .filter((e) => e.data.source === undefined)
-            .map((e) => e.data.id as string);
-        const haveAllPositions = nodeIds.length > 0 && nodeIds.every((id) => savedPositions[id] !== undefined);
+        const resolvedPositions = resolvePositions(filter.elements, savedPositions);
 
         const elementsWithPositions = filter.elements.map((e) => {
             const id = e.data.id;
             const isNode = e.data.source === undefined;
-            const pos = isNode && typeof id === 'string' ? savedPositions[id] : undefined;
+
+            if (!isNode || typeof id !== 'string') {
+                return e;
+            }
+
+            const pos = resolvedPositions.get(id);
             return pos !== undefined ? {...e, position: pos} : e;
         });
 
@@ -503,6 +590,10 @@ export class GraphView implements GraphRenderer {
                         'text-margin-y': 4,
                         'text-outline-width': 2,
                         'text-outline-color': '#0f1115',
+                        // Skip label paint entirely once the on-screen text
+                        // would be ~7px or smaller. Eliminates thousands of
+                        // text-outline draws per pan/zoom frame on big vaults.
+                        'min-zoomed-font-size': 7,
                         'width': 'mapData(tagCount, 0, 5, 14, 32)',
                         'height': 'mapData(tagCount, 0, 5, 14, 32)'
                     }
@@ -523,17 +614,13 @@ export class GraphView implements GraphRenderer {
                     style: {'border-width': 2, 'border-color': '#ffb86c'}
                 }
             ],
-            layout: haveAllPositions
-                ? {name: 'preset', fit: true, padding: 24}
-                : {
-                    name: 'cose',
-                    animate: false,
-                    idealEdgeLength: () => 80,
-                    nodeRepulsion: () => 8000,
-                    padding: 24,
-                    fit: true
-                },
-            wheelSensitivity: 0.2
+            // Always preset: cose was O(N²) and blocked the main thread on
+            // multi-thousand-node vaults. resolvePositions() places new nodes
+            // near their neighbours, which is good enough — the user can drag
+            // to refine, and snapshotPositions() persists the result.
+            layout: {name: 'preset', fit: true, padding: 24},
+            // Bigger wheel steps → fewer zoom events → fewer re-renders.
+            wheelSensitivity: 0.4
         });
 
         this.cy.on('tap', 'node', (event) => {

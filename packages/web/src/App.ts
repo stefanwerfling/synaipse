@@ -83,7 +83,7 @@ export class App {
         this.hideIsolated = new PersistentValue<boolean>(STORAGE_HIDE_ISOLATED, false);
         this.showHulls = new PersistentValue<boolean>(STORAGE_SHOW_HULLS, false);
         this.showHeat = new PersistentValue<boolean>(STORAGE_SHOW_HEAT, false);
-        this.heatState = new PersistentValue<HeatState>(STORAGE_HEAT_STATE, {});
+        this.heatState = new PersistentValue<HeatState>(STORAGE_HEAT_STATE, {}, undefined, 500);
         this.showRoomGrid = new PersistentValue<boolean>(STORAGE_SHOW_ROOM_GRID, false);
         this.showCluster = new PersistentValue<boolean>(STORAGE_SHOW_CLUSTER, false);
         this.showCommunities = new PersistentValue<boolean>(STORAGE_SHOW_COMMUNITIES, false);
@@ -330,14 +330,16 @@ export class App {
     }
 
     private scheduleVaultReload(): void {
+        // Trailing-edge debounce: each event resets the timer, so a burst of
+        // MCP writes collapses to a single reload instead of one every 250ms.
         if (this.reloadTimer !== null) {
-            return;
+            window.clearTimeout(this.reloadTimer);
         }
 
         this.reloadTimer = window.setTimeout(() => {
             this.reloadTimer = null;
             void this.reloadVault();
-        }, 250);
+        }, 500);
     }
 
     private async reloadVault(): Promise<void> {

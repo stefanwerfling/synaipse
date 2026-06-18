@@ -8,7 +8,24 @@ import {el} from './Dom.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
 import {CONCENTRATE_COLOR, filterGraph, PULSE_COLORS, concentrateOpacity, concentrateRadius} from './GraphRenderer.js';
+import {PersistentValue} from './Persistence.js';
 import {trailOpacity} from './Trail.js';
+
+const STORAGE_POSITIONS_3D = 'synaipse.graph3d.positions';
+type Position3DMap = Record<string, {x: number; y: number; z: number}>;
+// Debounce persistence: drag-end can fire rapidly during pan-drag, and a
+// 3500-node vault is non-trivial to JSON.stringify.
+const positionsStore3D = new PersistentValue<Position3DMap>(STORAGE_POSITIONS_3D, {}, undefined, 500);
+
+/**
+ * How many force-simulation ticks the engine is allowed to run after a
+ * (re)build. The library default is Infinity, capped by a 15s wall-clock
+ * timer — which on a multi-thousand-node vault burns CPU for the full
+ * 15s because every tick is O(N log N). With saved positions restored as
+ * seeds, ~80 ticks is enough to settle visible drift without staying
+ * busy for seconds at a time.
+ */
+const COOLDOWN_TICKS = 80;
 
 interface NodeRecord {
     id: string;
@@ -501,6 +518,7 @@ export class GraphView3D implements GraphRenderer {
         this.stats.textContent = `${visibleNodeCount} nodes · ${visibleEdgeCount} edges`;
 
         const oldById = new Map(this.nodes.map((n) => [n.id, n]));
+        const savedPositions = positionsStore3D.get();
 
         this.nodes = nodes.map((n) => {
             const existing = oldById.get(n.id);
@@ -521,16 +539,28 @@ export class GraphView3D implements GraphRenderer {
                 }
             }
 
+            // Position precedence: live in-memory > localStorage snapshot >
+            // let the force engine spawn it. Restoring across sessions
+            // means the user doesn't pay another 15s of CPU-bound settling
+            // every time they re-enter the 3D tab.
+            const saved = savedPositions[n.id];
+
             if (existing?.x !== undefined) {
                 record.x = existing.x;
+            } else if (saved !== undefined) {
+                record.x = saved.x;
             }
 
             if (existing?.y !== undefined) {
                 record.y = existing.y;
+            } else if (saved !== undefined) {
+                record.y = saved.y;
             }
 
             if (existing?.z !== undefined) {
                 record.z = existing.z;
+            } else if (saved !== undefined) {
+                record.z = saved.z;
             }
 
             return record;
@@ -549,6 +579,7 @@ export class GraphView3D implements GraphRenderer {
                 .backgroundColor('#000000')
                 .showNavInfo(false)
                 .nodeRelSize(4)
+                .cooldownTicks(COOLDOWN_TICKS)
                 .nodeLabel((node: object) => (node as NodeRecord).title)
                 .nodeThreeObject((node: object) => this.makeSphere(node as NodeRecord))
                 .linkColor((link: object) => this.linkColorForHover(link))
@@ -567,9 +598,13 @@ export class GraphView3D implements GraphRenderer {
                     this.hoverNodeId = node === null ? null : (node as NodeRecord).id;
                     this.applyHoverHighlight();
                 })
+                .onNodeDragEnd(() => {
+                    this.snapshotPositions();
+                })
                 .onEngineStop(() => {
                     this.hullsDirty = true;
                     this.refreshHulls();
+                    this.snapshotPositions();
                 });
 
             this.installParticles();
@@ -584,6 +619,29 @@ export class GraphView3D implements GraphRenderer {
             .width(this.canvas.clientWidth || 800)
             .height(this.canvas.clientHeight || 600)
             .graphData({nodes: this.nodes, links: this.links});
+    }
+
+    /**
+     * Save current node positions to localStorage so the next mount can
+     * skip the force-settling phase. Persistence is debounced inside
+     * PersistentValue so rapid drag-end / engine-stop bursts collapse
+     * to one JSON.stringify.
+     */
+    private snapshotPositions(): void {
+        if (this.nodes.length === 0) {
+            return;
+        }
+
+        const next: Position3DMap = {...positionsStore3D.get()};
+
+        for (const node of this.nodes) {
+            if (node.x === undefined || node.y === undefined || node.z === undefined) {
+                continue;
+            }
+            next[node.id] = {x: node.x, y: node.y, z: node.z};
+        }
+
+        positionsStore3D.set(next);
     }
 
     public focus(noteId: string): void {

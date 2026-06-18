@@ -30,7 +30,13 @@ interface NoteGroup {
 }
 
 const GROUP_ROW_H = 32;
-const NOTE_ROW_H = 56;
+// Two heights so the row box is large enough for whatever it actually paints.
+// With tags, the meta column adds gap + a ~17px chip row that previously
+// overflowed a hard-coded 56px box and overlapped the next item by ~16px.
+const NOTE_ROW_H_PLAIN = 56;
+const NOTE_ROW_H_TAGGED = 76;
+const noteRowHeight = (note: NoteSummary): number =>
+    note.tags.length > 0 ? NOTE_ROW_H_TAGGED : NOTE_ROW_H_PLAIN;
 const VIRT_BUFFER = 8;
 
 type VirtualRow =
@@ -375,7 +381,7 @@ export class NotesPanel {
                 for (const n of group.notes) {
                     this.flatRows.push({kind: 'note', note: n});
                     this.rowOffsets.push(offset);
-                    offset += NOTE_ROW_H;
+                    offset += noteRowHeight(n);
                 }
             }
         }
@@ -477,7 +483,7 @@ export class NotesPanel {
 
         return el('li', {
             class: n.id === this.activeId ? 'note-list-item active' : 'note-list-item',
-            style: {top: `${top}px`, height: `${NOTE_ROW_H}px`},
+            style: {top: `${top}px`, height: `${noteRowHeight(n)}px`},
             on: {click: () => this.handleSelect(n.id)}
         },
             el('div', {class: 'note-list-title', text: n.title}),
