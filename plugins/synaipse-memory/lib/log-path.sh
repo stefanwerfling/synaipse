@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Sourced by hook scripts. Requires SESSION_ID and CLAUDE_PROJECT_DIR.
+# Exports:
+#   SYNAIPSE_LOG_DIR
+#   SYNAIPSE_JSONL_PATH
+#   SYNAIPSE_META_PATH
+
+if [[ -z "${CLAUDE_PROJECT_DIR:-}" ]]; then
+  CLAUDE_PROJECT_DIR="$PWD"
+fi
+
+SYNAIPSE_LOG_DIR="${CLAUDE_PROJECT_DIR}/.synaipse-sessions"
+SYNAIPSE_JSONL_PATH="${SYNAIPSE_LOG_DIR}/${SESSION_ID}.jsonl"
+SYNAIPSE_META_PATH="${SYNAIPSE_LOG_DIR}/${SESSION_ID}.meta.json"

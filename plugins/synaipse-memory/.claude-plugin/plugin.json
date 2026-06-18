@@ -1,0 +1,10 @@
+{
+  "name": "synaipse-memory",
+  "version": "0.1.0",
+  "description": "Capture Claude Code sessions into per-project JSONL logs; curate via slash command and write to the Synaipse vault through MCP.",
+  "author": { "name": "Stefan Werfling" },
+  "homepage": "https://github.com/stefanwerfling/synaipse",
+  "license": "MIT",
+  "keywords": ["synaipse", "memory", "vault", "session", "mcp"],
+  "hooks": "./hooks/hooks.json"
+}

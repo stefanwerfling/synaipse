@@ -10,6 +10,7 @@ build/
 /vault/
 /data/
 /qdrant_storage/
+/.synaipse-sessions/
 
 .DS_Store
 *.log
