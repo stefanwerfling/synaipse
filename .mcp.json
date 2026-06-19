@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "synaipse": {
-      "command": "node",
-      "args": ["--enable-source-maps", "./packages/mcp-server/dist/Index.js"],
-      "env": {}
+      "type": "http",
+      "url": "http://localhost:3001/mcp",
+      "headers": {"X-Synaipse-Project": "synaipse"}
     }
   }
 }
