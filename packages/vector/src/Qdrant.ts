@@ -3,12 +3,91 @@ import {QdrantClient} from '@qdrant/js-client-rest';
 import {VectorError} from '@synaipse/core';
 import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
 
+export interface QdrantRetryInfo {
+    attempt: number;
+    error: unknown;
+    waitMs: number;
+}
+
+export interface QdrantRetryOptions {
+    maxRetries?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    onRetry?: (info: QdrantRetryInfo) => void;
+    sleep?: (ms: number) => Promise<void>;
+    random?: () => number;
+}
+
 export interface QdrantStoreOptions {
     url: string;
     apiKey?: string;
     collection: string;
     dimension: number;
+    retry?: QdrantRetryOptions;
 }
+
+interface ResolvedRetry {
+    maxRetries: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    onRetry?: (info: QdrantRetryInfo) => void;
+    sleep: (ms: number) => Promise<void>;
+    random: () => number;
+}
+
+const DEFAULT_SLEEP = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+
+const resolveRetry = (opts: QdrantRetryOptions | undefined): ResolvedRetry => ({
+    maxRetries: opts?.maxRetries ?? 5,
+    baseDelayMs: opts?.baseDelayMs ?? 300,
+    maxDelayMs: opts?.maxDelayMs ?? 5_000,
+    sleep: opts?.sleep ?? DEFAULT_SLEEP,
+    random: opts?.random ?? Math.random,
+    ...(opts?.onRetry ? {onRetry: opts.onRetry} : {})
+});
+
+// undici-level transient errors that warrant a retry. The real signal is
+// usually buried under `TypeError: fetch failed` — walk `.cause` to find it.
+// Typical trigger: a slow embedder (HF on CPU, large batch) leaves the
+// keep-alive socket idle long enough for Qdrant to close it; the next call
+// then sees "other side closed" or EPIPE on a stale pooled connection.
+const RETRYABLE_CODES = new Set([
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'EPIPE',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ETIMEDOUT',
+    'EAI_AGAIN'
+]);
+
+export const isRetryableNetworkError = (error: unknown): boolean => {
+    let cur: unknown = error;
+
+    for (let depth = 0; depth < 5 && cur !== undefined; depth += 1) {
+        if (!(cur instanceof Error)) {
+            return false;
+        }
+
+        const code = (cur as Error & {code?: unknown}).code;
+        const codeStr = typeof code === 'string' ? code : '';
+
+        if (
+            cur.name === 'SocketError'
+            || RETRYABLE_CODES.has(codeStr)
+            || codeStr.startsWith('UND_ERR_')
+        ) {
+            return true;
+        }
+
+        cur = (cur as Error & {cause?: unknown}).cause;
+    }
+
+    return false;
+};
 
 interface ChunkPayload {
     noteId: NoteId;
@@ -55,6 +134,7 @@ const sanitiseText = (text: string): string => {
 
 export class QdrantStore {
     private readonly client: QdrantClient;
+    private readonly retry: ResolvedRetry;
     private ready = false;
 
     public constructor(private readonly options: QdrantStoreOptions) {
@@ -62,6 +142,31 @@ export class QdrantStore {
             url: options.url,
             ...(options.apiKey !== undefined ? {apiKey: options.apiKey} : {})
         });
+        this.retry = resolveRetry(options.retry);
+    }
+
+    private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+        let attempt = 0;
+
+        while (true) {
+            try {
+                return await fn();
+            } catch (error) {
+                if (attempt >= this.retry.maxRetries || !isRetryableNetworkError(error)) {
+                    throw error;
+                }
+
+                attempt += 1;
+                const jitter = 0.5 + this.retry.random() * 0.5;
+                const waitMs = Math.min(
+                    this.retry.maxDelayMs,
+                    Math.floor(this.retry.baseDelayMs * 2 ** (attempt - 1) * jitter)
+                );
+
+                this.retry.onRetry?.({attempt, error, waitMs});
+                await this.retry.sleep(waitMs);
+            }
+        }
     }
 
     public async ensureCollection(): Promise<void> {
@@ -69,18 +174,18 @@ export class QdrantStore {
             return;
         }
 
-        const collections = await this.client.getCollections();
+        const collections = await this.withRetry(() => this.client.getCollections());
         const exists = collections.collections.some((c) => c.name === this.options.collection);
 
         if (!exists) {
-            await this.client.createCollection(this.options.collection, {
+            await this.withRetry(() => this.client.createCollection(this.options.collection, {
                 vectors: {size: this.options.dimension, distance: 'Cosine'}
-            });
+            }));
 
-            await this.client.createPayloadIndex(this.options.collection, {
+            await this.withRetry(() => this.client.createPayloadIndex(this.options.collection, {
                 field_name: 'noteId',
                 field_schema: 'keyword'
-            });
+            }));
         }
 
         this.ready = true;
@@ -97,7 +202,7 @@ export class QdrantStore {
 
         await this.ensureCollection();
 
-        await this.client.upsert(this.options.collection, {
+        await this.withRetry(() => this.client.upsert(this.options.collection, {
             wait: true,
             points: chunks.map((chunk, i) => ({
                 id: toPointId(chunk.id),
@@ -110,7 +215,7 @@ export class QdrantStore {
                     chunkId: chunk.id
                 } satisfies ChunkPayload
             }))
-        });
+        }));
     }
 
     public async deleteByNote(noteId: NoteId): Promise<void> {
@@ -124,22 +229,22 @@ export class QdrantStore {
 
         await this.ensureCollection();
 
-        await this.client.delete(this.options.collection, {
+        await this.withRetry(() => this.client.delete(this.options.collection, {
             wait: true,
             filter: {
                 must: [{key: 'noteId', match: {any: noteIds}}]
             }
-        });
+        }));
     }
 
     public async search(vector: number[], limit: number): Promise<SearchHit[]> {
         await this.ensureCollection();
 
-        const results = await this.client.search(this.options.collection, {
+        const results = await this.withRetry(() => this.client.search(this.options.collection, {
             vector,
             limit,
             with_payload: true
-        });
+        }));
 
         const hits: SearchHit[] = [];
 

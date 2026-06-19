@@ -8,6 +8,7 @@ export {createEmbedder} from './Factory.js';
 export type {Embedder, EmbedderInputType} from './Embedder.js';
 export {chunkNote, CHUNK_DEFAULTS} from './Chunker.js';
 export {QdrantStore} from './Qdrant.js';
+export type {QdrantStoreOptions, QdrantRetryOptions, QdrantRetryInfo} from './Qdrant.js';
 export {VectorIndex, partitionChunks} from './Pipeline.js';
 export type {ChunkOptions} from './Chunker.js';
 export type {BatchInfo, IndexBatchResult, VectorIndexOptions} from './Pipeline.js';

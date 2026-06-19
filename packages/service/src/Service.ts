@@ -288,7 +288,13 @@ export class SynaipseService {
             url: config.qdrant.url,
             ...(config.qdrant.apiKey !== undefined ? {apiKey: config.qdrant.apiKey} : {}),
             collection: config.qdrant.collection,
-            dimension: embedder.dimension
+            dimension: embedder.dimension,
+            retry: {
+                onRetry: ({attempt, error, waitMs}) => {
+                    const reason = error instanceof Error ? error.message : String(error);
+                    process.stderr.write(`[synaipse] qdrant retry #${attempt} reason="${reason}" wait=${waitMs}ms\n`);
+                }
+            }
         });
 
         this.index = new VectorIndex({
