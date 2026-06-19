@@ -165,15 +165,15 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
 
     const vaultPath = path.resolve(env.SYNAIPSE_VAULT_PATH ?? './vault');
 
-    // Chat storage defaults to a hidden sidecar inside the vault
-    // (`<vaultPath>/.synaipse-chats/`). The walker skips this folder so
-    // chats stay out of the notes list / graph / search index, and the
-    // user always has write permission since they own the vault dir.
-    // `./data/` is typically root-owned (Docker volumes for Ollama /
-    // Qdrant), so it's a bad default for app state.
+    // App-state defaults (index cache, chat store) sit as hidden sidecars
+    // inside the vault. The walker skips dot-prefixed dirs and only picks
+    // up `.md`, so they stay out of the notes list / graph / search index,
+    // and the user always has write permission since they own the vault.
+    // `./data/` would be a bad default — it's typically root-owned because
+    // docker-compose creates it for the Qdrant / Ollama volumes.
     const base = {
         vaultPath,
-        indexCachePath: path.resolve(env.SYNAIPSE_INDEX_CACHE ?? './data/synaipse-index.json'),
+        indexCachePath: path.resolve(env.SYNAIPSE_INDEX_CACHE ?? path.join(vaultPath, '.synaipse-index.json')),
         chatStoreDir: path.resolve(env.SYNAIPSE_CHAT_STORE_DIR ?? path.join(vaultPath, '.synaipse-chats')),
         embeddings: {provider},
         qdrant: {

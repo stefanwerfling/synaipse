@@ -10,8 +10,8 @@ cp .env.example .env
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SYNAIPSE_VAULT_PATH`  | `./vault`                    | Folder Synaipse reads/writes Markdown from. |
-| `SYNAIPSE_INDEX_CACHE` | `./data/synaipse-index.json` | Cache file for the in-memory note index.    |
+| `SYNAIPSE_VAULT_PATH`  | `./vault`                                       | Folder Synaipse reads/writes Markdown from. |
+| `SYNAIPSE_INDEX_CACHE` | `<SYNAIPSE_VAULT_PATH>/.synaipse-index.json`    | Cache file for the in-memory note index. Sits inside the vault as a hidden sidecar — the walker only picks up `.md`, so it stays out of the notes list. |
 
 The vault path is interpreted relative to the directory that the process is started from. For absolute portability use an absolute path.
 
