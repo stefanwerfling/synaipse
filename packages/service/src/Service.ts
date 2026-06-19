@@ -584,6 +584,49 @@ export class SynaipseService {
         });
     }
 
+    /**
+     * Write an asset with project-scope enforcement. If `noteId` is given,
+     * it must live inside the active project folder; the returned relativePath
+     * is computed against it. If absent and a project scope is active, the
+     * asset still lands in `Memory/<project>/_assets/` (relativePath is then
+     * left undefined since there's no anchor note).
+     */
+    public async writeAssetScoped(
+        input: {content: Buffer; contentType: string | null; noteId?: NoteId},
+        opts?: ProjectOpts
+    ): Promise<{assetId: string; written: number; deduped: boolean; relativePath?: string}> {
+        const project = this.requireProject('write_asset', opts?.project);
+        const prefix = this.projectFolder(project);
+
+        if (input.noteId !== undefined && input.noteId.length > 0) {
+            if (!input.noteId.startsWith(prefix)) {
+                throw new ProjectScopeError(
+                    `write_asset blocked: ${input.noteId} is outside project scope (${project}). Project notes live under ${prefix}.`
+                );
+            }
+
+            return writeAsset({
+                vaultPath: this.vault.root,
+                noteId: input.noteId,
+                content: input.content,
+                contentType: input.contentType
+            });
+        }
+
+        // No anchor note — synthesise a virtual id inside the project folder
+        // so assetsFolderForNote routes to Memory/<project>/_assets, then drop
+        // relativePath from the result since there's no real note to be
+        // relative to.
+        const result = await writeAsset({
+            vaultPath: this.vault.root,
+            noteId: `${prefix}.virtual.md`,
+            content: input.content,
+            contentType: input.contentType
+        });
+
+        return {assetId: result.assetId, written: result.written, deduped: result.deduped};
+    }
+
     public chatEnabled(): boolean {
         return this.chatProvider !== null;
     }

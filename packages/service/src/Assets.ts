@@ -3,7 +3,7 @@ import {mkdir, writeFile, access} from 'node:fs/promises';
 import {constants as fsConstants} from 'node:fs';
 import path from 'node:path';
 
-const MIME_TO_EXT: Record<string, string> = {
+export const MIME_TO_EXT: Record<string, string> = {
     'image/jpeg': 'jpg',
     'image/jpg': 'jpg',
     'image/png': 'png',
@@ -11,6 +11,12 @@ const MIME_TO_EXT: Record<string, string> = {
     'image/webp': 'webp',
     'image/avif': 'avif',
     'image/svg+xml': 'svg'
+};
+
+export const isAllowedAssetMime = (contentType: string | null): boolean => {
+    if (contentType === null) return false;
+    const head = contentType.split(';')[0]?.trim().toLowerCase();
+    return head !== undefined && head in MIME_TO_EXT;
 };
 
 const extFromMime = (contentType: string | null): string => {

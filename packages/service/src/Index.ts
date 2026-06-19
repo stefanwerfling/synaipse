@@ -2,6 +2,8 @@ export {SynaipseService} from './Service.js';
 export {fulltextSearch} from './Fulltext.js';
 export {HashCache} from './Cache.js';
 export type {CacheEntry} from './Cache.js';
+export {isAllowedAssetMime, MIME_TO_EXT} from './Assets.js';
+export type {WriteAssetResult} from './Assets.js';
 export type {
     ChatgptImportAttachment,
     ChatgptImportConversation,

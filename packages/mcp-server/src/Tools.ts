@@ -1,7 +1,35 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import type {SearchMode} from '@synaipse/core';
-import {SynaipseService} from '@synaipse/service';
+import {SynaipseService, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
+
+const DEFAULT_ASSET_MAX_BYTES = 10 * 1024 * 1024;
+
+const assetMaxBytes = (): number => {
+    const raw = process.env.SYNAIPSE_ASSET_MAX_BYTES;
+    if (raw === undefined || raw.trim() === '') return DEFAULT_ASSET_MAX_BYTES;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ASSET_MAX_BYTES;
+};
+
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+const decodeBase64Strict = (value: string): Buffer => {
+    // node Buffer.from('...', 'base64') silently drops invalid chars — that
+    // hides upload bugs (truncated payloads look "valid"). Validate the
+    // alphabet up front so a corrupted upload fails loudly.
+    const cleaned = value.replace(/\s/g, '');
+
+    if (cleaned.length === 0) {
+        throw new Error('data is empty');
+    }
+
+    if (!BASE64_RE.test(cleaned)) {
+        throw new Error('data is not valid base64');
+    }
+
+    return Buffer.from(cleaned, 'base64');
+};
 
 export interface ToolResponse {
     content: Array<{type: 'text'; text: string}>;
@@ -194,6 +222,43 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                 ...(frontmatter ? {frontmatter} : {})
             }, ctx);
             return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_write_asset',
+            description: `Upload a binary asset (image/svg/png/jpg/gif/webp/avif) into the project's _assets/ folder. The file is hashed and deduped — re-uploading the same bytes returns the existing assetId. When noteId is given, the response includes a note-relative relativePath ready to drop into a markdown ![](…) link. Use this BEFORE synaipse_write_note / synaipse_update_note when adding images to a note. Allowed MIME types: ${Object.keys(MIME_TO_EXT).join(', ')}.`,
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    data: {type: 'string', description: 'Base64-encoded file bytes (no data: URL prefix). Max size configurable via SYNAIPSE_ASSET_MAX_BYTES (default 10 MB).'},
+                    contentType: {type: 'string', description: 'MIME type, e.g. "image/png", "image/svg+xml". Determines the file extension.'},
+                    noteId: {type: 'string', description: 'Optional vault-relative note id (e.g. "Memory/proj/decision-x.md"). When given, the asset is anchored to that note and the response carries a ready-to-embed relativePath. When omitted, the asset still lands in Memory/<project>/_assets/ but you build the link yourself.'}
+                },
+                required: ['data', 'contentType']
+            }
+        },
+        handle: async (args, ctx) => {
+            const contentType = asString(args.contentType, 'contentType');
+
+            if (!isAllowedAssetMime(contentType)) {
+                throw new Error(`contentType "${contentType}" is not an allowed asset MIME (allowed: ${Object.keys(MIME_TO_EXT).join(', ')})`);
+            }
+
+            const buffer = decodeBase64Strict(asString(args.data, 'data'));
+            const max = assetMaxBytes();
+
+            if (buffer.length > max) {
+                throw new Error(`asset is ${buffer.length} bytes, exceeds limit ${max} (raise SYNAIPSE_ASSET_MAX_BYTES to override)`);
+            }
+
+            const noteId = typeof args.noteId === 'string' && args.noteId.length > 0 ? args.noteId : undefined;
+            const result = await service.writeAssetScoped(
+                {content: buffer, contentType, ...(noteId !== undefined ? {noteId} : {})},
+                ctx
+            );
+
+            return {response: ok({asset: result}), event: {kind: 'write', touched: [result.assetId]}};
         }
     },
     {
