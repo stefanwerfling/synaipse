@@ -17,7 +17,10 @@
     "clean": "tsc --build --clean"
   },
   "dependencies": {
-    "@synaipse/core": "*",
-    "@qdrant/js-client-rest": "^1.13.0"
+    "@qdrant/js-client-rest": "^1.13.0",
+    "@synaipse/core": "*"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.8.1"
   }
 }

@@ -96,6 +96,7 @@ export type SearchQuerySchemaT = ExtractSchemaResultType<typeof SearchQuerySchem
 export const EmbeddingsProviderSchema = Vts.or([
     Vts.equal('voyage' as const),
     Vts.equal('ollama' as const),
+    Vts.equal('huggingface' as const),
     Vts.equal('none' as const)
 ]);
 
@@ -112,6 +113,9 @@ export const ConfigSchema = Vts.object({
     })),
     ollama: Vts.optional(Vts.object({
         url: Vts.string(),
+        model: Vts.string()
+    })),
+    huggingface: Vts.optional(Vts.object({
         model: Vts.string()
     })),
     qdrant: Vts.object({

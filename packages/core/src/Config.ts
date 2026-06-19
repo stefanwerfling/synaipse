@@ -27,14 +27,14 @@ const int = (name: string, value: string | undefined, fallback: number): number 
     return parsed;
 };
 
-const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'none' => {
+const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'huggingface' | 'none' => {
     const raw = (env.EMBEDDINGS_PROVIDER ?? 'none').toLowerCase();
 
-    if (raw === 'voyage' || raw === 'ollama' || raw === 'none') {
+    if (raw === 'voyage' || raw === 'ollama' || raw === 'huggingface' || raw === 'none') {
         return raw;
     }
 
-    throw new ConfigError(`EMBEDDINGS_PROVIDER must be one of voyage|ollama|none, got: ${raw}`);
+    throw new ConfigError(`EMBEDDINGS_PROVIDER must be one of voyage|ollama|huggingface|none, got: ${raw}`);
 };
 
 const buildResearchConfig = (env: NodeJS.ProcessEnv): {
@@ -213,6 +213,13 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
                 ollama: {
                     url: env.OLLAMA_URL ?? 'http://localhost:11434',
                     model: env.OLLAMA_MODEL ?? 'nomic-embed-text'
+                }
+            }
+            : {}),
+        ...(provider === 'huggingface'
+            ? {
+                huggingface: {
+                    model: env.HUGGINGFACE_MODEL ?? 'Xenova/all-MiniLM-L6-v2'
                 }
             }
             : {}),

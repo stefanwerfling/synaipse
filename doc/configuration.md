@@ -19,11 +19,14 @@ The vault path is interpreted relative to the directory that the process is star
 
 `EMBEDDINGS_PROVIDER` selects how semantic search works:
 
-| Value    | Needs Docker | Needs API key | Notes |
+| Value          | Needs Docker | Needs API key | Notes |
 |---|---|---|---|
-| `none`   | no  | no  | Fulltext only. Semantic / hybrid silently fall back to fulltext. |
-| `ollama` | yes | no  | Local LLM, free, slower. Default model `nomic-embed-text`.       |
-| `voyage` | yes | yes | Hosted, fastest, highest quality.                                 |
+| `none`         | no  | no  | Fulltext only. Semantic / hybrid silently fall back to fulltext. |
+| `ollama`       | yes | no  | Local LLM via HTTP. Default model `nomic-embed-text`.            |
+| `voyage`       | yes | yes | Hosted, fastest, highest quality.                                |
+| `huggingface`  | no¹ | no  | Local in-process ONNX, no API key. Default `Xenova/all-MiniLM-L6-v2`. |
+
+¹ Docker is still needed for Qdrant if you want persistent storage. The embedder itself runs in-process.
 
 ### `voyage`
 
@@ -45,9 +48,44 @@ OLLAMA_MODEL=nomic-embed-text
 
 The Docker profile (`docker:up:ollama`) starts an Ollama container and pulls the model on first run.
 
+### `huggingface`
+
+In-process ONNX inference via [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) — no API key, no Ollama container, just the embedder running inside the Node process.
+
+```env
+EMBEDDINGS_PROVIDER=huggingface
+HUGGINGFACE_MODEL=Xenova/all-MiniLM-L6-v2
+```
+
+Then install the optional dependency once:
+
+```bash
+npm install @huggingface/transformers
+```
+
+(It is marked `optionalDependencies` so users of `voyage`/`ollama`/`none` are not forced to pull the ~300 MB onnxruntime install.)
+
+The first call downloads the model weights (~80 MB for MiniLM-L6) into `~/.cache/huggingface/`; subsequent calls are local and offline. The model namespace stays `Xenova/*` — that is the HF Hub account hosting the ONNX-converted weights.
+
+Built-in dimension lookup table (see `packages/vector/src/Factory.ts`):
+
+| Model                              | Dim  | Note                        |
+|------------------------------------|------|-----------------------------|
+| `Xenova/all-MiniLM-L6-v2`          | 384  | Default, English, smallest  |
+| `Xenova/all-MiniLM-L12-v2`         | 384  | English, slightly stronger  |
+| `Xenova/all-mpnet-base-v2`         | 768  | English, higher quality     |
+| `Xenova/bge-small-en-v1.5`         | 384  | English, BGE-small          |
+| `Xenova/bge-base-en-v1.5`          | 768  | English, BGE-base           |
+| `Xenova/bge-large-en-v1.5`         | 1024 | English, BGE-large          |
+| `Xenova/multilingual-e5-small`     | 384  | Multilingual incl. DE       |
+| `Xenova/multilingual-e5-base`      | 768  | Multilingual incl. DE       |
+| `Xenova/multilingual-e5-large`     | 1024 | Multilingual incl. DE       |
+
+For other models, add the dim to `HUGGINGFACE_DIMS` and submit a PR.
+
 ## Qdrant
 
-Required for both `voyage` and `ollama`. Not used for `none`.
+Required for `voyage`, `ollama` and `huggingface`. Not used for `none`.
 
 ```env
 QDRANT_URL=http://localhost:6333
@@ -236,6 +274,7 @@ WEB_API_PORT=3001
 | `EMBEDDINGS_PROVIDER`   | `@synaipse/service`              |
 | `VOYAGE_*`              | `@synaipse/vector`               |
 | `OLLAMA_*`              | `@synaipse/vector`               |
+| `HUGGINGFACE_MODEL`     | `@synaipse/vector`               |
 | `QDRANT_*`              | `@synaipse/vector`               |
 | `MCP_SERVER_*`          | `@synaipse/mcp-server`           |
 | `WEB_PORT`, `WEB_API_PORT` | `@synaipse/web`               |

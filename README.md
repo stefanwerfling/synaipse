@@ -8,7 +8,7 @@ Synaipse stores project knowledge (ADRs, API docs, bug analyses, code patterns, 
 
 - **Obsidian-compatible** Markdown vault — open it in Obsidian alongside Claude
 - **MCP first** — `.mcp.json` ships in the repo; Claude Code picks it up automatically
-- **Pluggable embeddings** — `none`, `ollama` (local) or `voyage` (hosted)
+- **Pluggable embeddings** — `none`, `huggingface` (in-process ONNX, zero-Docker), `ollama` (local), or `voyage` (hosted)
 - **Live web UI** — search, graph, backlinks; SSE-pushed updates when Claude writes
 
 ## Quickstart
