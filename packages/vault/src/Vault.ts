@@ -189,7 +189,35 @@ export class Vault {
             return [];
         }
 
-        return [...(this.backlinkIndex.get(note.title) ?? new Set<NoteId>())];
+        // Wikilinks may reference a note by its title OR by any of its
+        // aliases (matches the frontend resolver in
+        // packages/web/src/Wikilinks.ts). Union the lookups so callers get
+        // a complete list regardless of which key the linker used.
+        const out = new Set<NoteId>();
+
+        const collect = (key: string): void => {
+            const set = this.backlinkIndex.get(key);
+            if (set) {
+                for (const linker of set) {
+                    out.add(linker);
+                }
+            }
+        };
+
+        if (note.title.length > 0) {
+            collect(note.title);
+        }
+
+        const aliases = note.frontmatter.aliases;
+        if (aliases !== undefined) {
+            for (const alias of aliases) {
+                if (alias.length > 0) {
+                    collect(alias);
+                }
+            }
+        }
+
+        return [...out];
     }
 
     public tags(): Map<string, NoteId[]> {
@@ -241,9 +269,27 @@ export class Vault {
     private rebuildBacklinks(): void {
         this.backlinkIndex.clear();
 
-        const titleToId = new Map<string, NoteId>();
+        // Build a key→noteId lookup from titles AND aliases. Title wins
+        // on collision; aliases register only if the key isn't already
+        // taken. Matches packages/web/src/Wikilinks.ts so the frontend
+        // and backend agree on which note a wikilink resolves to.
+        const keyToId = new Map<string, NoteId>();
+
         for (const note of this.notes.values()) {
-            titleToId.set(note.title, note.id);
+            if (note.title.length > 0 && !keyToId.has(note.title)) {
+                keyToId.set(note.title, note.id);
+            }
+        }
+
+        for (const note of this.notes.values()) {
+            const aliases = note.frontmatter.aliases;
+            if (aliases === undefined) continue;
+
+            for (const alias of aliases) {
+                if (alias.length > 0 && !keyToId.has(alias)) {
+                    keyToId.set(alias, note.id);
+                }
+            }
         }
 
         for (const note of this.notes.values()) {
@@ -252,12 +298,12 @@ export class Vault {
 
         for (const note of this.notes.values()) {
             for (const link of note.wikilinks) {
-                const targetId = titleToId.get(link);
+                const targetId = keyToId.get(link);
                 const set = this.backlinkIndex.get(link) ?? new Set<NoteId>();
                 set.add(note.id);
                 this.backlinkIndex.set(link, set);
 
-                if (targetId) {
+                if (targetId !== undefined) {
                     const target = this.notes.get(targetId);
 
                     if (target && !target.backlinks.includes(note.id)) {
