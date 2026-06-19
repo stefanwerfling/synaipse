@@ -65,16 +65,39 @@ const main = async (): Promise<void> => {
     });
 };
 
-process.on('uncaughtException', (error: Error) => {
-    process.stderr.write(`[synaipse-web-api] uncaughtException: ${error.stack ?? error.message}\n`);
+// undici's `TypeError: fetch failed` hides the real reason in `error.cause`
+// (e.g. SocketError "other side closed", ECONNREFUSED). Walk the chain so
+// the bootstrap log carries enough signal to act on.
+const formatError = (error: unknown): string => {
+    if (!(error instanceof Error)) {
+        return String(error);
+    }
+
+    let out = error.stack ?? error.message;
+    let cause: unknown = (error as Error & {cause?: unknown}).cause;
+
+    while (cause !== undefined) {
+        if (cause instanceof Error) {
+            out += `\n  caused by: ${cause.stack ?? cause.message}`;
+            cause = (cause as Error & {cause?: unknown}).cause;
+        } else {
+            out += `\n  caused by: ${String(cause)}`;
+            cause = undefined;
+        }
+    }
+
+    return out;
+};
+
+process.on('uncaughtException', (error: unknown) => {
+    process.stderr.write(`[synaipse-web-api] uncaughtException: ${formatError(error)}\n`);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-    const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
-    process.stderr.write(`[synaipse-web-api] unhandledRejection: ${detail}\n`);
+    process.stderr.write(`[synaipse-web-api] unhandledRejection: ${formatError(reason)}\n`);
 });
 
 main().catch((error: unknown) => {
-    process.stderr.write(`[synaipse-web-api] fatal: ${String(error)}\n`);
+    process.stderr.write(`[synaipse-web-api] fatal: ${formatError(error)}\n`);
     process.exit(1);
 });
