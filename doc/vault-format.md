@@ -138,7 +138,7 @@ Inline `#tags` are picked up from the body. They are merged with frontmatter `ta
 
 ## Templates
 
-Templates ship in [`templates/vault/`](../templates/vault). `npm run vault:init` seeds them into the configured vault. Add your own under `Memory/<folder>/_template.md` — they are pure Markdown, copy them when you need them.
+Templates ship in [`templates/`](../templates). The seed script (`npm run vault:init`) copies `templates/Memory/Project/<category>/` into the configured vault, substituting `Project` with `SYNAIPSE_PROJECT`. Add your own under `Memory/<project>/<category>/_template.md` — they are pure Markdown, copy them when you need them.
 
 ## File naming tips
 

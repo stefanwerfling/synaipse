@@ -47,7 +47,7 @@ This runs `tsc --build` across every package. After this step the MCP server ent
 npm run vault:init
 ```
 
-Copies the template notes from `templates/vault/` into the directory pointed to by `SYNAIPSE_VAULT_PATH` (default: `./vault`). Skip the step if you already have a vault.
+Copies the template notes from `templates/` into the directory pointed to by `SYNAIPSE_VAULT_PATH` (default: `./vault`). The `Memory/Project/` placeholder folder is renamed to the value of `SYNAIPSE_PROJECT` during the copy (or stays `Project` if unset). Skip the step if you already have a vault.
 
 ## 5. Start the services
 
@@ -82,7 +82,7 @@ npm run web
 
 http://localhost:5757
 
-You should see the templated notes from `templates/vault/`. Try the search bar in `fulltext` mode first — `semantic` and `hybrid` only return results once embeddings are indexed (provider ≠ `none`).
+You should see the templated notes from `templates/`. Try the search bar in `fulltext` mode first — `semantic` and `hybrid` only return results once embeddings are indexed (provider ≠ `none`).
 
 ## 7. Verify the MCP server
 

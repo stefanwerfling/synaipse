@@ -7,18 +7,19 @@ import 'dotenv/config';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
-const templateRoot = path.join(repoRoot, 'templates', 'vault');
+const templateRoot = path.join(repoRoot, 'templates');
 
 const target = path.resolve(process.env.SYNAIPSE_VAULT_PATH ?? path.join(repoRoot, 'vault'));
+const project = process.env.SYNAIPSE_PROJECT?.trim() || 'Project';
 
-const EMPTY_DIRS = ['Memory/bugs', 'Memory/research'];
+const EMPTY_DIRS = [`Memory/${project}/bugs`, `Memory/${project}/research`];
 
 const copyRecursive = async (src, dst) => {
     const entries = await readdir(src, {withFileTypes: true});
 
     for (const entry of entries) {
         const from = path.join(src, entry.name);
-        const to = path.join(dst, entry.name);
+        const to = path.join(dst, entry.name === 'Project' ? project : entry.name);
 
         if (entry.isDirectory()) {
             await mkdir(to, {recursive: true});
@@ -27,6 +28,10 @@ const copyRecursive = async (src, dst) => {
         }
 
         if (entry.isFile()) {
+            if (entry.name === 'README.md' && src === templateRoot) {
+                continue;
+            }
+
             if (existsSync(to)) {
                 process.stdout.write(`skip   ${path.relative(target, to)}\n`);
                 continue;
@@ -55,7 +60,7 @@ const main = async () => {
         await mkdir(target, {recursive: true});
     }
 
-    process.stdout.write(`vault: ${target}\n`);
+    process.stdout.write(`vault:   ${target}\nproject: ${project}\n`);
 
     await copyRecursive(templateRoot, target);
 

@@ -110,7 +110,7 @@ Details: [doc/vault-format.md](doc/vault-format.md).
 npm run build              tsc --build across all packages
 npm test                   vitest run
 npm run lint               eslint
-npm run vault:init         seed vault from templates/vault
+npm run vault:init         seed vault from templates/ (substitutes Memory/Project/ with SYNAIPSE_PROJECT)
 npm run mcp                start MCP server (stdio)
 npm run web                start API + Vite dev server
 npm run docker:up:voyage   start qdrant only
