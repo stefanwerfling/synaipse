@@ -9,7 +9,7 @@ written to the vault automatically** — the plugin is opt-in by design.
 
 | Hook              | What it writes                                                   |
 |-------------------|------------------------------------------------------------------|
-| `SessionStart`    | Creates / resumes `<session_id>.jsonl` and `<session_id>.meta.json` |
+| `SessionStart`    | Creates / resumes `<session_id>.jsonl` and `<session_id>.meta.json`; refreshes `.claude/synaipse-primer.md` from the Synaipse web API |
 | `UserPromptSubmit`| `{kind:"user", text}` line                                       |
 | `Stop`            | `{kind:"stop", transcript_path}` line                            |
 | `PostToolUse`     | `Edit`/`Write`/`Bash`/`NotebookEdit` → full args + 200-char result preview. Other tools → counter line only (`{kind:"tool_counter", name, result_size}`). |
@@ -19,6 +19,34 @@ A `.gitignore` is dropped into `.synaipse-sessions/` on first write so the raw
 logs — which can contain secrets in tool args — never get committed.
 
 Same `session_id` always maps to the same files, so **resume** simply appends.
+
+## CLAUDE.md primer bridge
+
+On every `SessionStart` (incl. resume) the hook calls `GET /api/prime?format=markdown`
+on the Synaipse web API (`localhost:${SYNAIPSE_WEB_API_PORT:-3001}`) and writes the
+returned bundle to `$CLAUDE_PROJECT_DIR/.claude/synaipse-primer.md`. The bundle is
+the same `synaipse_prime` payload Claude would otherwise have to fetch via MCP —
+pinned notes, recent sessions, project decisions, hot notes, recent edits, TODO
+sample — pre-rendered as compact Markdown.
+
+To make Claude pick the file up automatically, add one line to your
+`CLAUDE.md` (project-level or user-level):
+
+```md
+@.claude/synaipse-primer.md
+```
+
+That's it — the `@`-import is resolved at session start, the primer lives in
+Claude's context from the very first turn, no manual `synaipse_prime` call needed.
+
+The file is regenerated on every SessionStart. If the web API is unreachable
+(server down, wrong port, no curl), the hook silently skips the refresh and the
+last known primer stays in place. Add `.claude/synaipse-primer.md` to your
+`.gitignore` if you don't want to commit the snapshot — it's a derived
+view of the vault, not source of truth.
+
+Override the port with `SYNAIPSE_WEB_API_PORT=<n>` in the environment Claude
+Code inherits (e.g. via your shell profile or a wrapper script).
 
 ## Slash commands
 
@@ -53,10 +81,13 @@ For a permanent install, symlink or copy into `~/.claude/plugins/synaipse-memory
 ## Files this plugin writes
 
 ```
-$CLAUDE_PROJECT_DIR/.synaipse-sessions/
-├── .gitignore                    # auto-created (ignores everything inside)
-├── <session_id>.jsonl            # append-only event log
-└── <session_id>.meta.json        # sidecar — status, stats, promotion target
+$CLAUDE_PROJECT_DIR/
+├── .synaipse-sessions/
+│   ├── .gitignore                # auto-created (ignores everything inside)
+│   ├── <session_id>.jsonl        # append-only event log
+│   └── <session_id>.meta.json    # sidecar — status, stats, promotion target
+└── .claude/
+    └── synaipse-primer.md        # refreshed on each SessionStart from /api/prime
 ```
 
 ## Hook safety

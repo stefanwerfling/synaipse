@@ -15,3 +15,10 @@ export type {
     ChatTurn,
     ChatSourceRef
 } from './ChatStore.js';
+export type {
+    PrimeOptions,
+    PrimeResult,
+    PrimerEntry,
+    PrimerReason,
+    TodoItem
+} from './Service.js';

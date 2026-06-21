@@ -1,6 +1,6 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Frontmatter} from '@synaipse/core';
-import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, SynaipseService} from '@synaipse/service';
+import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService, TodoItem} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
 
@@ -82,6 +82,90 @@ const parseTurnsForRequest = (raw: unknown): ChatTurn[] => {
     }
 
     return out;
+};
+
+const REASON_HEADINGS: Record<PrimerReason, string> = {
+    pinned: 'Pinned',
+    recent_session: 'Recent sessions',
+    project_decision: 'Project decisions',
+    topic: 'Topic-relevant',
+    hot: 'Hot (by backlink count)',
+    recent: 'Recently edited'
+};
+
+const REASON_ORDER: readonly PrimerReason[] = [
+    'pinned',
+    'recent_session',
+    'project_decision',
+    'topic',
+    'hot',
+    'recent'
+];
+
+const renderPrimerMarkdown = (result: PrimeResult): string => {
+    const lines: string[] = [];
+    const project = result.project ?? '(unscoped)';
+    const generatedAt = new Date().toISOString();
+
+    lines.push(`# Synaipse Primer — ${project}`);
+    lines.push('');
+    lines.push(
+        `*Generated ${generatedAt}. ${result.context.length} context entries, ` +
+        `${result.todoCount} open TODOs.*`
+    );
+    lines.push('');
+    lines.push('This file is regenerated on every Claude Code session start by the');
+    lines.push('`synaipse-memory` plugin. Read the listed notes via `synaipse_read_note`');
+    lines.push('when their topic comes up in this session.');
+    lines.push('');
+
+    const grouped = new Map<PrimerReason, PrimerEntry[]>();
+
+    for (const entry of result.context) {
+        const existing = grouped.get(entry.reason);
+
+        if (existing) {
+            existing.push(entry);
+        } else {
+            grouped.set(entry.reason, [entry]);
+        }
+    }
+
+    for (const reason of REASON_ORDER) {
+        const entries = grouped.get(reason);
+
+        if (entries === undefined || entries.length === 0) {
+            continue;
+        }
+
+        lines.push(`## ${REASON_HEADINGS[reason]}`);
+        lines.push('');
+
+        for (const entry of entries) {
+            const excerpt = entry.excerpt.replace(/\s+/g, ' ').trim().slice(0, 200);
+            lines.push(`- **${entry.title}** (\`${entry.id}\`) — ${excerpt}`);
+        }
+
+        lines.push('');
+    }
+
+    if (result.todoSample.length > 0) {
+        lines.push('## TODOs (sample)');
+        lines.push('');
+
+        for (const todo of result.todoSample) {
+            lines.push(`- [ ] from \`${todo.noteId}\`: ${todo.text}`);
+        }
+
+        lines.push('');
+    }
+
+    return lines.join('\n');
+};
+
+const writeTextPlain = (res: ServerResponse, status: number, body: string): void => {
+    res.writeHead(status, {'Content-Type': 'text/plain; charset=utf-8'});
+    res.end(body);
 };
 
 const asFrontmatter = (value: unknown): Frontmatter | undefined => {
@@ -628,6 +712,38 @@ export const routes = (
             json(res, 404, {error: String(error)});
         }
 
+        return;
+    }
+
+    if (path === '/api/prime') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const limitRaw = Number.parseInt(url.searchParams.get('limit') ?? '15', 10);
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 15;
+        const topic = url.searchParams.get('topic') ?? '';
+        const includeCrawler = url.searchParams.get('includeCrawler') === 'true';
+        const format = url.searchParams.get('format') ?? 'json';
+        const projectParam = url.searchParams.get('project');
+        const project = projectParam !== null && projectParam.length > 0
+            ? projectParam
+            : service.getProject();
+
+        const result = await service.prime({
+            project,
+            limit,
+            ...(topic.length > 0 ? {topic} : {}),
+            includeCrawler
+        });
+
+        if (format === 'markdown') {
+            writeTextPlain(res, 200, renderPrimerMarkdown(result));
+            return;
+        }
+
+        json(res, 200, result);
         return;
     }
 
