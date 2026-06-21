@@ -540,6 +540,61 @@ describe('SynaipseService project enforcement', () => {
             .rejects.toThrow(/project context/);
     });
 
+    it('appendInboxEntry writes into Memory/<project>/inbox/ with H3 entry and inline tags', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const id = await service.appendInboxEntry('qdrant v2 drops legacy upsert', ['qdrant', 'breaking-change']);
+        expect(id.startsWith('Memory/app-x/inbox/')).toBe(true);
+        expect(id.endsWith('.md')).toBe(true);
+
+        const note = service.readNote(id);
+        expect(note.content).toMatch(/^### \d{2}:\d{2}\s*\n\s*\nqdrant v2 drops legacy upsert\s*\n\s*\n#qdrant #breaking-change\s*$/);
+        expect(note.frontmatter.title).toMatch(/^Inbox \d{4}-\d{2}-\d{2}$/);
+        expect(note.frontmatter.tags).toContain('inbox');
+    });
+
+    it('appendInboxEntry appends to existing file as separate H3 block', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const id1 = await service.appendInboxEntry('first insight', []);
+        const id2 = await service.appendInboxEntry('second insight', ['tagged']);
+        expect(id1).toBe(id2);
+
+        const note = service.readNote(id1);
+        expect(note.content.match(/^### \d{2}:\d{2}$/gm)?.length).toBe(2);
+        expect(note.content).toContain('first insight');
+        expect(note.content).toContain('second insight');
+        expect(note.content).toContain('#tagged');
+    });
+
+    it('appendInboxEntry strips leading # from tags and skips empty ones', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        const id = await service.appendInboxEntry('insight', ['#foo', '  ', 'bar', '']);
+        const note = service.readNote(id);
+        const tagLine = note.content.split('\n').find((l) => l.startsWith('#') && !l.startsWith('#'.repeat(2)));
+        expect(tagLine).toBe('#foo #bar');
+    });
+
+    it('appendInboxEntry without a project throws', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        await expect(service.appendInboxEntry('x', []))
+            .rejects.toThrow(/project context/);
+    });
+
+    it('appendInboxEntry with empty text throws', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await expect(service.appendInboxEntry('   ', []))
+            .rejects.toThrow(/text must not be empty/);
+    });
+
     it('per-call project override beats the constructor default', async () => {
         service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'default'));
         await service.start();

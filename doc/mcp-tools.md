@@ -26,6 +26,7 @@ Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
 | [`synaipse_stale`](#synaipse_stale)                   | Notes that gathered dust — knowledge decay              |
 | [`synaipse_todos`](#synaipse_todos)                   | Open `- [ ]` items across the vault                    |
 | [`synaipse_log_session`](#synaipse_log_session)       | Append to today's session log                          |
+| [`synaipse_remember`](#synaipse_remember)             | One-line insight capture into today's inbox            |
 
 The canonical schema lives in [`packages/mcp-server/src/Tools.ts`](../packages/mcp-server/src/Tools.ts).
 
@@ -357,6 +358,19 @@ Scans every note for Markdown todo items.
 | `references` | string[]? | Titles to wikilink under the entry                 |
 
 Appends an `### HH:MM` block to `Memory/sessions/YYYY-MM-DD.md`. Creates the file if it does not exist.
+
+---
+
+## `synaipse_remember`
+
+| Arg    | Type      | Notes                                                                                 |
+|---|---|---|
+| `text` | string    | 1–3 sentence insight. Trimmed; empty input rejected.                                  |
+| `tags` | string[]? | Optional. Leading `#` and whitespace are stripped. Rendered inline as `#foo #bar`.    |
+
+Appends an `### HH:MM` block to `Memory/<project>/inbox/YYYY-MM-DD.md`. Creates the file with frontmatter `{title: "Inbox YYYY-MM-DD", tags: ["inbox"]}` if it does not exist. Tags are rendered inline in the body (not added to frontmatter) so the inbox tag list stays clean as the file grows.
+
+Use this for lightweight captures that sit between `log_session` (narrative recap of a work block) and `write_note` (curated standalone note): one-liners worth keeping but not worth a dedicated file yet.
 
 ---
 

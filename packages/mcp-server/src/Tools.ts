@@ -414,6 +414,36 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
     },
     {
         definition: {
+            name: 'synaipse_remember',
+            description: 'Append a one-line insight to today\'s inbox at Memory/<project>/inbox/YYYY-MM-DD.md. Use this for lightweight captures that don\'t deserve a full note yet (e.g. "qdrant client v2 drops the legacy upsert API" or "Stefan prefers PascalCase for src/ files") — somewhere between log_session (narrative) and write_note (curated note). Each call appends a heading-3 entry with the current time; tags are rendered inline as #foo #bar.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    text: {type: 'string', description: 'The insight in 1-3 sentences. Leading/trailing whitespace is trimmed.'},
+                    tags: {
+                        type: 'array',
+                        items: {type: 'string'},
+                        description: 'Optional inline tags (without #). Rendered as #tag on a separate line below the text. Not added to frontmatter to keep the inbox file tag list clean.'
+                    }
+                },
+                required: ['text']
+            }
+        },
+        handle: async (args, ctx) => {
+            const text = asString(args.text, 'text');
+            const tags = Array.isArray(args.tags)
+                ? args.tags.filter((t): t is string => typeof t === 'string')
+                : [];
+
+            const noteId = await service.appendInboxEntry(text, tags, ctx);
+            return {
+                response: ok({noteId, tags, time: new Date().toISOString()}),
+                event: {kind: 'write', touched: [noteId]}
+            };
+        }
+    },
+    {
+        definition: {
             name: 'synaipse_related',
             description: 'Find notes related to a given note via semantic similarity, wikilinks (in & out), and shared tags. Returns ranked list with reasons.',
             inputSchema: {

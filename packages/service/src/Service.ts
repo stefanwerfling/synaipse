@@ -1352,6 +1352,46 @@ export class SynaipseService {
         return note.id;
     }
 
+    public async appendInboxEntry(text: string, tags: string[], opts?: ProjectOpts): Promise<NoteId> {
+        const project = this.requireProject('remember', opts?.project);
+        const trimmed = text.trim();
+
+        if (trimmed.length === 0) {
+            throw new Error('remember: text must not be empty');
+        }
+
+        const now = new Date();
+        const date = now.toISOString().slice(0, 10);
+        const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        const inboxPath = `${this.projectFolder(project)}inbox/${date}.md`;
+        const existing = this.vault.tryGet(inboxPath);
+
+        const baseFrontmatter = existing !== undefined
+            ? {...existing.frontmatter, updated: date}
+            : {title: `Inbox ${date}`, tags: ['inbox'], created: date, updated: date};
+
+        const cleanTags = tags
+            .map((t) => t.trim().replace(/^#/, ''))
+            .filter((t) => t.length > 0);
+        const tagsLine = cleanTags.length > 0
+            ? `\n\n${cleanTags.map((t) => `#${t}`).join(' ')}`
+            : '';
+
+        const newEntry = `### ${time}\n\n${trimmed}${tagsLine}\n`;
+
+        const prevBody = (existing?.content ?? '').trimEnd();
+        const body = prevBody.length === 0 ? newEntry : `${prevBody}\n\n${newEntry}`;
+
+        const note = await this.writeNote(
+            {path: inboxPath, content: body, frontmatter: baseFrontmatter},
+            opts,
+            'remember'
+        );
+
+        return note.id;
+    }
+
     public readNote(id: NoteId): Note {
         const note = this.vault.get(id);
         this.touchAccess(note);
