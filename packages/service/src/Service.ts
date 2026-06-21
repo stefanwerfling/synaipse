@@ -57,7 +57,7 @@ export interface SnapshotEntry {
     sha: string;
 }
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
-import {defaultDemote, reciprocalRankFusion} from './Fusion.js';
+import {annotateSingleSignal, defaultDemote, reciprocalRankFusion} from './Fusion.js';
 import {InvertedIndex} from './InvertedIndex.js';
 import {HashCache} from './Cache.js';
 
@@ -455,11 +455,11 @@ export class SynaipseService {
 
     private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
         if (mode === 'fulltext' || this.index === null) {
-            return this.fulltextIndex.search(query, limit);
+            return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
         }
 
         if (mode === 'semantic') {
-            return this.index.semanticSearch(query, limit);
+            return annotateSingleSignal(await this.index.semanticSearch(query, limit), 'semantic');
         }
 
         const [ft, sem] = await Promise.all([
@@ -468,10 +468,17 @@ export class SynaipseService {
         ]);
         const titles = this.fulltextIndex.searchTitle(query, limit);
 
-        return reciprocalRankFusion([titles, sem, ft], {
-            limit,
-            weightFor: defaultDemote((id) => this.vault.tryGet(id))
-        });
+        return reciprocalRankFusion(
+            [
+                {name: 'title', hits: titles},
+                {name: 'semantic', hits: sem},
+                {name: 'fulltext', hits: ft}
+            ],
+            {
+                limit,
+                weightFor: defaultDemote((id) => this.vault.tryGet(id))
+            }
+        );
     }
 
     public getProject(override?: string | null): string | null {

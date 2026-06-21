@@ -158,20 +158,25 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_search',
-            description: 'Search the Synaipse knowledge base. Modes: fulltext (keywords), semantic (meaning), hybrid (both). Use semantic for concept questions, fulltext for exact terms, hybrid by default.',
+            description: 'Search the Synaipse knowledge base. Modes: fulltext (keywords), semantic (meaning), hybrid (both). Use semantic for concept questions, fulltext for exact terms, hybrid by default. Pass explain:true to receive a per-signal score breakdown for each hit — useful when ranking is surprising.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     query: {type: 'string', description: 'Search query'},
                     mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid'], description: 'Search strategy (default: hybrid)'},
-                    limit: {type: 'number', description: 'Max results (default: 10)'}
+                    limit: {type: 'number', description: 'Max results (default: 10)'},
+                    explain: {type: 'boolean', description: 'Include per-signal components ({score, rank} per fulltext/title/semantic + demote multiplier) on each hit. Default false to keep responses compact.'}
                 },
                 required: ['query']
             }
         },
         handle: async (args) => {
             const query = asString(args.query, 'query');
-            const hits = await service.search(query, asSearchMode(args.mode), asNumber(args.limit, 10));
+            const explain = args.explain === true;
+            const raw = await service.search(query, asSearchMode(args.mode), asNumber(args.limit, 10));
+            const hits = explain
+                ? raw
+                : raw.map(({components: _components, ...rest}) => rest);
             return {
                 response: ok({hits}),
                 event: {kind: 'search', touched: hits.slice(0, 5).map((h) => h.noteId), query}

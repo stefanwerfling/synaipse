@@ -275,6 +275,50 @@ body {
     border-radius: var(--r-pill);
 }
 
+.search-result-score[role="button"] {
+    cursor: pointer;
+    user-select: none;
+}
+
+.search-result-score[role="button"]:hover,
+.search-result-score.expanded {
+    background: var(--bg-3, var(--bg-2));
+    color: var(--text-1);
+}
+
+.search-result-breakdown {
+    margin-top: var(--space-1);
+    padding: 4px 8px;
+    background: var(--bg-2);
+    border-radius: var(--r-1, 4px);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.search-result-component {
+    display: grid;
+    grid-template-columns: 70px 1fr auto;
+    gap: var(--space-1);
+    color: var(--text-2);
+}
+
+.search-result-component.demote {
+    color: var(--text-3);
+    font-style: italic;
+}
+
+.search-result-component-name {
+    font-family: var(--font-mono);
+    color: var(--text-3);
+}
+
+.search-result-component-score {
+    color: var(--text-1);
+}
+
 .search-result-path {
     font-size: 11px;
     color: var(--text-3);

@@ -65,6 +65,29 @@ export interface SearchQuery {
     paths?: string[];
 }
 
+export type SearchSignalName = 'fulltext' | 'title' | 'semantic';
+
+export interface SearchSignalComponent {
+    /**
+     * Raw signal score (BM25 magnitude, cosine similarity, title-match score).
+     * Magnitudes are NOT comparable across signals — use `rank` for fair comparison.
+     */
+    score: number;
+    /** 1-indexed rank within this signal's ranked list. RRF uses 1/(k+rank). */
+    rank: number;
+}
+
+export interface SearchHitComponents {
+    fulltext?: SearchSignalComponent;
+    title?: SearchSignalComponent;
+    semantic?: SearchSignalComponent;
+    /**
+     * Multiplier applied after fusion (e.g. crawler-index demotion).
+     * Only present when < 1. Final score = sum(1/(k+rank)) × demote.
+     */
+    demote?: number;
+}
+
 export interface SearchHit {
     noteId: NoteId;
     path: string;
@@ -72,6 +95,11 @@ export interface SearchHit {
     score: number;
     snippet?: string;
     chunkId?: string;
+    /**
+     * Per-signal breakdown explaining how the final score was assembled.
+     * Optional — present when the searcher is configured to populate it.
+     */
+    components?: SearchHitComponents;
 }
 
 export interface GraphNode {

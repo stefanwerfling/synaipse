@@ -1,4 +1,4 @@
-import type {SearchHit, SearchMode} from '@synaipse/core';
+import type {SearchHit, SearchHitComponents, SearchMode} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 
@@ -151,6 +151,28 @@ export class Search {
         }
 
         this.results.forEach((hit, i) => {
+            const breakdown = hit.components !== undefined
+                ? el('div', {class: 'search-result-breakdown', style: {display: 'none'}}, ...this.renderComponents(hit.components))
+                : null;
+
+            const scoreBadge = el('span', {
+                class: 'search-result-score',
+                text: hit.score.toFixed(2),
+                ...(hit.components !== undefined ? {
+                    attrs: {title: 'click for signal breakdown', role: 'button'},
+                    on: {
+                        click: (event) => {
+                            event.stopPropagation();
+
+                            if (breakdown === null) return;
+                            const isHidden = breakdown.style.display === 'none';
+                            breakdown.style.display = isHidden ? '' : 'none';
+                            scoreBadge.classList.toggle('expanded', isHidden);
+                        }
+                    }
+                } : {})
+            });
+
             const row = el('div', {
                 class: i === this.highlight ? 'search-result active' : 'search-result',
                 on: {
@@ -163,14 +185,48 @@ export class Search {
             },
                 el('div', {class: 'search-result-head'},
                     el('span', {class: 'search-result-title', text: hit.title}),
-                    el('span', {class: 'search-result-score', text: hit.score.toFixed(2)})
+                    scoreBadge
                 ),
                 el('div', {class: 'search-result-path', text: hit.noteId}),
-                hit.snippet ? el('div', {class: 'search-result-snippet', text: hit.snippet}) : ''
+                hit.snippet ? el('div', {class: 'search-result-snippet', text: hit.snippet}) : '',
+                breakdown ?? ''
             );
 
             this.dropdown.appendChild(row);
         });
+    }
+
+    private renderComponents(components: SearchHitComponents): HTMLElement[] {
+        const rows: HTMLElement[] = [];
+        const signals: Array<{name: string; key: keyof SearchHitComponents}> = [
+            {name: 'fulltext', key: 'fulltext'},
+            {name: 'title', key: 'title'},
+            {name: 'semantic', key: 'semantic'}
+        ];
+
+        for (const {name, key} of signals) {
+            const sig = components[key];
+
+            if (sig === undefined || typeof sig === 'number') {
+                continue;
+            }
+
+            rows.push(el('div', {class: 'search-result-component'},
+                el('span', {class: 'search-result-component-name', text: name}),
+                el('span', {class: 'search-result-component-rank', text: `rank ${sig.rank}`}),
+                el('span', {class: 'search-result-component-score', text: sig.score.toFixed(3)})
+            ));
+        }
+
+        if (components.demote !== undefined && components.demote < 1) {
+            rows.push(el('div', {class: 'search-result-component demote'},
+                el('span', {class: 'search-result-component-name', text: 'demote'}),
+                el('span', {class: 'search-result-component-rank', text: '— crawler index / heavy wikilinks'}),
+                el('span', {class: 'search-result-component-score', text: `×${components.demote.toFixed(2)}`})
+            ));
+        }
+
+        return rows;
     }
 
     private updateHighlight(): void {

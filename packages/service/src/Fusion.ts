@@ -1,4 +1,4 @@
-import type {SearchHit} from '@synaipse/core';
+import type {SearchHit, SearchHitComponents, SearchSignalName} from '@synaipse/core';
 
 export interface FusionOptions {
     /** RRF dampening constant — 60 is the canonical value from the original paper. */
@@ -9,9 +9,15 @@ export interface FusionOptions {
     limit: number;
 }
 
+export interface RankedSignal {
+    name: SearchSignalName;
+    hits: readonly SearchHit[];
+}
+
 interface Accumulator {
     hit: SearchHit;
     score: number;
+    components: SearchHitComponents;
 }
 
 /**
@@ -20,28 +26,38 @@ interface Accumulator {
  * RELATIVE rank within each list matters — which fixes the classic problem of
  * mixing fulltext scores (0–200) with semantic similarity (0–1).
  *
+ * Each output hit carries a `components` field with `{score, rank}` for every
+ * signal that contributed plus an optional `demote` multiplier — lets the UI/
+ * MCP explain *why* a hit ranked where it did.
+ *
  * From "Reciprocal Rank Fusion outperforms Condorcet and individual Rank
  * Learning Methods" by Cormack, Clarke and Buettcher.
  */
 export const reciprocalRankFusion = (
-    rankings: readonly (readonly SearchHit[])[],
+    signals: readonly RankedSignal[],
     opts: FusionOptions
 ): SearchHit[] => {
     const k = opts.k ?? 60;
     const map = new Map<string, Accumulator>();
 
-    for (const ranked of rankings) {
-        ranked.forEach((hit, idx) => {
+    for (const signal of signals) {
+        signal.hits.forEach((hit, idx) => {
             const rank = idx + 1;
             const contribution = 1 / (k + rank);
             const existing = map.get(hit.noteId);
+            const component = {score: hit.score, rank};
 
             if (existing === undefined) {
-                map.set(hit.noteId, {hit: {...hit}, score: contribution});
+                map.set(hit.noteId, {
+                    hit: {...hit},
+                    score: contribution,
+                    components: {[signal.name]: component}
+                });
                 return;
             }
 
             existing.score += contribution;
+            existing.components[signal.name] = component;
 
             // Prefer the snippet from whichever ranking placed it higher
             // — usually semantic snippets are better for RAG context.
@@ -55,15 +71,33 @@ export const reciprocalRankFusion = (
         const weightFn = opts.weightFor;
 
         for (const entry of map.values()) {
-            entry.score *= weightFn(entry.hit);
+            const weight = weightFn(entry.hit);
+            entry.score *= weight;
+
+            if (weight < 1) {
+                entry.components.demote = weight;
+            }
         }
     }
 
     return [...map.values()]
         .sort((a, b) => b.score - a.score)
-        .map((e) => ({...e.hit, score: e.score}))
+        .map((e) => ({...e.hit, score: e.score, components: e.components}))
         .slice(0, opts.limit);
 };
+
+/**
+ * Wrap single-signal results so they share the same `components` shape as
+ * fused hits. Lets the UI render breakdowns uniformly regardless of mode.
+ */
+export const annotateSingleSignal = (
+    hits: readonly SearchHit[],
+    name: SearchSignalName
+): SearchHit[] =>
+    hits.map((hit, idx) => ({
+        ...hit,
+        components: {[name]: {score: hit.score, rank: idx + 1}}
+    }));
 
 const INDEX_FILE_RE = /\/_index\.md$/i;
 const HEAVY_WIKILINK_THRESHOLD = 30;

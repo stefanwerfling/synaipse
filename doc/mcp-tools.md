@@ -81,17 +81,35 @@ Returns `{sha, path, entries: [{name, type, sha}]}` where `type` is `file` or `d
 
 ## `synaipse_search`
 
-| Arg     | Type     | Default  | Notes                                          |
+| Arg       | Type     | Default  | Notes                                                                            |
 |---|---|---|---|
-| `query` | string   | required |                                                |
-| `mode`  | enum     | `hybrid` | `fulltext` \| `semantic` \| `hybrid`             |
-| `limit` | number   | `10`     |                                                |
+| `query`   | string   | required |                                                                                  |
+| `mode`    | enum     | `hybrid` | `fulltext` \| `semantic` \| `hybrid`                                             |
+| `limit`   | number   | `10`     |                                                                                  |
+| `explain` | boolean  | `false`  | Attach per-signal `components` (score + rank per fulltext/title/semantic + demote) on each hit. |
 
 `semantic` and `hybrid` silently degrade to `fulltext` when `EMBEDDINGS_PROVIDER=none`.
 
 ```json
 {"name": "synaipse_search", "arguments": {"query": "qdrant collection setup", "mode": "hybrid"}}
 ```
+
+With `explain: true` each hit additionally carries:
+
+```json
+{
+  "noteId": "Memory/foo/qdrant.md",
+  "score": 0.0489,
+  "components": {
+    "title":    {"score": 1.0, "rank": 1},
+    "semantic": {"score": 0.91, "rank": 2},
+    "fulltext": {"score": 11, "rank": 1},
+    "demote":   0.5
+  }
+}
+```
+
+`rank` is the 1-indexed position in that signal's ranked list; RRF uses `1/(k+rank)` with `k=60`. `demote` is only present when `< 1` (currently triggered by `_index.md` paths and notes with > 30 wikilinks). Magnitudes across signals are **not** comparable — use rank for fair comparison, raw score only for in-signal tuning.
 
 ---
 
