@@ -111,7 +111,7 @@ const renderPrimerMarkdown = (result: PrimeResult): string => {
     lines.push('');
     lines.push(
         `*Generated ${generatedAt}. ${result.context.length} context entries, ` +
-        `${result.todoCount} open TODOs.*`
+        `${result.todoCount} open TODOs, ~${result.tokenEstimate} tokens.*`
     );
     lines.push('');
     lines.push('This file is regenerated on every Claude Code session start by the');

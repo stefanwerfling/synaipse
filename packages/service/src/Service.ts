@@ -147,6 +147,12 @@ export interface PrimeResult {
     todoCount: number;
     todoSample: TodoItem[];
     context: PrimerEntry[];
+    /**
+     * Rough token estimate for the context + todoSample payload (≈ chars / 4).
+     * Lets callers surface what loading this bundle costs in Claude's context window.
+     * Not a precise tokenizer — order-of-magnitude indicator.
+     */
+    tokenEstimate: number;
 }
 
 export interface UpdateNoteInput {
@@ -1836,11 +1842,15 @@ export class SynaipseService {
         const todoSource = this.todos(todoPrefix, false);
         const allTodos = includeCrawler ? todoSource : todoSource.filter((t) => !t.noteId.startsWith('Crawler/'));
 
+        const todoSample = allTodos.slice(0, 3);
+        const payloadChars = JSON.stringify({context, todoSample}).length;
+
         return {
             project,
             todoCount: allTodos.length,
-            todoSample: allTodos.slice(0, 3),
-            context
+            todoSample,
+            context,
+            tokenEstimate: Math.ceil(payloadChars / 4)
         };
     }
 

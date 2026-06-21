@@ -272,7 +272,7 @@ Selection buckets, deduped and capped at `limit` — applied in this priority or
 | 5 | `hot`              | Top 3 by backlink count, project-scoped                                                 |
 | 6 | `recent`           | Top 5 by mtime within the last 14 days, project-scoped                                  |
 
-A separate `todoCount` + 3-sample `todoSample` digest is included, scoped to the same project.
+A separate `todoCount` + 3-sample `todoSample` digest is included, scoped to the same project. The response also carries `tokenEstimate`, a rough (`chars/4`) token count of the context + todoSample payload so callers can see what loading the bundle costs in Claude's context window. The `synaipse-memory` plugin's primer renderer surfaces this number in the file header.
 
 **`Crawler/` exclusion** — externally-imported notes (GitHub stars, dev.to articles, etc.) are dropped from `hot`, `recent` and the TODO digest by default, because they tend to dominate (large indexes have very high backlink counts and TODOs from imported articles aren't your work). Pass `includeCrawler: true` to opt them back in. `recent_session`, `project_decision` and `pinned` are unaffected — they live under `Memory/`.
 
@@ -285,6 +285,7 @@ Returns:
   "project": "synaipse",
   "todoCount": 4,
   "todoSample": [{"noteId":"…","title":"…","line":12,"text":"add metrics","done":false}],
+  "tokenEstimate": 1820,
   "context": [
     {
       "id": "Memory/synaipse/decisions/dolt-vs-md.md",
