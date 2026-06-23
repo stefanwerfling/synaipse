@@ -1,7 +1,7 @@
 export {SynaipseService} from './Service.js';
 export {fulltextSearch} from './Fulltext.js';
-export {HashCache} from './Cache.js';
-export type {CacheEntry} from './Cache.js';
+export {HashCache} from '@synaipse/vault';
+export type {CacheEntry} from '@synaipse/vault';
 export {isAllowedAssetMime, MIME_TO_EXT} from './Assets.js';
 export type {WriteAssetResult} from './Assets.js';
 export type {ChatAdapter} from './ChatAdapter.js';

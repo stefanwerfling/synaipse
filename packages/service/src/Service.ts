@@ -62,7 +62,7 @@ import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
-import {HashCache} from './Cache.js';
+import {HashCache} from '@synaipse/vault';
 
 export interface IndexingStats {
     total: number;
