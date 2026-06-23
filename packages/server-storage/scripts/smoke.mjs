@@ -8,7 +8,12 @@
 // Exits non-zero on any failed assertion.
 
 import {strict as assert} from 'node:assert';
-import {MariaDBNoteAdapter, createPool, resolveConfig} from '../dist/Index.js';
+import {
+    MariaDBChatAdapter,
+    MariaDBNoteAdapter,
+    createPool,
+    resolveConfig
+} from '../dist/Index.js';
 
 const cfg = resolveConfig({
     host: process.env.SYNAIPSE_MARIADB_HOST ?? '127.0.0.1',
@@ -94,7 +99,73 @@ try {
     const rows = await pool.query('SELECT COUNT(*) AS n FROM notes');
     assert.equal(rows[0].n, 0);
 
-    console.error('\n✓ MariaDBNoteAdapter smoke test passed');
+    console.error('\n--- MariaDBChatAdapter ---');
+    const chats = new MariaDBChatAdapter(pool, cfg);
+
+    step('TRUNCATE chat_sessions (clean slate)');
+    await pool.query('TRUNCATE TABLE chat_sessions');
+
+    step('load() empty');
+    await chats.load();
+    assert.equal(chats.isLoaded(), true);
+    assert.equal((await chats.list()).length, 0);
+
+    step('uniqueId() unchanged when nothing collides');
+    assert.equal(chats.uniqueId('2026-06-23-hello.md'), '2026-06-23-hello.md');
+
+    step('write() persists a session');
+    const session = {
+        id: '2026-06-23-hello.md',
+        title: 'Hello chat',
+        createdAt: '2026-06-23T20:00:00.000Z',
+        updatedAt: '2026-06-23T20:05:00.000Z',
+        lastModel: 'sonnet',
+        turns: [
+            {role: 'user', content: 'hi'},
+            {role: 'assistant', content: 'hey', model: 'sonnet',
+                sources: [{target: 'Notes/Greeting.md', title: 'Greeting', index: 1}]}
+        ]
+    };
+    await chats.write(session);
+
+    step('exists() + uniqueId() now collide-aware');
+    assert.equal(await chats.exists('2026-06-23-hello.md'), true);
+    assert.equal(chats.uniqueId('2026-06-23-hello.md'), '2026-06-23-hello-2.md');
+    assert.equal(chats.uniqueId('2026-06-23-hello.md'), '2026-06-23-hello-2.md',
+        'sync — calling twice without write returns the same suggestion');
+
+    step('list() returns the summary');
+    const summaries = await chats.list();
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].title, 'Hello chat');
+    assert.equal(summaries[0].turnCount, 2);
+    assert.equal(summaries[0].lastModel, 'sonnet');
+
+    step('get() returns the full session with turns + sources');
+    const gotChat = await chats.get('2026-06-23-hello.md');
+    assert.equal(gotChat.turns.length, 2);
+    assert.equal(gotChat.turns[1].sources[0].target, 'Notes/Greeting.md');
+
+    step('reload from DB carries the id set');
+    const freshChats = new MariaDBChatAdapter(pool, cfg);
+    await freshChats.load();
+    assert.equal(freshChats.uniqueId('2026-06-23-hello.md'), '2026-06-23-hello-2.md');
+
+    step('write() upsert replaces in place');
+    await chats.write({...session, title: 'Hello chat (renamed)', turns: [...session.turns, {role: 'user', content: 'more'}]});
+    const after = await chats.list();
+    assert.equal(after.length, 1, 'still exactly one row');
+    assert.equal(after[0].title, 'Hello chat (renamed)');
+    assert.equal(after[0].turnCount, 3);
+
+    step('delete() removes session');
+    await chats.delete('2026-06-23-hello.md');
+    assert.equal((await chats.list()).length, 0);
+    assert.equal(await chats.exists('2026-06-23-hello.md'), false);
+    assert.equal(chats.uniqueId('2026-06-23-hello.md'), '2026-06-23-hello.md',
+        'after delete the basename is free again');
+
+    console.error('\n✓ MariaDBNoteAdapter + MariaDBChatAdapter smoke test passed');
 } catch (err) {
     ok = false;
     console.error('\n✗ FAILED:', err);

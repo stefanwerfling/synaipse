@@ -24,7 +24,7 @@ export interface ResolvedMariaDBConfig extends MariaDBConfig {
 
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 
-const MIGRATION_FILES = ['001_notes.sql'] as const;
+const MIGRATION_FILES = ['001_notes.sql', '002_chats.sql'] as const;
 
 export const createPool = (cfg: MariaDBConfig): Pool => {
     return mariadb.createPool({

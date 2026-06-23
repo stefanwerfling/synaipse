@@ -55,6 +55,14 @@ export interface ChatSummary {
  * Memory/synaipse/decisions/2026-06-23-server-mode-architecture.md.
  */
 export interface ChatAdapter {
+    /**
+     * Warm any in-memory state the adapter needs. Filesystem adapters
+     * can leave this as a no-op (existsSync covers the sync surface);
+     * DB-backed adapters use it to pre-load the id set so the sync
+     * uniqueId() method has something to consult.
+     */
+    load(): Promise<void>;
+    isLoaded(): boolean;
     list(): Promise<ChatSummary[]>;
     get(id: string): Promise<ChatSession>;
     tryGet(id: string): Promise<ChatSession | null>;

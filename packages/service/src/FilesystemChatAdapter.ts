@@ -9,6 +9,15 @@ import type {ChatRepo} from './ChatRepo.js';
 export class FilesystemChatAdapter implements ChatAdapter {
     public constructor(private readonly repo: ChatRepo) {}
 
+    public load(): Promise<void> {
+        // existsSync covers the sync surface — no warm-up needed.
+        return Promise.resolve();
+    }
+
+    public isLoaded(): boolean {
+        return true;
+    }
+
     public list(): Promise<ChatSummary[]> {
         return this.repo.list();
     }

@@ -350,6 +350,7 @@ export class SynaipseService {
 
     public async start(): Promise<void> {
         await this.notes.load();
+        await this.chats.load();
 
         // Migrate any chats that ended up in the vault during the brief
         // window where the chat layer was vault-backed. After this runs
