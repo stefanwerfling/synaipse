@@ -1,6 +1,6 @@
-import type {Config, Frontmatter, Note, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
+import type {Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
-import {Vault, VaultWatcher} from '@synaipse/vault';
+import {FilesystemNoteAdapter, Vault, VaultWatcher} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
@@ -246,7 +246,9 @@ const slugifyForPath = (input: string): string => {
 export type VaultChangeListener = (event: VaultEvent & {noteId: NoteId}) => void;
 
 export class SynaipseService {
+    /** Vault kept around for filesystem-specific concerns: root path, ngit repo handle, and file-watcher sync (`handleExternalChange`). All note-payload reads/writes go through `notes` (a NoteAdapter) so a MariaDB implementation can drop in later. */
     private readonly vault: Vault;
+    private readonly notes: NoteAdapter;
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly cache: HashCache;
@@ -273,6 +275,7 @@ export class SynaipseService {
         this.vault = new Vault(config.vaultPath, {
             history: {autoCommit: git.autoCommit, author: git.author}
         });
+        this.notes = new FilesystemNoteAdapter(this.vault);
         this.cache = new HashCache(config.indexCachePath);
         this.chatRepo = new ChatRepo(config.chatStoreDir);
         this.watcher = new VaultWatcher(config.vaultPath);
@@ -343,7 +346,7 @@ export class SynaipseService {
     }
 
     public async start(): Promise<void> {
-        await Promise.all([this.vault.load(), this.cache.load()]);
+        await Promise.all([this.notes.load(), this.cache.load()]);
 
         // Migrate any chats that ended up in the vault during the brief
         // window where the chat layer was vault-backed. After this runs
@@ -351,11 +354,11 @@ export class SynaipseService {
         // home for conversations.
         await this.migrateLegacyChatNotesOut();
 
-        this.fulltextIndex.build(this.vault.list());
+        this.fulltextIndex.build(this.notes.list());
         process.stderr.write(`[synaipse] fulltext index: ${this.fulltextIndex.size()} notes · ${this.fulltextIndex.termCount()} terms\n`);
 
         if (this.index === null) {
-            process.stderr.write(`[synaipse] embeddings disabled (provider=none) — fulltext only, ${this.vault.list().length} notes loaded\n`);
+            process.stderr.write(`[synaipse] embeddings disabled (provider=none) — fulltext only, ${this.notes.list().length} notes loaded\n`);
             this.attachWatcher();
             this.warmGraphCaches();
             return;
@@ -370,7 +373,7 @@ export class SynaipseService {
         const toReindex: Note[] = [];
         let excluded = 0;
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             stats.total += 1;
             liveIds.add(note.id);
 
@@ -497,7 +500,7 @@ export class SynaipseService {
 
         return reciprocalRankFusion(signals, {
             limit,
-            weightFor: defaultDemote((id) => this.vault.tryGet(id))
+            weightFor: defaultDemote((id) => this.notes.tryGet(id))
         });
     }
 
@@ -535,7 +538,7 @@ export class SynaipseService {
     private adjacency(): AdjacencyMap {
         if (this.cachedAdjacency !== null) return this.cachedAdjacency;
 
-        const notes = this.vault.list();
+        const notes = this.notes.list();
         const keyToId = new Map<string, NoteId>();
 
         for (const note of notes) {
@@ -566,7 +569,7 @@ export class SynaipseService {
     private collectGraphSeeds(): NoteId[] {
         const seeds = new Set<NoteId>();
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             const fm = note.frontmatter;
             if (fm['pinned'] === true || fm['prime'] === true) {
                 seeds.add(note.id);
@@ -579,7 +582,7 @@ export class SynaipseService {
             const entry = this.cache.get(id);
             const lastAccessed = entry?.lastAccessed;
             if (lastAccessed === undefined || lastAccessed < cutoff) continue;
-            if (this.vault.tryGet(id) === undefined) continue;
+            if (this.notes.tryGet(id) === undefined) continue;
             recent.push({id, lastAccessed});
         }
 
@@ -800,7 +803,7 @@ export class SynaipseService {
             return;
         }
 
-        const note = this.vault.tryGet(id);
+        const note = this.notes.tryGet(id);
 
         if (note === undefined) {
             yield {kind: 'error', message: `note not found: ${id}`};
@@ -850,7 +853,7 @@ export class SynaipseService {
 
                 return hits.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
             },
-            readNote: (id) => this.vault.tryGet(id)?.content,
+            readNote: (id) => this.notes.tryGet(id)?.content,
             provider
         }, options);
     }
@@ -1002,7 +1005,7 @@ export class SynaipseService {
             frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project, extraTags)
         };
 
-        const note = await this.vault.write(scoped, {
+        const note = await this.notes.write(scoped, {
             message: buildCommitMessage(commitTool, scoped.path, project),
             ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
         });
@@ -1018,7 +1021,7 @@ export class SynaipseService {
     public listChatgptImports(): Map<string, NoteId> {
         const out = new Map<string, NoteId>();
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             const id = note.frontmatter.chatgpt_id;
 
             if (typeof id === 'string' && id.length > 0) {
@@ -1040,7 +1043,7 @@ export class SynaipseService {
             return;
         }
 
-        const note = this.vault.tryGet(id);
+        const note = this.notes.tryGet(id);
 
         if (note === undefined) {
             yield {kind: 'error', message: `note not found: ${id}`};
@@ -1049,7 +1052,7 @@ export class SynaipseService {
 
         // Sibling note path: drop the .md suffix, append .compiled.md
         const compiledPath = id.replace(/\.md$/i, '.compiled.md');
-        const existing = this.vault.tryGet(compiledPath);
+        const existing = this.notes.tryGet(compiledPath);
 
         if (existing !== undefined && opts.force !== true) {
             const sourceHash = existing.frontmatter.source_hash;
@@ -1070,7 +1073,7 @@ export class SynaipseService {
 
         const markdown = renderCompiledMarkdown(note.id, note.title, final);
 
-        const written = await this.vault.write({
+        const written = await this.notes.write({
             path: compiledPath,
             content: markdown,
             frontmatter: {
@@ -1104,7 +1107,7 @@ export class SynaipseService {
             excludePrefixes?: readonly string[];
         } = {}
     ): Promise<{noteId: NoteId; accepted: AcceptedLink[]; skipped: boolean}> {
-        const note = this.vault.tryGet(id);
+        const note = this.notes.tryGet(id);
         if (note === undefined) throw new Error(`note not found: ${id}`);
 
         // Idempotency: if the note already has an explicit ## Related section
@@ -1179,7 +1182,7 @@ export class SynaipseService {
         const stripped = stripRelatedSection(note.content).trimEnd();
         const next = `${stripped}\n${renderRelatedSection(accepted)}`;
 
-        const written = await this.vault.write({
+        const written = await this.notes.write({
             path: id,
             content: next,
             frontmatter: note.frontmatter
@@ -1203,7 +1206,7 @@ export class SynaipseService {
         // Idempotency by URL: scan vault for an existing clip with the same source URL.
         let existingId: NoteId | undefined;
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             if (note.frontmatter.source_url === input.url) {
                 existingId = note.id;
                 break;
@@ -1230,7 +1233,7 @@ export class SynaipseService {
 
         const body = `# ${input.title}\n\n> Source: <${input.url}>\n\n${input.markdown.trim()}\n`;
 
-        const note = await this.vault.write(
+        const note = await this.notes.write(
             {path: writePath, content: body, frontmatter},
             {message: `synaipse: clip ${writePath}`}
         );
@@ -1261,7 +1264,7 @@ export class SynaipseService {
 
         const rendered = renderChatgptConversation(conv, (ptr) => pointerToRelative.get(ptr) ?? null);
 
-        const note = await this.vault.write(
+        const note = await this.notes.write(
             {
                 path: writePath,
                 content: rendered.content,
@@ -1282,7 +1285,7 @@ export class SynaipseService {
         this.assertInProject(id, 'delete_note', opts?.project);
 
         const project = opts?.project ?? this.project;
-        await this.vault.delete(id, {
+        await this.notes.delete(id, {
             message: buildCommitMessage('delete_note', id, project),
             ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
         });
@@ -1398,7 +1401,7 @@ export class SynaipseService {
      */
     public async migrateLegacyChatNotesOut(): Promise<{moved: number; failed: number}> {
         const legacy: NoteId[] = [];
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             if (isChatNote(note)) legacy.push(note.id);
         }
 
@@ -1406,7 +1409,7 @@ export class SynaipseService {
         let failed = 0;
 
         for (const noteId of legacy) {
-            const note = this.vault.tryGet(noteId);
+            const note = this.notes.tryGet(noteId);
             if (note === undefined) continue;
 
             try {
@@ -1420,7 +1423,7 @@ export class SynaipseService {
                 await this.chatRepo.write({...session, id: safeId});
 
                 // Remove from vault + bookkeeping
-                await this.vault.delete(noteId, {message: `synaipse: migrate chat ${noteId} → chat store`});
+                await this.notes.delete(noteId, {message: `synaipse: migrate chat ${noteId} → chat store`});
                 if (this.index !== null) await this.index.deleteNote(noteId);
                 this.fulltextIndex.removeNote(noteId);
                 this.cache.delete(noteId);
@@ -1446,7 +1449,7 @@ export class SynaipseService {
         const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
         const sessionPath = `${this.projectFolder(project)}sessions/${date}.md`;
-        const existing = this.vault.tryGet(sessionPath);
+        const existing = this.notes.tryGet(sessionPath);
 
         const baseFrontmatter = existing !== undefined
             ? {...existing.frontmatter, updated: date}
@@ -1483,7 +1486,7 @@ export class SynaipseService {
         const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
         const inboxPath = `${this.projectFolder(project)}inbox/${date}.md`;
-        const existing = this.vault.tryGet(inboxPath);
+        const existing = this.notes.tryGet(inboxPath);
 
         const baseFrontmatter = existing !== undefined
             ? {...existing.frontmatter, updated: date}
@@ -1511,27 +1514,27 @@ export class SynaipseService {
     }
 
     public readNote(id: NoteId): Note {
-        const note = this.vault.get(id);
+        const note = this.notes.get(id);
         this.touchAccess(note);
         return note;
     }
 
     public listNotes(): Note[] {
-        return this.vault.list();
+        return this.notes.list();
     }
 
     public tags(): Map<string, NoteId[]> {
-        return this.vault.tags();
+        return this.notes.tags();
     }
 
     public backlinks(id: NoteId): NoteId[] {
         this.touchAccess(id);
-        return this.vault.backlinksOf(id);
+        return this.notes.backlinksOf(id);
     }
 
     private touchAccess(noteOrId: Note | NoteId): void {
         if (typeof noteOrId === 'string') {
-            const note = this.vault.tryGet(noteOrId);
+            const note = this.notes.tryGet(noteOrId);
 
             if (note === undefined) {
                 return;
@@ -1552,7 +1555,7 @@ export class SynaipseService {
 
         const result: StaleNote[] = [];
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             if (pathPrefix.length > 0 && !note.id.startsWith(pathPrefix)) {
                 continue;
             }
@@ -1595,7 +1598,7 @@ export class SynaipseService {
     public graph(): Graph {
         if (this.cachedGraph !== null) return this.cachedGraph;
 
-        const notes = this.vault.list();
+        const notes = this.notes.list();
         const titleToId = new Map(notes.map((n) => [n.title, n.id]));
 
         const built: Graph = {
@@ -1627,7 +1630,7 @@ export class SynaipseService {
     }
 
     public async related(id: NoteId, limit = 10): Promise<RelatedNote[]> {
-        const note = this.vault.tryGet(id);
+        const note = this.notes.tryGet(id);
 
         if (note === undefined) {
             return [];
@@ -1658,7 +1661,7 @@ export class SynaipseService {
         }
 
         const titleToId = new Map<string, NoteId>();
-        for (const other of this.vault.list()) {
+        for (const other of this.notes.list()) {
             titleToId.set(other.title, other.id);
         }
 
@@ -1677,7 +1680,7 @@ export class SynaipseService {
         const myTags = new Set(note.tags);
 
         if (myTags.size > 0) {
-            for (const other of this.vault.list()) {
+            for (const other of this.notes.list()) {
                 if (other.id === id) {
                     continue;
                 }
@@ -1698,7 +1701,7 @@ export class SynaipseService {
 
         return [...accumulator.entries()]
             .map(([otherId, {score, reasons}]) => {
-                const other = this.vault.tryGet(otherId);
+                const other = this.notes.tryGet(otherId);
                 return {
                     id: otherId,
                     title: other?.title ?? otherId,
@@ -1715,7 +1718,7 @@ export class SynaipseService {
         const minScore = opts.minScore ?? 0.65;
         const prefix = opts.pathPrefix ?? '';
 
-        const allNotes = this.vault.list();
+        const allNotes = this.notes.list();
         const scoped = prefix.length === 0
             ? allNotes
             : allNotes.filter((n) => n.id.startsWith(prefix));
@@ -1740,7 +1743,7 @@ export class SynaipseService {
                 }
             }
 
-            for (const backlinkId of this.vault.backlinksOf(note.id)) {
+            for (const backlinkId of this.notes.backlinksOf(note.id)) {
                 set.add(backlinkId);
             }
 
@@ -1757,8 +1760,8 @@ export class SynaipseService {
             reason: string,
             sharedTags?: string[]
         ): void => {
-            const a = this.vault.tryGet(aId);
-            const b = this.vault.tryGet(bId);
+            const a = this.notes.tryGet(aId);
+            const b = this.notes.tryGet(bId);
 
             if (a === undefined || b === undefined) {
                 return;
@@ -1865,7 +1868,7 @@ export class SynaipseService {
     public todos(pathPrefix = '', includeDone = false): TodoItem[] {
         const result: TodoItem[] = [];
 
-        for (const note of this.vault.list()) {
+        for (const note of this.notes.list()) {
             if (pathPrefix.length > 0 && !note.id.startsWith(pathPrefix)) {
                 continue;
             }
@@ -1909,7 +1912,7 @@ export class SynaipseService {
         const sessionPrefix = project === null ? 'Memory/sessions/' : `Memory/${project}/sessions/`;
         const decisionPrefix = project === null ? 'Memory/decisions/' : `Memory/${project}/decisions/`;
 
-        const all = this.vault.list();
+        const all = this.notes.list();
 
         const isCrawler = (note: Note): boolean => note.id.startsWith('Crawler/');
 
@@ -1968,7 +1971,7 @@ export class SynaipseService {
             const hits = await this.search(topic, 'hybrid', 5);
             for (const hit of hits) {
                 if (context.length >= limit) break;
-                const note = this.vault.tryGet(hit.noteId);
+                const note = this.notes.tryGet(hit.noteId);
                 if (note === undefined) continue;
                 if (!inProject(note)) continue;
                 push(note, 'topic');
@@ -2014,7 +2017,7 @@ export class SynaipseService {
 
     public async linkNote(fromId: NoteId, toTitles: readonly string[], section = 'References', opts?: ProjectOpts): Promise<{note: Note; added: string[]}> {
         this.assertInProject(fromId, 'link_note', opts?.project);
-        const note = this.vault.get(fromId);
+        const note = this.notes.get(fromId);
         const targets = toTitles.map((t) => t.trim()).filter((t) => t.length > 0);
 
         if (targets.length === 0) {
@@ -2086,7 +2089,7 @@ export class SynaipseService {
 
     public async updateNote(id: NoteId, patch: UpdateNoteInput, opts?: ProjectOpts): Promise<Note> {
         this.assertInProject(id, 'update_note', opts?.project);
-        const existing = this.vault.get(id);
+        const existing = this.notes.get(id);
         const nextContent = patch.content ?? existing.content;
         const nextFrontmatter = patch.frontmatterPatch === undefined
             ? existing.frontmatter
@@ -2123,7 +2126,7 @@ export class SynaipseService {
             return;
         }
 
-        const note = this.vault.tryGet(id);
+        const note = this.notes.tryGet(id);
 
         if (!note) {
             return;
