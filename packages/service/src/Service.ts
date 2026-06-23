@@ -1,6 +1,6 @@
 import type {Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
-import {FilesystemNoteAdapter, Vault, VaultWatcher} from '@synaipse/vault';
+import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
 import {writeAsset, type WriteAssetResult} from './Assets.js';
@@ -251,6 +251,7 @@ export class SynaipseService {
     /** Vault kept around for filesystem-specific concerns: root path, ngit repo handle, and file-watcher sync (`handleExternalChange`). All note-payload reads/writes go through `notes` (a NoteAdapter) so a MariaDB implementation can drop in later. */
     private readonly vault: Vault;
     private readonly notes: NoteAdapter;
+    private readonly history: History;
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly chats: ChatAdapter;
@@ -280,6 +281,7 @@ export class SynaipseService {
             this.vault,
             new HashCache(config.indexCachePath)
         );
+        this.history = new VaultHistory(this.vault);
         this.chats = new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
@@ -607,7 +609,7 @@ export class SynaipseService {
     }
 
     public async noteHistory(id: NoteId, limit = 50): Promise<NoteHistoryEntry[]> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return [];
@@ -637,7 +639,7 @@ export class SynaipseService {
     }
 
     public async getActivity(opts: {sinceDays?: number; limit?: number} = {}): Promise<ActivityReport> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return {total: 0, commits: [], timeline: [], hotNotes: [], byTool: [], byProject: []};
@@ -663,7 +665,7 @@ export class SynaipseService {
     }
 
     public async noteVersion(id: NoteId, commitSha: string): Promise<string> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             throw new Error('history disabled — no .ngit found in vault');
@@ -674,7 +676,7 @@ export class SynaipseService {
     }
 
     public async noteDiff(id: NoteId, fromSha: string, toSha?: string): Promise<string> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return '';
@@ -863,15 +865,15 @@ export class SynaipseService {
     }
 
     public async historyEnabled(): Promise<boolean> {
-        if (this.vault.isHistoryConfigured()) {
+        if (this.history.isConfigured()) {
             return true;
         }
 
-        return (await this.vault.getRepo()) !== null;
+        return (await this.history.getRepo()) !== null;
     }
 
     public async verifyHistory(): Promise<VerifyReport | null> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return null;
@@ -881,7 +883,7 @@ export class SynaipseService {
     }
 
     public async snapshotList(commitSha: string, treePath?: string): Promise<SnapshotEntry[]> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return [];
@@ -893,7 +895,7 @@ export class SynaipseService {
     }
 
     public async snapshotWalk(commitSha: string, pathPrefix = ''): Promise<{path: string; sha: string}[]> {
-        const repo = await this.vault.getRepo();
+        const repo = await this.history.getRepo();
 
         if (repo === null) {
             return [];

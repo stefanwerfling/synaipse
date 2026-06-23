@@ -1,6 +1,8 @@
 export {Vault} from './Vault.js';
 export type {VaultOptions, VaultHistoryConfig, CommitContext} from './Vault.js';
 export {FilesystemNoteAdapter} from './FilesystemNoteAdapter.js';
+export {VaultHistory} from './History.js';
+export type {History} from './History.js';
 export {HashCache} from './Cache.js';
 export type {CacheEntry, TouchSeed} from './Cache.js';
 export {parseNote, extractWikilinks, extractTags} from './Parser.js';
