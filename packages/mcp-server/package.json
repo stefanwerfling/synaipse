@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@synaipse/core": "*",
+    "@synaipse/server-storage": "*",
     "@synaipse/service": "*",
     "@synaipse/vault": "*",
     "@synaipse/vector": "*",

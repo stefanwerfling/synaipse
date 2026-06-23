@@ -5,7 +5,8 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import type {Config} from '@synaipse/core';
-import {SynaipseService} from '@synaipse/service';
+import {SynaipseService, type ServiceOverrides} from '@synaipse/service';
+import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
 import {resolveContextFromRequest} from './Project.js';
@@ -119,8 +120,36 @@ export const buildMcpHttpHandler = (
     };
 };
 
+const buildOverrides = async (config: Config): Promise<{overrides: ServiceOverrides; close: () => Promise<void>}> => {
+    if (config.mode !== 'server') {
+        return {overrides: {}, close: () => Promise.resolve()};
+    }
+
+    if (config.mariadb === undefined) {
+        throw new Error('config.mode=server requires config.mariadb — check loadConfigFromEnv');
+    }
+
+    const {createServerAdapters} = await import('@synaipse/server-storage');
+    const bundle = await createServerAdapters(config.mariadb);
+
+    return {
+        overrides: {
+            notes: bundle.notes,
+            chats: bundle.chats,
+            history: new NoopHistory(),
+            skipWatcher: true
+        },
+        close: () => bundle.close()
+    };
+};
+
 export const startServer = async (config: Config, options: StartServerOptions): Promise<void> => {
-    const service = new SynaipseService(config);
+    const {overrides, close: closeAdapters} = await buildOverrides(config);
+    if (config.mode === 'server') {
+        process.stderr.write('[synaipse-mcp] server-mode: MariaDB-backed adapters wired in\n');
+    }
+
+    const service = new SynaipseService(config, overrides);
     await service.start();
 
     let httpServer: http.Server | null = null;
@@ -146,7 +175,9 @@ export const startServer = async (config: Config, options: StartServerOptions): 
 
     const shutdown = (): void => {
         const finalize = (): void => {
-            service.stop().finally(() => process.exit(0));
+            service.stop()
+                .finally(() => closeAdapters())
+                .finally(() => process.exit(0));
         };
 
         if (httpServer !== null) {
