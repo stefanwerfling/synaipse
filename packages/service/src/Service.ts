@@ -3,7 +3,8 @@ import {ProjectScopeError} from '@synaipse/core';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
-import {writeAsset, type WriteAssetResult} from './Assets.js';
+import {type WriteAssetResult} from './Assets.js';
+import {FilesystemAssetStore, type AssetStore} from './AssetStore.js';
 import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
@@ -259,6 +260,7 @@ export interface ServiceOverrides {
     notes?: NoteAdapter;
     chats?: ChatAdapter;
     history?: History;
+    assetStore?: AssetStore;
     skipWatcher?: boolean;
 }
 
@@ -267,6 +269,7 @@ export class SynaipseService {
     private readonly vault: Vault;
     private readonly notes: NoteAdapter;
     private readonly history: History;
+    private readonly assetStore: AssetStore;
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly skipWatcher: boolean;
@@ -298,6 +301,7 @@ export class SynaipseService {
             new HashCache(config.indexCachePath)
         );
         this.history = overrides.history ?? new VaultHistory(this.vault);
+        this.assetStore = overrides.assetStore ?? new FilesystemAssetStore(this.vault.root);
         this.chats = overrides.chats ?? new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
         this.watcher = new VaultWatcher(config.vaultPath);
         this.skipWatcher = overrides.skipWatcher ?? false;
@@ -725,12 +729,7 @@ export class SynaipseService {
 
     /** True whenever the History UI should be available — feature is configured. The repo may not be initialised yet (no Synaipse-driven write has happened), in which case noteHistory/snapshot etc. just return empty results. */
     public async writeNoteAsset(noteId: NoteId, content: Buffer, contentType: string | null): Promise<WriteAssetResult> {
-        return writeAsset({
-            vaultPath: this.vault.root,
-            noteId,
-            content,
-            contentType
-        });
+        return this.assetStore.writeAsset({noteId, content, contentType});
     }
 
     /**
@@ -754,8 +753,7 @@ export class SynaipseService {
                 );
             }
 
-            return writeAsset({
-                vaultPath: this.vault.root,
+            return this.assetStore.writeAsset({
                 noteId: input.noteId,
                 content: input.content,
                 contentType: input.contentType
@@ -766,8 +764,7 @@ export class SynaipseService {
         // so assetsFolderForNote routes to Memory/<project>/_assets, then drop
         // relativePath from the result since there's no real note to be
         // relative to.
-        const result = await writeAsset({
-            vaultPath: this.vault.root,
+        const result = await this.assetStore.writeAsset({
             noteId: `${prefix}.virtual.md`,
             content: input.content,
             contentType: input.contentType

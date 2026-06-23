@@ -5,7 +5,7 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import type {Config} from '@synaipse/core';
-import {SynaipseService, type ServiceOverrides} from '@synaipse/service';
+import {NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
@@ -137,6 +137,7 @@ const buildOverrides = async (config: Config): Promise<{overrides: ServiceOverri
             notes: bundle.notes,
             chats: bundle.chats,
             history: new NoopHistory(),
+            assetStore: new NoopAssetStore(),
             skipWatcher: true
         },
         close: () => bundle.close()

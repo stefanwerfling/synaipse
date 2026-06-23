@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {SynaipseService} from '../../service/dist/Index.js';
+import {NoopAssetStore} from '../../service/dist/Index.js';
 import {NoopHistory} from '../../vault/dist/Index.js';
 import {createServerAdapters} from '../dist/Index.js';
 
@@ -58,6 +59,7 @@ try {
         notes: bundle.notes,
         chats: bundle.chats,
         history: new NoopHistory(),
+        assetStore: new NoopAssetStore(),
         skipWatcher: true
     });
 
@@ -85,6 +87,7 @@ try {
         notes: bundle.notes,
         chats: bundle.chats,
         history: new NoopHistory(),
+        assetStore: new NoopAssetStore(),
         skipWatcher: true
     });
     // Note: same adapter instance — Service.start() calls notes.load()
@@ -97,6 +100,12 @@ try {
 
     step('noteHistory() returns empty array under NoopHistory');
     assert.deepEqual(await service.noteHistory('Memory/smoke/Notes/ServerHello.md'), []);
+
+    step('writeNoteAsset() rejects with the NoopAssetStore explanation');
+    await assert.rejects(
+        () => service.writeNoteAsset('Memory/smoke/Notes/ServerHello.md', Buffer.from([1, 2, 3]), 'image/png'),
+        /not supported in server-mode/
+    );
 
     step('Cleanup: delete the note');
     await service.deleteNote('Memory/smoke/Notes/ServerHello.md');

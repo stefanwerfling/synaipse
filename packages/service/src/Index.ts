@@ -5,6 +5,8 @@ export {HashCache} from '@synaipse/vault';
 export type {CacheEntry} from '@synaipse/vault';
 export {isAllowedAssetMime, MIME_TO_EXT} from './Assets.js';
 export type {WriteAssetResult} from './Assets.js';
+export {FilesystemAssetStore, NoopAssetStore} from './AssetStore.js';
+export type {AssetStore} from './AssetStore.js';
 export type {ChatAdapter} from '@synaipse/core';
 export {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 export type {

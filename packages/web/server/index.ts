@@ -3,7 +3,7 @@ import {fileURLToPath} from 'node:url';
 import {config as dotenvConfig} from 'dotenv';
 import http from 'node:http';
 import {URL} from 'node:url';
-import type {ServiceOverrides} from '@synaipse/service';
+import {NoopAssetStore, type ServiceOverrides} from '@synaipse/service';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..', '..');
@@ -39,6 +39,7 @@ const buildOverrides = async (): Promise<{overrides: ServiceOverrides; close: ()
             notes: bundle.notes,
             chats: bundle.chats,
             history: new NoopHistory(),
+            assetStore: new NoopAssetStore(),
             skipWatcher: true
         },
         close: () => bundle.close()
