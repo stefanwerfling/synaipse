@@ -4,7 +4,7 @@ export {HashCache} from '@synaipse/vault';
 export type {CacheEntry} from '@synaipse/vault';
 export {isAllowedAssetMime, MIME_TO_EXT} from './Assets.js';
 export type {WriteAssetResult} from './Assets.js';
-export type {ChatAdapter} from './ChatAdapter.js';
+export type {ChatAdapter} from '@synaipse/core';
 export {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 export type {
     ChatgptImportAttachment,

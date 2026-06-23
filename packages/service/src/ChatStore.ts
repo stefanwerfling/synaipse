@@ -1,4 +1,13 @@
-import type {Frontmatter, Note, NoteId} from '@synaipse/core';
+import type {
+    ChatSession,
+    ChatSourceRef,
+    ChatSummary,
+    ChatTurn,
+    Frontmatter,
+    Note
+} from '@synaipse/core';
+
+export type {ChatSession, ChatSourceRef, ChatSummary, ChatTurn};
 
 /**
  * Persistent chat sessions live in `vault/Chats/<id>.md`. The body is
@@ -13,47 +22,11 @@ import type {Frontmatter, Note, NoteId} from '@synaipse/core';
  *   <!--chat:assistant model="..." sources='...'--> (opens an assistant turn)
  *
  * The next marker — or EOF — ends the current turn.
+ *
+ * The session/turn/source type shapes themselves live in @synaipse/core
+ * so storage adapters in @synaipse/server-storage can implement the
+ * ChatAdapter port without depending on @synaipse/service.
  */
-
-export interface ChatSourceRef {
-    /** Wikilink target — a vault note id, or a URL for research mode. */
-    target: string;
-    /** Display title at chat time. */
-    title: string;
-    /** Citation index ([^N]). */
-    index: number;
-    /** Retrieval score, if any. */
-    score?: number;
-    /** Optional snippet (for hover/expand). */
-    snippet?: string;
-}
-
-export interface ChatTurn {
-    role: 'user' | 'assistant';
-    content: string;
-    /** Model that produced an assistant turn. */
-    model?: string;
-    sources?: ChatSourceRef[];
-}
-
-export interface ChatSession {
-    id: NoteId;
-    title: string;
-    /** ISO-8601 */
-    createdAt: string;
-    /** ISO-8601 */
-    updatedAt: string;
-    lastModel?: string;
-    turns: ChatTurn[];
-}
-
-export interface ChatSummary {
-    id: NoteId;
-    title: string;
-    updatedAt: string;
-    lastModel?: string;
-    turnCount: number;
-}
 
 // Allow ANY character in the attrs (including `>` and newlines) because the
 // `sources` JSON payload regularly contains blockquote chars (`> ` in

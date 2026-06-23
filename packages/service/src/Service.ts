@@ -35,7 +35,7 @@ import {
     type ChatSummary,
     type ChatTurn
 } from './ChatStore.js';
-import type {ChatAdapter} from './ChatAdapter.js';
+import type {ChatAdapter} from '@synaipse/core';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 import {HashCache} from '@synaipse/vault';

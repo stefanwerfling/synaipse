@@ -1,6 +1,5 @@
-import type {ChatAdapter} from './ChatAdapter.js';
+import type {ChatAdapter, ChatSession, ChatSummary} from '@synaipse/core';
 import type {ChatRepo} from './ChatRepo.js';
-import type {ChatSession, ChatSummary} from './ChatStore.js';
 
 /**
  * Thin adapter wrapping the existing disk-backed ChatRepo. Lets call
