@@ -38,6 +38,7 @@ import {
 import type {ChatAdapter} from './ChatAdapter.js';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
+import {HashCache} from '@synaipse/vault';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
 export type {WriteAssetResult} from './Assets.js';
@@ -62,7 +63,6 @@ import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
-import {HashCache} from '@synaipse/vault';
 
 export interface IndexingStats {
     total: number;
@@ -253,7 +253,6 @@ export class SynaipseService {
     private readonly notes: NoteAdapter;
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
-    private readonly cache: HashCache;
     private readonly chats: ChatAdapter;
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
@@ -277,8 +276,10 @@ export class SynaipseService {
         this.vault = new Vault(config.vaultPath, {
             history: {autoCommit: git.autoCommit, author: git.author}
         });
-        this.notes = new FilesystemNoteAdapter(this.vault);
-        this.cache = new HashCache(config.indexCachePath);
+        this.notes = new FilesystemNoteAdapter(
+            this.vault,
+            new HashCache(config.indexCachePath)
+        );
         this.chats = new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
@@ -348,7 +349,7 @@ export class SynaipseService {
     }
 
     public async start(): Promise<void> {
-        await Promise.all([this.notes.load(), this.cache.load()]);
+        await this.notes.load();
 
         // Migrate any chats that ended up in the vault during the brief
         // window where the chat layer was vault-backed. After this runs
@@ -384,7 +385,7 @@ export class SynaipseService {
                 continue;
             }
 
-            const cached = this.cache.get(note.id);
+            const cached = this.notes.getEntry(note.id);
 
             if (cached && cached.hash === note.hash) {
                 stats.unchanged += 1;
@@ -398,13 +399,13 @@ export class SynaipseService {
             process.stderr.write(`[synaipse] embed: skipped ${excluded} notes by exclude-prefix\n`);
         }
 
-        const orphans: NoteId[] = this.cache.ids().filter((id) => !liveIds.has(id));
+        const orphans: NoteId[] = this.notes.entryIds().filter((id) => !liveIds.has(id));
 
         if (toReindex.length > 0) {
             await this.index.indexNotes(toReindex);
 
             for (const note of toReindex) {
-                this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
+                this.notes.recordEntry(note.id, note.hash, note.mtime);
             }
 
             stats.reindexed = toReindex.length;
@@ -414,13 +415,13 @@ export class SynaipseService {
             await this.index.deleteNotes(orphans);
 
             for (const id of orphans) {
-                this.cache.delete(id);
+                this.notes.removeEntry(id);
             }
 
             stats.removed = orphans.length;
         }
 
-        await this.cache.flush();
+        await this.notes.flushEntries();
         this.lastStats = stats;
 
         process.stderr.write(
@@ -444,7 +445,7 @@ export class SynaipseService {
 
     public async stop(): Promise<void> {
         await this.watcher.stop();
-        await this.cache.flush();
+        await this.notes.flushEntries();
     }
 
     public getLastIndexingStats(): IndexingStats {
@@ -580,8 +581,8 @@ export class SynaipseService {
 
         const recent: {id: NoteId; lastAccessed: number}[] = [];
         const cutoff = Date.now() - GRAPH_SEED_RECENT_WINDOW_MS;
-        for (const id of this.cache.ids()) {
-            const entry = this.cache.get(id);
+        for (const id of this.notes.entryIds()) {
+            const entry = this.notes.getEntry(id);
             const lastAccessed = entry?.lastAccessed;
             if (lastAccessed === undefined || lastAccessed < cutoff) continue;
             if (this.notes.tryGet(id) === undefined) continue;
@@ -1014,8 +1015,6 @@ export class SynaipseService {
 
         await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
-        this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
-        await this.cache.flush();
         return note;
     }
 
@@ -1091,8 +1090,6 @@ export class SynaipseService {
 
         await this.maybeIndexNote(written);
         this.fulltextIndex.addNote(written);
-        this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
-        await this.cache.flush();
 
         yield {kind: 'done', result: final, compiledPath: written.id};
     }
@@ -1192,8 +1189,6 @@ export class SynaipseService {
 
         await this.maybeIndexNote(written);
         this.fulltextIndex.addNote(written);
-        this.cache.set(written.id, {hash: written.hash, mtime: written.mtime});
-        await this.cache.flush();
 
         return {noteId: written.id, accepted, skipped: false};
     }
@@ -1242,8 +1237,6 @@ export class SynaipseService {
 
         await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
-        this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
-        await this.cache.flush();
 
         return {noteId: note.id, isUpdate: existingId !== undefined};
     }
@@ -1277,8 +1270,6 @@ export class SynaipseService {
 
         await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
-        this.cache.set(note.id, {hash: note.hash, mtime: note.mtime});
-        await this.cache.flush();
 
         return {noteId: note.id, isUpdate: existingId !== undefined};
     }
@@ -1297,7 +1288,6 @@ export class SynaipseService {
         }
 
         this.fulltextIndex.removeNote(id);
-        this.cache.delete(id);
         this.invalidateTopologyCaches();
     }
 
@@ -1428,7 +1418,6 @@ export class SynaipseService {
                 await this.notes.delete(noteId, {message: `synaipse: migrate chat ${noteId} → chat store`});
                 if (this.index !== null) await this.index.deleteNote(noteId);
                 this.fulltextIndex.removeNote(noteId);
-                this.cache.delete(noteId);
 
                 moved += 1;
             } catch (cause) {
@@ -1542,11 +1531,11 @@ export class SynaipseService {
                 return;
             }
 
-            this.cache.touch(note.id, {hash: note.hash, mtime: note.mtime});
+            this.notes.recordAccess(note.id, note.hash, note.mtime);
             return;
         }
 
-        this.cache.touch(noteOrId.id, {hash: noteOrId.hash, mtime: noteOrId.mtime});
+        this.notes.recordAccess(noteOrId.id, noteOrId.hash, noteOrId.mtime);
     }
 
     public staleNotes(opts: StaleNotesOptions = {}, now: number = Date.now()): StaleNote[] {
@@ -1562,7 +1551,7 @@ export class SynaipseService {
                 continue;
             }
 
-            const entry = this.cache.get(note.id);
+            const entry = this.notes.getEntry(note.id);
             const lastAccessed = entry?.lastAccessed;
             const accessCount = entry?.accessCount ?? 0;
 
@@ -2123,7 +2112,7 @@ export class SynaipseService {
                 await this.index.deleteNote(id);
             }
             this.fulltextIndex.removeNote(id);
-            this.cache.delete(id);
+            this.notes.removeEntry(id);
             this.notifyVaultChange({kind, path, noteId: id});
             return;
         }
@@ -2136,9 +2125,9 @@ export class SynaipseService {
 
         // Pick up cache updates from a parallel CLI process so we don't
         // re-embed a file that the relink/compile CLI just wrote.
-        await this.cache.reloadIfChanged();
+        await this.notes.syncEntries();
 
-        const cached = this.cache.get(id);
+        const cached = this.notes.getEntry(id);
 
         if (cached && cached.hash === note.hash) {
             return;
@@ -2146,7 +2135,7 @@ export class SynaipseService {
 
         await this.maybeIndexNote(note);
         this.fulltextIndex.addNote(note);
-        this.cache.set(id, {hash: note.hash, mtime: note.mtime});
+        this.notes.recordEntry(id, note.hash, note.mtime);
         this.notifyVaultChange({kind, path, noteId: id});
     }
 
