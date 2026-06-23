@@ -31,6 +31,17 @@ npm run docker:up:ollama && npm run web
 npm run docker:up:voyage && npm run web
 ```
 
+### Server mode (MariaDB-backed)
+
+For multi-user / multi-instance deployments, run notes + chats out of MariaDB instead of the filesystem vault:
+
+```bash
+npm run docker:up:server                # mariadb:11.7 on port 3307
+SYNAIPSE_MODE=server npm run web        # web + MCP boot against the DB
+```
+
+See the [architecture ADR](Memory/synaipse/decisions/2026-06-23-server-mode-architecture.md) for the rationale, the [server-storage smoke scripts](packages/server-storage/scripts/) for the verification shape, and the `SYNAIPSE_MARIADB_*` block in `.env.example` for the required environment variables. ngit history is silent (NoopHistory) in server mode until the async commit-worker lands.
+
 Detailed walkthrough: [doc/getting-started.md](doc/getting-started.md).
 
 ## Documentation
@@ -53,13 +64,14 @@ Index: [doc/README.md](doc/README.md).
 
 | Package | Purpose |
 |---|---|
-| `@synaipse/core`       | Shared types & VTS schemas |
-| `@synaipse/vault`      | Markdown I/O, frontmatter, wikilinks, tags, backlinks |
-| `@synaipse/vector`     | Qdrant client + pluggable embedders (Voyage / Ollama) |
-| `@synaipse/service`    | Vault + vector orchestration, fulltext, hybrid merge |
-| `@synaipse/mcp-server` | MCP server (stdio) exposing tools to Claude Code |
-| `@synaipse/web`        | Vanilla TS web UI (no React) for browsing, search, edit, graph |
-| `@synaipse/crawler`    | External-source crawlers writing under `Crawler/` (first: GitHub stars) |
+| `@synaipse/core`           | Shared types, VTS schemas, NoteAdapter + ChatAdapter ports |
+| `@synaipse/vault`          | Markdown I/O, frontmatter, wikilinks, tags, backlinks |
+| `@synaipse/vector`         | Qdrant client + pluggable embedders (Voyage / Ollama / HuggingFace) |
+| `@synaipse/server-storage` | MariaDB-backed adapters for `SYNAIPSE_MODE=server` |
+| `@synaipse/service`        | Vault + vector orchestration, fulltext, hybrid merge |
+| `@synaipse/mcp-server`     | MCP server (stdio + http) exposing tools to Claude Code |
+| `@synaipse/web`            | Vanilla TS web UI (no React) for browsing, search, edit, graph |
+| `@synaipse/crawler`        | External-source crawlers writing under `Crawler/` (first: GitHub stars) |
 
 ## Use from Claude Code
 
@@ -115,6 +127,7 @@ npm run mcp                start MCP server (stdio)
 npm run web                start API + Vite dev server
 npm run docker:up:voyage   start qdrant only
 npm run docker:up:ollama   start qdrant + ollama + model pull
+npm run docker:up:server   start mariadb (server-mode hot-tier)
 npm run docker:down        stop all
 npm run crawl:github-stars crawl your starred repos into Crawler/github/starred/
 npm run crawl:devto        crawl the latest 100 dev.to articles into Crawler/devto/articles/
