@@ -100,6 +100,11 @@ export const EmbeddingsProviderSchema = Vts.or([
     Vts.equal('none' as const)
 ]);
 
+export const RuntimeModeSchema = Vts.or([
+    Vts.equal('local' as const),
+    Vts.equal('server' as const)
+]);
+
 export const ConfigSchema = Vts.object({
     vaultPath: Vts.string(),
     indexCachePath: Vts.string(),
@@ -161,6 +166,15 @@ export const ConfigSchema = Vts.object({
         apiKey: Vts.optional(Vts.string()),
         url: Vts.optional(Vts.string())
     })),
-    embedExcludePrefixes: Vts.optional(Vts.array(Vts.string()))
+    embedExcludePrefixes: Vts.optional(Vts.array(Vts.string())),
+    mode: Vts.optional(RuntimeModeSchema),
+    mariadb: Vts.optional(Vts.object({
+        host: Vts.string(),
+        port: Vts.optional(Vts.number()),
+        user: Vts.string(),
+        password: Vts.string(),
+        database: Vts.string(),
+        vaultId: Vts.optional(Vts.number())
+    }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

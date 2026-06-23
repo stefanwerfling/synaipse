@@ -43,3 +43,20 @@ export class VaultHistory implements History {
         return this.vault.getRepo();
     }
 }
+
+/**
+ * History impl that returns null/false everywhere — used by Server-Mode
+ * boot until the Phase-3 commit-worker-backed implementation lands.
+ * Lives here (rather than in @synaipse/server-storage) so the noop
+ * doesn't drag the ngit type dependency into the server-storage
+ * package: the Repo return type stays internal to @synaipse/vault.
+ */
+export class NoopHistory implements History {
+    public isConfigured(): boolean {
+        return false;
+    }
+
+    public getRepo(): Promise<Repo | null> {
+        return Promise.resolve(null);
+    }
+}

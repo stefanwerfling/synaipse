@@ -247,6 +247,21 @@ const slugifyForPath = (input: string): string => {
 
 export type VaultChangeListener = (event: VaultEvent & {noteId: NoteId}) => void;
 
+/**
+ * Dependency-injection seam for the Service. Local-Mode boots without
+ * touching this — all defaults wrap the filesystem vault. Server-Mode
+ * boot (in @synaipse/web or @synaipse/mcp-server) passes a bundle from
+ * @synaipse/server-storage's createServerAdapters() plus a NoopHistory
+ * from @synaipse/vault, and skips the chokidar watcher because there
+ * is no filesystem vault to tail.
+ */
+export interface ServiceOverrides {
+    notes?: NoteAdapter;
+    chats?: ChatAdapter;
+    history?: History;
+    skipWatcher?: boolean;
+}
+
 export class SynaipseService {
     /** Vault kept around for filesystem-specific concerns: root path, ngit repo handle, and file-watcher sync (`handleExternalChange`). All note-payload reads/writes go through `notes` (a NoteAdapter) so a MariaDB implementation can drop in later. */
     private readonly vault: Vault;
@@ -254,6 +269,7 @@ export class SynaipseService {
     private readonly history: History;
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
+    private readonly skipWatcher: boolean;
     private readonly chats: ChatAdapter;
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
@@ -268,7 +284,7 @@ export class SynaipseService {
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
-    public constructor(config: Config) {
+    public constructor(config: Config, overrides: ServiceOverrides = {}) {
         const git = config.git ?? {
             autoCommit: true,
             author: {name: 'Synaipse', email: 'synaipse@local'}
@@ -277,13 +293,14 @@ export class SynaipseService {
         this.vault = new Vault(config.vaultPath, {
             history: {autoCommit: git.autoCommit, author: git.author}
         });
-        this.notes = new FilesystemNoteAdapter(
+        this.notes = overrides.notes ?? new FilesystemNoteAdapter(
             this.vault,
             new HashCache(config.indexCachePath)
         );
-        this.history = new VaultHistory(this.vault);
-        this.chats = new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
+        this.history = overrides.history ?? new VaultHistory(this.vault);
+        this.chats = overrides.chats ?? new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
         this.watcher = new VaultWatcher(config.vaultPath);
+        this.skipWatcher = overrides.skipWatcher ?? false;
         this.project = config.project?.name ?? null;
         this.configProjectExtraTags = config.project?.extraTags ?? [];
         this.chatProvider = config.chat !== undefined
@@ -2097,6 +2114,14 @@ export class SynaipseService {
     }
 
     private attachWatcher(): void {
+        if (this.skipWatcher) {
+            // Server-Mode: no filesystem vault to watch. Notes arrive
+            // via DB writes from the Service itself, not via external
+            // file edits, so the chokidar layer would have nothing to
+            // do — and might tail an empty / non-existent path.
+            return;
+        }
+
         this.watcher.on('event', (event) => {
             this.handleEvent(event.kind, event.path).catch((error: unknown) => {
                 process.stderr.write(`[synaipse] watcher error: ${String(error)}\n`);

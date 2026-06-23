@@ -1,4 +1,5 @@
 export {SynaipseService} from './Service.js';
+export type {ServiceOverrides} from './Service.js';
 export {fulltextSearch} from './Fulltext.js';
 export {HashCache} from '@synaipse/vault';
 export type {CacheEntry} from '@synaipse/vault';

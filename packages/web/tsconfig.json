@@ -10,6 +10,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../mcp-server" },
+    { "path": "../server-storage" },
     { "path": "../service" },
     { "path": "../vault" },
     { "path": "../vector" }

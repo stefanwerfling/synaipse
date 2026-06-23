@@ -27,6 +27,54 @@ const int = (name: string, value: string | undefined, fallback: number): number 
     return parsed;
 };
 
+const resolveMode = (env: NodeJS.ProcessEnv): 'local' | 'server' => {
+    const raw = (env.SYNAIPSE_MODE ?? 'local').toLowerCase();
+
+    if (raw === 'local' || raw === 'server') {
+        return raw;
+    }
+
+    throw new ConfigError(`SYNAIPSE_MODE must be one of local|server, got: ${raw}`);
+};
+
+const buildMariaDbConfig = (env: NodeJS.ProcessEnv): {
+    host: string;
+    port?: number;
+    user: string;
+    password: string;
+    database: string;
+    vaultId?: number;
+} => {
+    const host = env.SYNAIPSE_MARIADB_HOST?.trim();
+    const user = env.SYNAIPSE_MARIADB_USER?.trim();
+    const password = env.SYNAIPSE_MARIADB_PASSWORD;
+    const database = env.SYNAIPSE_MARIADB_DATABASE?.trim();
+
+    if (host === undefined || host.length === 0
+        || user === undefined || user.length === 0
+        || password === undefined || password.length === 0
+        || database === undefined || database.length === 0) {
+        throw new ConfigError(
+            'SYNAIPSE_MODE=server requires SYNAIPSE_MARIADB_HOST, '
+            + 'SYNAIPSE_MARIADB_USER, SYNAIPSE_MARIADB_PASSWORD, and '
+            + 'SYNAIPSE_MARIADB_DATABASE to be set.'
+        );
+    }
+
+    return {
+        host,
+        ...(env.SYNAIPSE_MARIADB_PORT !== undefined && env.SYNAIPSE_MARIADB_PORT !== ''
+            ? {port: int('SYNAIPSE_MARIADB_PORT', env.SYNAIPSE_MARIADB_PORT, 3306)}
+            : {}),
+        user,
+        password,
+        database,
+        ...(env.SYNAIPSE_MARIADB_VAULT_ID !== undefined && env.SYNAIPSE_MARIADB_VAULT_ID !== ''
+            ? {vaultId: int('SYNAIPSE_MARIADB_VAULT_ID', env.SYNAIPSE_MARIADB_VAULT_ID, 1)}
+            : {})
+    };
+};
+
 const resolveProvider = (env: NodeJS.ProcessEnv): 'voyage' | 'ollama' | 'huggingface' | 'none' => {
     const raw = (env.EMBEDDINGS_PROVIDER ?? 'none').toLowerCase();
 
@@ -162,6 +210,7 @@ export const parseProjectTags = (raw: string | undefined): string[] => {
 
 export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config => {
     const provider = resolveProvider(env);
+    const mode = resolveMode(env);
 
     const vaultPath = path.resolve(env.SYNAIPSE_VAULT_PATH ?? './vault');
 
@@ -233,6 +282,8 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
                 }
             }
             : {}),
+        mode,
+        ...(mode === 'server' ? {mariadb: buildMariaDbConfig(env)} : {}),
         git: {autoCommit: gitEnabled, author: gitAuthor},
         chat: buildChatConfig(env),
         ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {}),

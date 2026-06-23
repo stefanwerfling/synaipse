@@ -22,7 +22,9 @@ export interface ResolvedMariaDBConfig extends MariaDBConfig {
     vaultId: number;
 }
 
-const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
+// `dist/Pool.js` lives one level below the package root; migrations
+// sit beside `src/` (not inside it) so tsc leaves them alone.
+const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
 const MIGRATION_FILES = ['001_notes.sql', '002_chats.sql'] as const;
 
