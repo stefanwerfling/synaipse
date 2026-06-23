@@ -65,7 +65,7 @@ export interface SearchQuery {
     paths?: string[];
 }
 
-export type SearchSignalName = 'fulltext' | 'title' | 'semantic';
+export type SearchSignalName = 'fulltext' | 'title' | 'semantic' | 'graph';
 
 export interface SearchSignalComponent {
     /**
@@ -81,6 +81,12 @@ export interface SearchHitComponents {
     fulltext?: SearchSignalComponent;
     title?: SearchSignalComponent;
     semantic?: SearchSignalComponent;
+    /**
+     * Graph proximity to pinned + recently-touched seed notes. Hits that are
+     * direct neighbours of seeds or share common neighbours (Adamic-Adar) rank
+     * higher. Only present in hybrid mode when at least one seed exists.
+     */
+    graph?: SearchSignalComponent;
     /**
      * Multiplier applied after fusion (e.g. crawler-index demotion).
      * Only present when < 1. Final score = sum(1/(k+rank)) × demote.

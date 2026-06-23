@@ -2,6 +2,7 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import {mkdtemp, rm, writeFile, mkdir, readFile, utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import type {SearchHit} from '@synaipse/core';
 import {SynaipseService} from '../src/Service.js';
 import type {ChatEvent} from '../src/Chat.js';
 
@@ -1073,5 +1074,90 @@ describe('SynaipseService.prime', () => {
 
         const hotHits = result.context.filter((e) => e.reason === 'hot').map((e) => e.id);
         expect(hotHits.every((id) => !id.startsWith('Crawler/'))).toBe(true);
+    });
+});
+
+describe('SynaipseService graph signal in hybrid search', () => {
+    it('boosts hits that are wikilink-neighbours of a pinned seed', async () => {
+        // Both 'near' and 'far' match the query "alpha" equally via fulltext.
+        // 'near' is wikilinked from the pinned seed → graph signal should
+        // promote it above 'far'. Title hits don't fire because 'alpha' is
+        // body-only, so fulltext and graph are the active fusion signals.
+        await writeNote(
+            vaultDir,
+            'Pinned.md',
+            '---\ntitle: Pinned Hub\npinned: true\n---\nrefers to [[Near]]'
+        );
+        await writeNote(
+            vaultDir,
+            'Near.md',
+            '---\ntitle: Near\n---\nshared keyword alpha sits here'
+        );
+        await writeNote(
+            vaultDir,
+            'Far.md',
+            '---\ntitle: Far\n---\nshared keyword alpha sits here'
+        );
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        const ids = hits.map((h) => h.noteId);
+
+        expect(ids).toContain('Near.md');
+        expect(ids).toContain('Far.md');
+        expect(ids.indexOf('Near.md')).toBeLessThan(ids.indexOf('Far.md'));
+
+        const near = hits.find((h) => h.noteId === 'Near.md');
+        const far = hits.find((h) => h.noteId === 'Far.md');
+        expect(near?.components?.graph).toBeDefined();
+        expect(far?.components?.graph).toBeUndefined();
+    });
+
+    it('omits the graph signal entirely when no seeds exist', async () => {
+        await writeNote(vaultDir, 'A.md', '---\ntitle: A\n---\nalpha keyword');
+        await writeNote(vaultDir, 'B.md', '---\ntitle: B\n---\nalpha keyword');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        for (const hit of hits) {
+            expect(hit.components?.graph).toBeUndefined();
+        }
+    });
+
+    it('treats recently-accessed notes as seeds too', async () => {
+        // Hub is unpinned but gets touched via readNote, which writes
+        // lastAccessed into the cache. That alone should be enough to make
+        // Hub act as a graph seed and promote its neighbour Near.
+        await writeNote(
+            vaultDir,
+            'Hub.md',
+            '---\ntitle: Hub\n---\nrefers to [[Near]]'
+        );
+        await writeNote(
+            vaultDir,
+            'Near.md',
+            '---\ntitle: Near\n---\nshared keyword alpha sits here'
+        );
+        await writeNote(
+            vaultDir,
+            'Far.md',
+            '---\ntitle: Far\n---\nshared keyword alpha sits here'
+        );
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        service.readNote('Hub.md');
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        const near = hits.find((h) => h.noteId === 'Near.md');
+        const far = hits.find((h) => h.noteId === 'Far.md');
+        expect(near?.components?.graph).toBeDefined();
+        expect(far?.components?.graph).toBeUndefined();
+        expect(hits.indexOf(near as SearchHit)).toBeLessThan(hits.indexOf(far as SearchHit));
     });
 });

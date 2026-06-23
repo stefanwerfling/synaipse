@@ -165,7 +165,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
                     query: {type: 'string', description: 'Search query'},
                     mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid'], description: 'Search strategy (default: hybrid)'},
                     limit: {type: 'number', description: 'Max results (default: 10)'},
-                    explain: {type: 'boolean', description: 'Include per-signal components ({score, rank} per fulltext/title/semantic + demote multiplier) on each hit. Default false to keep responses compact.'}
+                    explain: {type: 'boolean', description: 'Include per-signal components ({score, rank} per fulltext/title/semantic/graph + demote multiplier) on each hit. Default false to keep responses compact.'}
                 },
                 required: ['query']
             }

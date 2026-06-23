@@ -57,7 +57,8 @@ export interface SnapshotEntry {
     sha: string;
 }
 import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
-import {annotateSingleSignal, defaultDemote, reciprocalRankFusion} from './Fusion.js';
+import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
+import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
 import {HashCache} from './Cache.js';
 
@@ -108,6 +109,9 @@ export interface StaleNotesOptions {
 }
 
 const MS_PER_DAY = 86_400_000;
+
+const GRAPH_SEED_RECENT_WINDOW_MS = 7 * MS_PER_DAY;
+const GRAPH_SEED_RECENT_CAP = 10;
 
 const extractExcerpt = (content: string, max: number): string => {
     const body = content.replace(/^---[\s\S]*?---\s*/, '').trim();
@@ -256,6 +260,7 @@ export class SynaipseService {
     private cachedLayout: GraphLayout | null = null;
     private cachedLayoutKey: string | null = null;
     private cachedGraph: Graph | null = null;
+    private cachedAdjacency: AdjacencyMap | null = null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -324,11 +329,17 @@ export class SynaipseService {
             await this.index.indexNote(note);
         }
 
-        // Topology might have changed (new note or new wikilinks). Drop the
-        // memoised graph + Atlas layout; the next request rebuilds them.
+        this.invalidateTopologyCaches();
+    }
+
+    private invalidateTopologyCaches(): void {
+        // Topology might have changed (new/removed note or edited wikilinks).
+        // Drop the memoised graph, Atlas layout, and search-time adjacency
+        // map; the next request rebuilds them lazily.
         this.cachedLayout = null;
         this.cachedLayoutKey = null;
         this.cachedGraph = null;
+        this.cachedAdjacency = null;
     }
 
     public async start(): Promise<void> {
@@ -454,31 +465,130 @@ export class SynaipseService {
     }
 
     private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
-        if (mode === 'fulltext' || this.index === null) {
+        if (mode === 'fulltext') {
             return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
         }
 
         if (mode === 'semantic') {
+            // Graceful fallback when a semantic-only query lands on an
+            // embeddings-disabled service — better to return fulltext hits
+            // than an empty list.
+            if (this.index === null) {
+                return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
+            }
             return annotateSingleSignal(await this.index.semanticSearch(query, limit), 'semantic');
         }
 
-        const [ft, sem] = await Promise.all([
-            Promise.resolve(this.fulltextIndex.search(query, limit)),
-            this.index.semanticSearch(query, limit)
-        ]);
+        // hybrid: title + fulltext + (semantic if available) + (graph if seeds)
+        const ft = this.fulltextIndex.search(query, limit);
         const titles = this.fulltextIndex.searchTitle(query, limit);
+        const sem = this.index !== null
+            ? await this.index.semanticSearch(query, limit)
+            : [];
 
-        return reciprocalRankFusion(
-            [
-                {name: 'title', hits: titles},
-                {name: 'semantic', hits: sem},
-                {name: 'fulltext', hits: ft}
-            ],
-            {
-                limit,
-                weightFor: defaultDemote((id) => this.vault.tryGet(id))
+        const signals: RankedSignal[] = [
+            {name: 'title', hits: titles},
+            {name: 'fulltext', hits: ft}
+        ];
+        if (sem.length > 0) signals.push({name: 'semantic', hits: sem});
+
+        const graph = this.buildGraphSignal([titles, sem, ft], limit);
+        if (graph !== null) signals.push(graph);
+
+        return reciprocalRankFusion(signals, {
+            limit,
+            weightFor: defaultDemote((id) => this.vault.tryGet(id))
+        });
+    }
+
+    /**
+     * Construct a graph-proximity signal for the candidate union of the other
+     * search signals. Returns null when there are no seed notes (pinned +
+     * recently-touched) or no candidate has a positive proximity score — the
+     * signal then contributes nothing and isn't added to the fusion.
+     */
+    private buildGraphSignal(
+        candidateLists: readonly (readonly SearchHit[])[],
+        limit: number
+    ): RankedSignal | null {
+        const seeds = this.collectGraphSeeds();
+        if (seeds.length === 0) return null;
+
+        const seen = new Set<NoteId>();
+        const candidates: SearchHit[] = [];
+        for (const list of candidateLists) {
+            for (const hit of list) {
+                if (seen.has(hit.noteId)) continue;
+                seen.add(hit.noteId);
+                candidates.push(hit);
             }
-        );
+        }
+
+        if (candidates.length === 0) return null;
+
+        const hits = rankByGraphProximity(candidates, seeds, this.adjacency()).slice(0, limit);
+        if (hits.length === 0) return null;
+
+        return {name: 'graph', hits};
+    }
+
+    private adjacency(): AdjacencyMap {
+        if (this.cachedAdjacency !== null) return this.cachedAdjacency;
+
+        const notes = this.vault.list();
+        const keyToId = new Map<string, NoteId>();
+
+        for (const note of notes) {
+            if (note.title.length > 0 && !keyToId.has(note.title)) {
+                keyToId.set(note.title, note.id);
+            }
+        }
+
+        for (const note of notes) {
+            const aliases = note.frontmatter.aliases;
+            if (aliases === undefined) continue;
+            for (const alias of aliases) {
+                if (alias.length > 0 && !keyToId.has(alias)) {
+                    keyToId.set(alias, note.id);
+                }
+            }
+        }
+
+        this.cachedAdjacency = buildAdjacency(notes, (key) => keyToId.get(key));
+        return this.cachedAdjacency;
+    }
+
+    /**
+     * Seed set for graph-signal ranking: pinned notes (frontmatter `pinned`
+     * or `prime` truthy) plus notes touched recently via the access cache.
+     * Capped so the per-candidate AA sum stays bounded.
+     */
+    private collectGraphSeeds(): NoteId[] {
+        const seeds = new Set<NoteId>();
+
+        for (const note of this.vault.list()) {
+            const fm = note.frontmatter;
+            if (fm['pinned'] === true || fm['prime'] === true) {
+                seeds.add(note.id);
+            }
+        }
+
+        const recent: {id: NoteId; lastAccessed: number}[] = [];
+        const cutoff = Date.now() - GRAPH_SEED_RECENT_WINDOW_MS;
+        for (const id of this.cache.ids()) {
+            const entry = this.cache.get(id);
+            const lastAccessed = entry?.lastAccessed;
+            if (lastAccessed === undefined || lastAccessed < cutoff) continue;
+            if (this.vault.tryGet(id) === undefined) continue;
+            recent.push({id, lastAccessed});
+        }
+
+        recent.sort((a, b) => b.lastAccessed - a.lastAccessed);
+        for (const {id} of recent.slice(0, GRAPH_SEED_RECENT_CAP)) {
+            seeds.add(id);
+        }
+
+        return [...seeds];
     }
 
     public getProject(override?: string | null): string | null {
@@ -1183,6 +1293,7 @@ export class SynaipseService {
 
         this.fulltextIndex.removeNote(id);
         this.cache.delete(id);
+        this.invalidateTopologyCaches();
     }
 
     // -- chat sessions ------------------------------------------------------

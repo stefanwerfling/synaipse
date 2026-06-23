@@ -201,7 +201,8 @@ export class Search {
         const signals: Array<{name: string; key: keyof SearchHitComponents}> = [
             {name: 'fulltext', key: 'fulltext'},
             {name: 'title', key: 'title'},
-            {name: 'semantic', key: 'semantic'}
+            {name: 'semantic', key: 'semantic'},
+            {name: 'graph', key: 'graph'}
         ];
 
         for (const {name, key} of signals) {
