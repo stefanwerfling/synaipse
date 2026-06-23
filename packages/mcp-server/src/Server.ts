@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {timingSafeEqual} from 'node:crypto';
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -71,10 +72,47 @@ const buildMcpServer = (
 };
 
 /**
+ * Bearer-Auth check. Returns true when the request is authorised
+ * (either no token is configured, or the Authorization header carries
+ * the right one). Returns false after writing a 401 response,
+ * meaning the caller should bail.
+ *
+ * Uses timingSafeEqual so the comparison cost is independent of how
+ * far the prefix matched — defends against remote attackers measuring
+ * roundtrip latency to guess characters.
+ */
+const checkAuth = (req: http.IncomingMessage, res: http.ServerResponse, expected: Buffer | null): boolean => {
+    if (expected === null) return true;
+
+    const header = req.headers.authorization;
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
+        res.statusCode = 401;
+        res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
+        res.end('unauthorised');
+        return false;
+    }
+
+    const provided = Buffer.from(header.slice('Bearer '.length).trim(), 'utf8');
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+        res.statusCode = 401;
+        res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
+        res.end('unauthorised');
+        return false;
+    }
+
+    return true;
+};
+
+/**
  * Build a plain `(req, res) => void` request handler that serves the MCP
  * StreamableHTTP transport on a given basePath. Lets us mount MCP under an
  * existing http.Server (e.g. the synaipse web API) and share a single
  * SynaipseService instance instead of spawning a second process.
+ *
+ * When `config.server.token` is set (via SYNAIPSE_MCP_TOKEN env), every
+ * request must carry `Authorization: Bearer <token>`. Unset means
+ * unauthenticated — fine for localhost-only dev, dangerous if the port
+ * is reachable from anywhere else, so we log a one-time warning.
  */
 export const buildMcpHttpHandler = (
     config: Config,
@@ -83,11 +121,26 @@ export const buildMcpHttpHandler = (
 ): http.RequestListener => {
     const publisher = new EventPublisher(options.eventsUrl);
     const tools = buildTools(service);
+    const expectedToken = config.server.token !== undefined && config.server.token.length > 0
+        ? Buffer.from(config.server.token, 'utf8')
+        : null;
+
+    if (expectedToken === null) {
+        process.stderr.write(
+            '[synaipse-mcp] WARN: SYNAIPSE_MCP_TOKEN unset — '
+            + 'HTTP endpoint is unauthenticated. Safe only for localhost; '
+            + 'set the env var before exposing the port to LAN / remote.\n'
+        );
+    }
 
     return (req, res) => {
         if (req.url === undefined || !req.url.startsWith(options.basePath)) {
             res.statusCode = 404;
             res.end('not found');
+            return;
+        }
+
+        if (!checkAuth(req, res, expectedToken)) {
             return;
         }
 

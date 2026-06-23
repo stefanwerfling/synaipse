@@ -234,7 +234,10 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
         },
         server: {
             name: env.MCP_SERVER_NAME ?? 'synaipse',
-            version: env.MCP_SERVER_VERSION ?? '0.1.0'
+            version: env.MCP_SERVER_VERSION ?? '0.1.0',
+            ...(env.SYNAIPSE_MCP_TOKEN !== undefined && env.SYNAIPSE_MCP_TOKEN.length > 0
+                ? {token: env.SYNAIPSE_MCP_TOKEN}
+                : {})
         },
         web: {
             port: int('WEB_PORT', env.WEB_PORT, 5757)

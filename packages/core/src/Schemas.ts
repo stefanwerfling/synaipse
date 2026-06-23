@@ -130,7 +130,8 @@ export const ConfigSchema = Vts.object({
     }),
     server: Vts.object({
         name: Vts.string(),
-        version: Vts.string()
+        version: Vts.string(),
+        token: Vts.optional(Vts.string())
     }),
     web: Vts.object({
         port: Vts.number()
