@@ -1,0 +1,23 @@
+{
+  "name": "@synaipse/server-storage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MariaDB-backed NoteAdapter / ChatAdapter for Synaipse server-mode",
+  "type": "module",
+  "main": "./dist/Index.js",
+  "types": "./dist/Index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/Index.d.ts",
+      "import": "./dist/Index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "dependencies": {
+    "@synaipse/core": "*",
+    "mariadb": "^3.3.0"
+  }
+}

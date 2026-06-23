@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/vault" },
     { "path": "./packages/vector" },
+    { "path": "./packages/server-storage" },
     { "path": "./packages/service" },
     { "path": "./packages/mcp-server" },
     { "path": "./packages/web" },

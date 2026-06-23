@@ -36,3 +36,29 @@ services:
     # want Ollama for chat too.
     entrypoint: ["sh", "-c", "sleep 10 && ollama pull ${OLLAMA_MODEL:-nomic-embed-text} && echo 'embedder ready'"]
     restart: "no"
+
+  # MariaDB hot-tier for SYNAIPSE_MODE=server. 11.7+ ships native VECTOR
+  # support — we don't use it yet (vectors stay in Qdrant for now) but
+  # pinning here keeps the migration path open.
+  mariadb:
+    image: mariadb:11.7
+    container_name: synaipse-mariadb
+    profiles: [server]
+    restart: unless-stopped
+    ports:
+      # Default 3307 — most dev hosts already have a MariaDB/MySQL on 3306.
+      # Override with SYNAIPSE_MARIADB_PORT if you want the canonical port.
+      - "${SYNAIPSE_MARIADB_PORT:-3307}:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: ${SYNAIPSE_MARIADB_ROOT_PASSWORD:-synaipse-root}
+      MARIADB_DATABASE: ${SYNAIPSE_MARIADB_DATABASE:-synaipse}
+      MARIADB_USER: ${SYNAIPSE_MARIADB_USER:-synaipse}
+      MARIADB_PASSWORD: ${SYNAIPSE_MARIADB_PASSWORD:-synaipse}
+    volumes:
+      - ./data/mariadb:/var/lib/mysql
+      - ./packages/server-storage/src/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 6

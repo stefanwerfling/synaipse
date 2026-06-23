@@ -30,7 +30,8 @@
     "relink": "npm --workspace @synaipse/crawler run start --silent -- relink",
     "docker:up:voyage": "docker-compose --profile voyage up -d",
     "docker:up:ollama": "docker-compose --profile ollama up -d",
-    "docker:down": "docker-compose --profile voyage --profile ollama down"
+    "docker:up:server": "docker-compose --profile server up -d",
+    "docker:down": "docker-compose --profile voyage --profile ollama --profile server down"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
