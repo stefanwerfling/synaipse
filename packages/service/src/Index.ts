@@ -4,6 +4,8 @@ export {HashCache} from './Cache.js';
 export type {CacheEntry} from './Cache.js';
 export {isAllowedAssetMime, MIME_TO_EXT} from './Assets.js';
 export type {WriteAssetResult} from './Assets.js';
+export type {ChatAdapter} from './ChatAdapter.js';
+export {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 export type {
     ChatgptImportAttachment,
     ChatgptImportConversation,
