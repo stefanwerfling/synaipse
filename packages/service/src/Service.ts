@@ -35,7 +35,9 @@ import {
     type ChatSummary,
     type ChatTurn
 } from './ChatStore.js';
+import type {ChatAdapter} from './ChatAdapter.js';
 import {ChatRepo} from './ChatRepo.js';
+import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
 export type {WriteAssetResult} from './Assets.js';
@@ -252,7 +254,7 @@ export class SynaipseService {
     private readonly index: VectorIndex | null;
     private readonly watcher: VaultWatcher;
     private readonly cache: HashCache;
-    private readonly chatRepo: ChatRepo;
+    private readonly chats: ChatAdapter;
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
@@ -277,7 +279,7 @@ export class SynaipseService {
         });
         this.notes = new FilesystemNoteAdapter(this.vault);
         this.cache = new HashCache(config.indexCachePath);
-        this.chatRepo = new ChatRepo(config.chatStoreDir);
+        this.chats = new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
         this.watcher = new VaultWatcher(config.vaultPath);
         this.project = config.project?.name ?? null;
         this.configProjectExtraTags = config.project?.extraTags ?? [];
@@ -1307,11 +1309,11 @@ export class SynaipseService {
     // an explicit user action — see saveChatAsNote().
 
     public async listChats(): Promise<ChatSummary[]> {
-        return this.chatRepo.list();
+        return this.chats.list();
     }
 
     public async getChat(id: string): Promise<ChatSession> {
-        return this.chatRepo.get(id);
+        return this.chats.get(id);
     }
 
     public async createChat(
@@ -1319,7 +1321,7 @@ export class SynaipseService {
     ): Promise<ChatSession> {
         const now = new Date();
         const baseId = buildChatId(input.title, now);
-        const id = this.chatRepo.uniqueId(baseId);
+        const id = this.chats.uniqueId(baseId);
         const iso = now.toISOString();
 
         const session: ChatSession = {
@@ -1331,7 +1333,7 @@ export class SynaipseService {
         };
         if (input.lastModel !== undefined) session.lastModel = input.lastModel;
 
-        await this.chatRepo.write(session);
+        await this.chats.write(session);
         return session;
     }
 
@@ -1339,7 +1341,7 @@ export class SynaipseService {
         id: string,
         input: {title: string; lastModel?: string; turns: ChatTurn[]}
     ): Promise<ChatSession> {
-        const prior = await this.chatRepo.tryGet(id);
+        const prior = await this.chats.tryGet(id);
         if (prior === null) throw new Error(`chat not found: ${id}`);
 
         const session: ChatSession = {
@@ -1351,12 +1353,12 @@ export class SynaipseService {
         };
         if (input.lastModel !== undefined) session.lastModel = input.lastModel;
 
-        await this.chatRepo.write(session);
+        await this.chats.write(session);
         return session;
     }
 
     public async deleteChat(id: string): Promise<void> {
-        await this.chatRepo.delete(id);
+        await this.chats.delete(id);
     }
 
     /**
@@ -1368,7 +1370,7 @@ export class SynaipseService {
      * anywhere.
      */
     public async saveChatAsNote(id: string, opts?: ProjectOpts): Promise<NoteId> {
-        const session = await this.chatRepo.get(id);
+        const session = await this.chats.get(id);
         const {content, frontmatter} = serializeChatSession(session);
 
         // Override kind so the saved note is a regular note, not a chat
@@ -1419,8 +1421,8 @@ export class SynaipseService {
                 const flatId = session.id.startsWith('Chats/')
                     ? session.id.slice('Chats/'.length)
                     : session.id;
-                const safeId = this.chatRepo.uniqueId(flatId);
-                await this.chatRepo.write({...session, id: safeId});
+                const safeId = this.chats.uniqueId(flatId);
+                await this.chats.write({...session, id: safeId});
 
                 // Remove from vault + bookkeeping
                 await this.notes.delete(noteId, {message: `synaipse: migrate chat ${noteId} → chat store`});
