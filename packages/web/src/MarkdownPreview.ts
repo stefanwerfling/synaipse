@@ -3,6 +3,7 @@ import {markedHighlight} from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
 import {clear, el} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
+import {setupContainerExtension} from './MarkdownContainer.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
 
 let highlightConfigured = false;
@@ -19,6 +20,8 @@ const configureHighlight = (): void => {
             return hljs.highlight(code, {language, ignoreIllegals: true}).value;
         }
     }));
+
+    setupContainerExtension(marked);
 
     highlightConfigured = true;
 };

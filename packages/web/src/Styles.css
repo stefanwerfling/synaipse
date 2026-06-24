@@ -4087,3 +4087,117 @@ body {
     font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
+
+/* ============================================================
+   Markdown container blocks — `::: <type> [{ attrs }]\n…\n:::`
+   Cards for roadmap steps, warnings, tips, notes. Default look
+   is type-driven (infographic = accent, warning = gold, tip =
+   green, note/info = blue, danger = red, success = green); an
+   explicit `color: <name>` attr overrides via .md-container-color-*.
+   ============================================================ */
+
+.md-container {
+    margin: var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--r-3);
+    box-shadow: var(--shadow-sm);
+}
+
+.md-container-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 13px;
+}
+
+.md-container-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 var(--space-2);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: var(--r-pill);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.md-container-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.md-container-title {
+    font-weight: 600;
+    color: var(--text-0);
+}
+
+.md-container-body > *:first-child { margin-top: 0; }
+.md-container-body > *:last-child  { margin-bottom: 0; }
+
+/* Type defaults (border-left + step pill) */
+.md-container-warning { border-left-color: var(--gold); }
+.md-container-warning .md-container-step { background: var(--gold-soft); color: var(--gold); }
+
+.md-container-tip,
+.md-container-success { border-left-color: var(--green); }
+.md-container-tip     .md-container-step,
+.md-container-success .md-container-step {
+    background: rgba(52, 211, 153, 0.14);
+    color: var(--green);
+}
+
+.md-container-danger { border-left-color: var(--red); }
+.md-container-danger .md-container-step {
+    background: rgba(248, 113, 113, 0.14);
+    color: var(--red);
+}
+
+.md-container-note,
+.md-container-info,
+.md-container-infographic { border-left-color: var(--accent); }
+
+/* Explicit color override via { color: "..." } attr — wins over type default */
+.md-container-color-blue   { border-left-color: var(--accent); }
+.md-container-color-accent { border-left-color: var(--accent); }
+.md-container-color-green  { border-left-color: var(--green); }
+.md-container-color-red    { border-left-color: var(--red); }
+.md-container-color-gold   { border-left-color: var(--gold); }
+.md-container-color-purple { border-left-color: var(--purple); }
+.md-container-color-pink   { border-left-color: var(--pink); }
+.md-container-color-gray   { border-left-color: var(--text-3); }
+
+.md-container-color-blue   .md-container-step,
+.md-container-color-accent .md-container-step { background: var(--accent-soft); color: var(--accent); }
+
+.md-container-color-green .md-container-step {
+    background: rgba(52, 211, 153, 0.14);
+    color: var(--green);
+}
+.md-container-color-red .md-container-step {
+    background: rgba(248, 113, 113, 0.14);
+    color: var(--red);
+}
+.md-container-color-gold .md-container-step { background: var(--gold-soft); color: var(--gold); }
+.md-container-color-purple .md-container-step {
+    background: rgba(167, 139, 250, 0.14);
+    color: var(--purple);
+}
+.md-container-color-pink .md-container-step {
+    background: rgba(244, 114, 182, 0.14);
+    color: var(--pink);
+}
+.md-container-color-gray .md-container-step {
+    background: rgba(107, 114, 128, 0.18);
+    color: var(--text-2);
+}
