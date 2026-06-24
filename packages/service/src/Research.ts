@@ -1,4 +1,5 @@
 import type {LlmProvider} from './Llm.js';
+import {INFOGRAPHIC_GUIDE} from './InfographicPrompt.js';
 
 /**
  * Deep-research agent: takes a question → searches the web → fetches the top
@@ -118,7 +119,7 @@ export const createWebSearchProvider = (config: WebSearchConfig): WebSearchProvi
     }
 };
 
-const SYSTEM_PROMPT = `Du beantwortest die Frage des Nutzers ausschließlich basierend auf den folgenden Web-Suchergebnissen. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Quellen. Wenn die Quellen die Frage nicht beantworten können, sag das ehrlich — erfinde nichts.`;
+const SYSTEM_PROMPT = `Du beantwortest die Frage des Nutzers ausschließlich basierend auf den folgenden Web-Suchergebnissen. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Quellen. Wenn die Quellen die Frage nicht beantworten können, sag das ehrlich — erfinde nichts.${INFOGRAPHIC_GUIDE}`;
 
 const stripHtml = (html: string): string => {
     return html

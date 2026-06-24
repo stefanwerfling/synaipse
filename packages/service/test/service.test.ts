@@ -1126,6 +1126,57 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(userMsg).toContain('Phase Alpha');
     });
 
+    it('chat embeds the infographic guide in the system prompt so the LLM can use ::: infographic blocks', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Cluster\n---\nCluster body content');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'ok'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        await collectChat(service.chat({question: 'cluster'}));
+
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const systemMsg = body.messages.find((m: {role: string}) => m.role === 'system')?.content as string;
+
+        expect(systemMsg).toContain('VISUAL INFOGRAPHICS');
+        expect(systemMsg).toContain('::: infographic');
+        expect(systemMsg).toContain('list-row-horizontal-icon-arrow');
+    });
+
+    it('summarize does NOT embed the infographic guide — it only writes a 2-3 sentence plain text', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Plain\n---\nSome body');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'sum'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        for await (const _e of service.summarizeNote('note.md')) { /* drain */ }
+
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const systemMsg = body.messages.find((m: {role: string}) => m.role === 'system')?.content as string;
+
+        expect(systemMsg).not.toContain('VISUAL INFOGRAPHICS');
+        expect(systemMsg).not.toContain('::: infographic');
+    });
+
     it('noteFlags reports {private: true} for notes marked via path prefix', async () => {
         await writeNote(vaultDir, 'Private/foo.md', '---\ntitle: Foo\n---\nbody');
         await writeNote(vaultDir, 'public.md', '---\ntitle: Pub\n---\nbody');

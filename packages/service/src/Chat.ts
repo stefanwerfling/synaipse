@@ -1,6 +1,7 @@
 import type {SearchHit} from '@synaipse/core';
 import type {LlmProvider} from './Llm.js';
 import type {RedactionHit} from './Privacy.js';
+import {INFOGRAPHIC_GUIDE} from './InfographicPrompt.js';
 
 export interface ChatSource {
     index: number;
@@ -44,7 +45,7 @@ export interface ChatProviderConfig {
     fetch?: typeof fetch;
 }
 
-const SYSTEM_PROMPT = `Du beantwortest Fragen ausschließlich basierend auf den folgenden Notizen aus dem persönlichen Vault des Nutzers. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Notizen. Wenn die Notizen die Frage nicht beantworten, sag das ehrlich — erfinde nichts. Bei Folgefragen berücksichtige den bisherigen Gesprächsverlauf, aber stütze neue Aussagen auf die für DIESE Frage gelieferten Notizen.`;
+const SYSTEM_PROMPT = `Du beantwortest Fragen ausschließlich basierend auf den folgenden Notizen aus dem persönlichen Vault des Nutzers. Antworte präzise und in der Sprache der Frage. Zitiere für jede Aussage die Quelle als [^N] passend zur nummerierten Liste der Notizen. Wenn die Notizen die Frage nicht beantworten, sag das ehrlich — erfinde nichts. Bei Folgefragen berücksichtige den bisherigen Gesprächsverlauf, aber stütze neue Aussagen auf die für DIESE Frage gelieferten Notizen.${INFOGRAPHIC_GUIDE}`;
 
 const SUMMARIZE_PROMPT = `Fasse die folgende Notiz in 2-3 Sätzen zusammen, in der Sprache der Notiz. Antworte ausschließlich mit der reinen Zusammenfassung — keine Einleitung, keine Anführungszeichen, keine Markdown-Formatierung, kein Bullet-List. Behalte konkrete Namen, Zahlen und Entscheidungen bei.`;
 
