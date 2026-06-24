@@ -67,6 +67,7 @@ export const api = {
         chatEnabled: boolean;
         chatModel: string | null;
         chatProvider: 'ollama' | 'openai' | 'anthropic' | 'claude-shell' | null;
+        chatProviderIsLocal: boolean | null;
         researchEnabled: boolean;
         researchProvider: 'tavily' | 'searxng' | null;
     }> => {

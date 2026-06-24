@@ -956,6 +956,89 @@ describe('SynaipseService.chat end-to-end (mocked Ollama)', () => {
     });
 });
 
+describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('summarize blocks a private note when the chat provider is external', async () => {
+        await writeNote(vaultDir, 'Private/diary.md', '---\ntitle: Diary\n---\nSensitive thoughts.');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        // http://fake-ollama is treated as external by isLocalUrl (no loopback/RFC1918/.local).
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events: ChatEvent[] = [];
+        for await (const e of service.summarizeNote('Private/diary.md') as AsyncGenerator<ChatEvent, void, void>) {
+            events.push(e);
+        }
+
+        expect(events.length).toBe(1);
+        const ev = events[0];
+        expect(ev?.kind).toBe('error');
+        if (ev?.kind === 'error') expect(ev.message).toMatch(/privat/i);
+        expect(fakeFetch).not.toHaveBeenCalled();
+    });
+
+    it('summarize allows a private note when the chat provider is local (loopback URL)', async () => {
+        await writeNote(vaultDir, 'Private/diary.md', '---\ntitle: Diary\n---\nSensitive thoughts about clusters.');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'short summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        const events: ChatEvent[] = [];
+        for await (const e of service.summarizeNote('Private/diary.md') as AsyncGenerator<ChatEvent, void, void>) {
+            events.push(e);
+        }
+
+        const last = events[events.length - 1];
+        expect(last?.kind).toBe('done');
+        expect(fakeFetch).toHaveBeenCalledOnce();
+    });
+
+    it('chat hides private notes from sources when the chat provider is external', async () => {
+        await writeNote(vaultDir, 'public.md', '---\ntitle: Public\n---\ncluster body content');
+        await writeNote(vaultDir, 'Private/secrets.md', '---\ntitle: Secret\n---\ncluster sensitive details');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const start = events.find((e) => e.kind === 'start');
+
+        if (start?.kind === 'start') {
+            const ids = start.sources.map((s) => s.noteId);
+            expect(ids).toContain('public.md');
+            expect(ids).not.toContain('Private/secrets.md');
+        } else {
+            throw new Error('expected start event');
+        }
+    });
+});
+
 describe('SynaipseService.prime', () => {
     it('includes pinned, recent session, decision, hot and recent notes with reasons', async () => {
         await writeNote(vaultDir, 'Memory/foo/sessions/2026-06-18.md', '---\ntitle: Session 2026-06-18\n---\nWorked on prime tool.');

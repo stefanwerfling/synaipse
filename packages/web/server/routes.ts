@@ -761,6 +761,7 @@ export const routes = (
             chatEnabled: service.chatEnabled(),
             chatModel: service.getChatModel(),
             chatProvider: service.getChatProviderKind(),
+            chatProviderIsLocal: service.getChatProviderIsLocal(),
             researchEnabled: service.researchEnabled(),
             researchProvider: service.getResearchProviderKind()
         });

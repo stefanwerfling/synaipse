@@ -29,10 +29,61 @@ export interface LlmProvider {
     readonly kind: LlmProviderKind;
     /** Model identifier shown in the UI. */
     readonly model: string;
+    /**
+     * DSGVO Layer 1: whether vault content stays on-host when this provider
+     * is used. `claude-shell` and `anthropic` are always remote (they reach
+     * Anthropic's API via the user's OAuth or API key, regardless of how the
+     * binary is invoked). For `ollama` and `openai`-compat backends the
+     * answer depends on the configured URL.
+     */
+    isLocal(): boolean;
     stream(options: LlmStreamOptions): AsyncGenerator<LlmStreamEvent, void, void>;
 }
 
 export type LlmProviderKind = 'ollama' | 'openai' | 'anthropic' | 'claude-shell';
+
+/**
+ * Classify a URL as "stays on the operator's host/LAN" (true) vs. "leaves
+ * the perimeter" (false). Loopback, RFC1918 IPv4, IPv6 loopback/link-local/
+ * unique-local, plus mDNS `.local` hosts count as local. Anything else —
+ * including unresolved public hostnames — is treated as external so that
+ * the DSGVO guard defaults conservatively when in doubt.
+ */
+export const isLocalUrl = (url: string): boolean => {
+    let host: string;
+
+    try {
+        host = new URL(url).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+
+    if (host.length === 0) return false;
+    if (host === 'localhost') return true;
+    if (host.endsWith('.local')) return true;
+
+    if (host.startsWith('[') && host.endsWith(']')) {
+        host = host.slice(1, -1);
+    }
+
+    if (host === '::1' || host === '::') return true;
+    if (host.startsWith('fe80:') || host.startsWith('fe80::')) return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
+
+    const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+    if (v4 === null) return false;
+
+    const octets = [v4[1], v4[2], v4[3], v4[4]].map((s) => Number(s));
+    if (octets.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return false;
+
+    const [a, b] = octets as [number, number, number, number];
+    if (a === 127) return true;
+    if (a === 10) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+
+    return false;
+};
 
 export interface OllamaConfig {
     kind: 'ollama';
@@ -123,6 +174,10 @@ class OllamaProvider implements LlmProvider {
         this.fetchImpl = config.fetch ?? fetch;
     }
 
+    public isLocal(): boolean {
+        return isLocalUrl(this.url);
+    }
+
     public async *stream(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent, void, void> {
         const messages = buildMessages(opts);
         const body = {model: this.model, messages, stream: true};
@@ -179,6 +234,10 @@ class OpenAiProvider implements LlmProvider {
         this.url = config.url.replace(/\/$/, '');
         this.apiKey = config.apiKey;
         this.fetchImpl = config.fetch ?? fetch;
+    }
+
+    public isLocal(): boolean {
+        return isLocalUrl(this.url);
     }
 
     public async *stream(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent, void, void> {
@@ -246,6 +305,10 @@ class AnthropicProvider implements LlmProvider {
         this.url = (config.url ?? 'https://api.anthropic.com').replace(/\/$/, '');
         this.apiKey = config.apiKey;
         this.fetchImpl = config.fetch ?? fetch;
+    }
+
+    public isLocal(): boolean {
+        return false;
     }
 
     public async *stream(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent, void, void> {
@@ -346,6 +409,10 @@ class ClaudeShellProvider implements LlmProvider {
         this.model = config.model;
         this.command = config.command;
         this.extraArgs = config.extraArgs ?? [];
+    }
+
+    public isLocal(): boolean {
+        return false;
     }
 
     public async *stream(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent, void, void> {

@@ -53,6 +53,7 @@ export class ChatPanel {
     private readonly saveAsNoteBtn: HTMLButtonElement;
     private readonly stickyHost: HTMLElement;
     private readonly threadTitle: HTMLElement;
+    private readonly providerBadge: HTMLElement;
 
     private messages: Message[] = [];
     private streaming = false;
@@ -92,9 +93,12 @@ export class ChatPanel {
         }) as HTMLButtonElement;
         this.saveAsNoteBtn.hidden = true;
 
+        this.providerBadge = el('span', {class: 'chat-provider-badge'});
+        this.providerBadge.hidden = true;
+
         const head = el('div', {class: 'chat-head'},
             this.threadTitle,
-            el('div', {class: 'chat-head-right'}, this.saveAsNoteBtn)
+            el('div', {class: 'chat-head-right'}, this.providerBadge, this.saveAsNoteBtn)
         );
 
         this.stickyHost = el('div', {class: 'chat-sticky', attrs: {hidden: 'true'}});
@@ -157,12 +161,18 @@ export class ChatPanel {
         void this.sidebar.refresh();
     }
 
-    public setInfo(enabled: boolean, model: string | null, provider?: string | null, research?: boolean): void {
+    public setInfo(
+        enabled: boolean,
+        model: string | null,
+        provider?: string | null,
+        research?: boolean,
+        providerIsLocal?: boolean | null
+    ): void {
         this.enabled = enabled;
         this.researchEnabled = research === true;
         this.model = model ?? '—';
-        // provider currently unused — kept in the signature for API stability
-        void provider;
+
+        this.renderProviderBadge(provider ?? null, providerIsLocal ?? null);
 
         this.researchBtn.hidden = !this.researchEnabled;
 
@@ -177,6 +187,31 @@ export class ChatPanel {
 
         this.input.disabled = false;
         if (this.messages.length === 0) this.renderEmpty();
+    }
+
+    private renderProviderBadge(provider: string | null, isLocal: boolean | null): void {
+        clear(this.providerBadge);
+
+        if (provider === null || isLocal === null) {
+            this.providerBadge.hidden = true;
+            this.providerBadge.className = 'chat-provider-badge';
+            return;
+        }
+
+        this.providerBadge.hidden = false;
+        this.providerBadge.className = `chat-provider-badge ${isLocal ? 'local' : 'external'}`;
+
+        const icon = isLocal ? '🔒' : '🌐';
+        const label = isLocal ? 'local' : 'external';
+        const title = isLocal
+            ? `Vault-Inhalte verlassen den Host nicht (${provider})`
+            : `Vault-Inhalte werden an einen externen LLM-Provider übertragen (${provider})`;
+
+        this.providerBadge.setAttribute('title', title);
+        this.providerBadge.appendChild(el('span', {class: 'chat-provider-icon', text: icon}));
+        this.providerBadge.appendChild(el('span', {class: 'chat-provider-label', text: label}));
+        this.providerBadge.appendChild(el('span', {class: 'chat-provider-sep', text: '·'}));
+        this.providerBadge.appendChild(el('span', {class: 'chat-provider-name', text: provider}));
     }
 
     public focusInput(): void {

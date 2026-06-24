@@ -9,6 +9,7 @@ import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
+import {isNotePrivate} from './Privacy.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -785,6 +786,25 @@ export class SynaipseService {
         return this.chatProvider?.kind ?? null;
     }
 
+    public getChatProviderIsLocal(): boolean | null {
+        return this.chatProvider?.isLocal() ?? null;
+    }
+
+    /**
+     * DSGVO Layer 2 guard. Returns true when the configured chat provider is
+     * allowed to receive the given note's content. Local providers always
+     * pass; external providers refuse private notes (frontmatter flags,
+     * `#private` tag, `Private/`/`Personal/`/`secrets/` path prefix).
+     * Returns true when no chat provider is configured at all — the caller
+     * surfaces the missing-provider error separately.
+     */
+    private chatProviderMayReceive(note: Note): boolean {
+        const provider = this.chatProvider;
+        if (provider === null) return true;
+        if (provider.isLocal()) return true;
+        return !isNotePrivate(note);
+    }
+
     public researchEnabled(): boolean {
         return this.researchProvider !== null && this.chatProvider !== null;
     }
@@ -830,6 +850,11 @@ export class SynaipseService {
             return;
         }
 
+        if (!this.chatProviderMayReceive(note)) {
+            yield {kind: 'error', message: `note ${id} ist als privat markiert (frontmatter.private/dsgvo, #private-Tag oder Private/Personal/secrets/-Pfad) — bitte einen lokalen LLM-Provider konfigurieren, um sie zu verarbeiten.`};
+            return;
+        }
+
         let finalSummary = '';
 
         for await (const event of runSummarize(provider, note.content, opts.abort)) {
@@ -859,21 +884,36 @@ export class SynaipseService {
             return;
         }
 
+        const externalProvider = !provider.isLocal();
+
         yield* runChat({
             search: async (q, prefix, limit) => {
                 const scoped = prefix !== undefined && prefix.length > 0;
-                // Over-fetch when scoping by prefix so the filter still has enough
-                // candidates to keep `limit` strong post-filter.
-                const overFetch = scoped ? Math.max(limit * 6, 60) : limit;
+                // Over-fetch when scoping by prefix OR when DSGVO filtering may
+                // drop hits, so the filter still has enough candidates to keep
+                // `limit` strong post-filter.
+                const overFetch = (scoped || externalProvider) ? Math.max(limit * 6, 60) : limit;
                 const hits = await this.search(q, 'hybrid', overFetch);
 
+                const dsgvoFiltered = externalProvider
+                    ? hits.filter((h) => {
+                        const note = this.notes.tryGet(h.noteId);
+                        return note === undefined || !isNotePrivate(note);
+                    })
+                    : hits;
+
                 if (!scoped) {
-                    return hits.slice(0, limit);
+                    return dsgvoFiltered.slice(0, limit);
                 }
 
-                return hits.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
+                return dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
             },
-            readNote: (id) => this.notes.tryGet(id)?.content,
+            readNote: (id) => {
+                const note = this.notes.tryGet(id);
+                if (note === undefined) return undefined;
+                if (externalProvider && isNotePrivate(note)) return undefined;
+                return note.content;
+            },
             provider
         }, options);
     }
@@ -1068,6 +1108,11 @@ export class SynaipseService {
             return;
         }
 
+        if (!this.chatProviderMayReceive(note)) {
+            yield {kind: 'error', message: `note ${id} ist als privat markiert — Compile gegen einen externen LLM-Provider ist gesperrt. Konfiguriere einen lokalen Provider (z. B. Ollama auf localhost).`};
+            return;
+        }
+
         // Sibling note path: drop the .md suffix, append .compiled.md
         const compiledPath = id.replace(/\.md$/i, '.compiled.md');
         const existing = this.notes.tryGet(compiledPath);
@@ -1163,15 +1208,30 @@ export class SynaipseService {
 
         let accepted: AcceptedLink[];
 
-        if (opts.useLlm === true && this.chatProvider !== null) {
+        // DSGVO Layer 2: if the chat provider is external and the source
+        // note (or its candidates) carry private markers, we must not send
+        // their content to the LLM. Fall back to deterministic ranking
+        // instead of failing — relink still produces useful links, just
+        // without LLM-assisted reasoning.
+        const useLlm = opts.useLlm === true
+            && this.chatProvider !== null
+            && this.chatProviderMayReceive(note);
+
+        if (useLlm) {
+            const llmCandidates = this.chatProvider !== null && this.chatProvider.isLocal()
+                ? candidates
+                : candidates.filter((c) => {
+                    const cand = this.notes.tryGet(c.noteId);
+                    return cand === undefined || !isNotePrivate(cand);
+                });
             const noteSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
             let finalAccepted: AcceptedLink[] | null = null;
 
             for await (const event of runRelink(
-                this.chatProvider,
+                this.chatProvider as LlmProvider,
                 note.title,
                 noteSnippet,
-                candidates.slice(0, 10),
+                llmCandidates.slice(0, 10),
                 opts.abort
             )) {
                 if (event.kind === 'error') {

@@ -346,7 +346,7 @@ export class App {
             this.project = info.project;
             this.notesPanel.setHistoryEnabled(info.historyEnabled);
             this.notesPanel.setChatEnabled(info.chatEnabled);
-            this.chatPanel.setInfo(info.chatEnabled, info.chatModel, info.chatProvider, info.researchEnabled);
+            this.chatPanel.setInfo(info.chatEnabled, info.chatModel, info.chatProvider, info.researchEnabled, info.chatProviderIsLocal);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }
