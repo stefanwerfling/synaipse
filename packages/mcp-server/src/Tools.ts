@@ -85,12 +85,55 @@ const asSearchMode = (value: unknown): SearchMode => {
 
 export interface ToolHandler {
     definition: Tool;
+    /**
+     * ACL category. Read-only tools (search, read, list, graph, …) are
+     * gated on the token's read scope; mutating tools (write/update/
+     * delete/link/log/remember) on the write scope. Default 'read' so
+     * the long list of read-only tool definitions stays uncluttered.
+     */
+    mode?: 'read' | 'write';
+    /**
+     * Name of the input field carrying the note path, if any. The
+     * scope check uses it to compare against `pathPrefixes`. Tools
+     * without a path argument (search, list_tags, recent, …) leave
+     * this undefined and skip the path-prefix check.
+     */
+    pathArg?: string;
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 
+/**
+ * ACL classification for every tool, applied as a post-pass to
+ * `buildTools()`. Kept as a table here (rather than inline per tool
+ * definition) so the 24-tool list stays scannable and adding/removing
+ * write tools is one line, not a hunt-for-the-right-position edit.
+ */
+const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
+    synaipse_write_note:   {mode: 'write', pathArg: 'path'},
+    synaipse_update_note:  {mode: 'write', pathArg: 'path'},
+    synaipse_delete_note:  {mode: 'write', pathArg: 'id'},
+    synaipse_write_asset:  {mode: 'write', pathArg: 'noteId'},
+    synaipse_link_note:    {mode: 'write', pathArg: 'source'},
+    synaipse_log_session:  {mode: 'write'},
+    synaipse_remember:     {mode: 'write'},
+    synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
+    synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
+    synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
+    synaipse_related:      {mode: 'read',  pathArg: 'id'}
+};
+
+const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t) => {
+    const entry = ACL_TABLE[t.definition.name];
+    return {
+        ...t,
+        mode: entry?.mode ?? 'read',
+        ...(entry?.pathArg !== undefined ? {pathArg: entry.pathArg} : {})
+    };
+});
+
 export {EMPTY_CTX};
 
-export const buildTools = (service: SynaipseService): ToolHandler[] => [
+export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl([
     {
         definition: {
             name: 'synaipse_get_project',
@@ -651,4 +694,4 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => [
             };
         }
     }
-];
+]);

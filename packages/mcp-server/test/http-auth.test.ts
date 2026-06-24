@@ -153,4 +153,49 @@ describe('MCP HTTP bearer auth', () => {
 
         expect(res.statusCode).toBe(401);
     });
+
+    it('lets a granular tokens-list match through', async () => {
+        const config: Config = {
+            ...buildConfig(vaultDir, path.join(vaultDir, '.cache.json')),
+            server: {
+                name: 'synaipse-test',
+                version: '0.0.0',
+                tokens: [{
+                    token: 'reader-token',
+                    label: 'reader',
+                    read: true,
+                    pathPrefixes: ['Memory/']
+                }]
+            }
+        };
+        service = new SynaipseService(config);
+        await service.start();
+
+        const handler = buildMcpHttpHandler(config, service, {basePath: '/mcp', eventsUrl: null});
+        const req = mockReq('/mcp', {authorization: 'Bearer reader-token'});
+        const res = mockRes();
+        handler(req, res as never);
+
+        expect(res.statusCode).not.toBe(401);
+    });
+
+    it('rejects an unknown token when only granular tokens are configured', async () => {
+        const config: Config = {
+            ...buildConfig(vaultDir, path.join(vaultDir, '.cache.json')),
+            server: {
+                name: 'synaipse-test',
+                version: '0.0.0',
+                tokens: [{token: 'reader-token', read: true}]
+            }
+        };
+        service = new SynaipseService(config);
+        await service.start();
+
+        const handler = buildMcpHttpHandler(config, service, {basePath: '/mcp', eventsUrl: null});
+        const req = mockReq('/mcp', {authorization: 'Bearer not-the-token'});
+        const res = mockRes();
+        handler(req, res as never);
+
+        expect(res.statusCode).toBe(401);
+    });
 });

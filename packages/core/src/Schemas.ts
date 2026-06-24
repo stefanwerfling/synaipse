@@ -132,7 +132,15 @@ export const ConfigSchema = Vts.object({
     server: Vts.object({
         name: Vts.string(),
         version: Vts.string(),
-        token: Vts.optional(Vts.string())
+        token: Vts.optional(Vts.string()),
+        tokens: Vts.optional(Vts.array(Vts.object({
+            token: Vts.string(),
+            label: Vts.optional(Vts.string()),
+            read: Vts.optional(Vts.equal(true as const)),
+            write: Vts.optional(Vts.equal(true as const)),
+            pathPrefixes: Vts.optional(Vts.array(Vts.string())),
+            tools: Vts.optional(Vts.array(Vts.string()))
+        })))
     }),
     web: Vts.object({
         port: Vts.number()

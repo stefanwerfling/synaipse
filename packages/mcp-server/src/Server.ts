@@ -1,5 +1,4 @@
 import http from 'node:http';
-import {timingSafeEqual} from 'node:crypto';
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -11,6 +10,7 @@ import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
 import {resolveContextFromRequest} from './Project.js';
+import {checkScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 
 export type TransportMode = 'stdio' | 'http';
 
@@ -25,28 +25,53 @@ const buildMcpServer = (
     config: Config,
     tools: ToolHandler[],
     publisher: EventPublisher,
-    ctx: ToolContext = {}
+    ctx: ToolContext = {},
+    scope: TokenScope = NO_AUTH_SCOPE
 ): Server => {
-    const handlers = new Map(tools.map((t) => [t.definition.name, t.handle]));
+    const byName = new Map(tools.map((t) => [t.definition.name, t]));
 
     const server = new Server(
         {name: config.server.name, version: config.server.version},
         {capabilities: {tools: {}}}
     );
 
+    // ListTools filters by tool whitelist when the scope has one set —
+    // a write-restricted token shouldn't see write tools in the catalog
+    // even if it wouldn't be allowed to call them. Keeps the client UI
+    // honest.
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: tools.map((t) => t.definition)
+        tools: tools
+            .filter((t) => {
+                if (scope.tools.length > 0 && !scope.tools.includes(t.definition.name)) return false;
+                if ((t.mode ?? 'read') === 'write' && !scope.write) return false;
+                if ((t.mode ?? 'read') === 'read' && !scope.read) return false;
+                return true;
+            })
+            .map((t) => t.definition)
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request): Promise<{content: Array<{type: 'text'; text: string}>; isError?: boolean}> => {
-        const handler = handlers.get(request.params.name);
+        const tool = byName.get(request.params.name);
 
-        if (!handler) {
+        if (!tool) {
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
 
+        const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+        const pathArg = tool.pathArg !== undefined && typeof args[tool.pathArg] === 'string'
+            ? args[tool.pathArg] as string
+            : undefined;
+
+        const denial = checkScope(scope, {name: tool.definition.name, mode: tool.mode ?? 'read'}, pathArg);
+        if (denial !== null) {
+            return {
+                isError: true,
+                content: [{type: 'text', text: `Forbidden: ${denial}`}]
+            };
+        }
+
         try {
-            const outcome = await handler((request.params.arguments ?? {}) as Record<string, unknown>, ctx);
+            const outcome = await tool.handle(args, ctx);
 
             if (outcome.event !== undefined) {
                 publisher.publish({
@@ -72,47 +97,22 @@ const buildMcpServer = (
 };
 
 /**
- * Bearer-Auth check. Returns true when the request is authorised
- * (either no token is configured, or the Authorization header carries
- * the right one). Returns false after writing a 401 response,
- * meaning the caller should bail.
- *
- * Uses timingSafeEqual so the comparison cost is independent of how
- * far the prefix matched — defends against remote attackers measuring
- * roundtrip latency to guess characters.
- */
-const checkAuth = (req: http.IncomingMessage, res: http.ServerResponse, expected: Buffer | null): boolean => {
-    if (expected === null) return true;
-
-    const header = req.headers.authorization;
-    if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
-        res.statusCode = 401;
-        res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
-        res.end('unauthorised');
-        return false;
-    }
-
-    const provided = Buffer.from(header.slice('Bearer '.length).trim(), 'utf8');
-    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-        res.statusCode = 401;
-        res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
-        res.end('unauthorised');
-        return false;
-    }
-
-    return true;
-};
-
-/**
  * Build a plain `(req, res) => void` request handler that serves the MCP
  * StreamableHTTP transport on a given basePath. Lets us mount MCP under an
  * existing http.Server (e.g. the synaipse web API) and share a single
  * SynaipseService instance instead of spawning a second process.
  *
- * When `config.server.token` is set (via SYNAIPSE_MCP_TOKEN env), every
- * request must carry `Authorization: Bearer <token>`. Unset means
- * unauthenticated — fine for localhost-only dev, dangerous if the port
- * is reachable from anywhere else, so we log a one-time warning.
+ * Two auth modes — picked by what's in `config.server`:
+ *   - **No auth** (neither `token` nor `tokens` set). Every request runs
+ *     under the `NO_AUTH_SCOPE` (full admin). Localhost-dev only; a
+ *     stderr WARN on startup nags the operator.
+ *   - **Token-list** (`tokens: [{token, label?, read?, write?,
+ *     pathPrefixes?, tools?}]`) and/or legacy single token
+ *     (`token: <string>`, treated as an admin-all alias). Each request
+ *     must carry `Authorization: Bearer <token>`. resolveTokenScope
+ *     returns the matched scope; mismatch → 401. The scope is then
+ *     enforced per tool inside `buildMcpServer` (read vs write, tool
+ *     whitelist, path-prefix restriction).
  */
 export const buildMcpHttpHandler = (
     config: Config,
@@ -121,15 +121,13 @@ export const buildMcpHttpHandler = (
 ): http.RequestListener => {
     const publisher = new EventPublisher(options.eventsUrl);
     const tools = buildTools(service);
-    const expectedToken = config.server.token !== undefined && config.server.token.length > 0
-        ? Buffer.from(config.server.token, 'utf8')
-        : null;
+    const authConfigured = isAuthConfigured(config);
 
-    if (expectedToken === null) {
+    if (!authConfigured) {
         process.stderr.write(
-            '[synaipse-mcp] WARN: SYNAIPSE_MCP_TOKEN unset — '
+            '[synaipse-mcp] WARN: no SYNAIPSE_MCP_TOKEN or server.tokens configured — '
             + 'HTTP endpoint is unauthenticated. Safe only for localhost; '
-            + 'set the env var before exposing the port to LAN / remote.\n'
+            + 'set auth before exposing the port to LAN / remote.\n'
         );
     }
 
@@ -140,8 +138,18 @@ export const buildMcpHttpHandler = (
             return;
         }
 
-        if (!checkAuth(req, res, expectedToken)) {
-            return;
+        let scope: TokenScope;
+        if (!authConfigured) {
+            scope = NO_AUTH_SCOPE;
+        } else {
+            const resolved = resolveTokenScope(req.headers.authorization, config);
+            if (resolved === null) {
+                res.statusCode = 401;
+                res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
+                res.end('unauthorised');
+                return;
+            }
+            scope = resolved;
         }
 
         void (async () => {
@@ -151,7 +159,7 @@ export const buildMcpHttpHandler = (
                 headers: req.headers,
                 basePath: options.basePath
             });
-            const server = buildMcpServer(config, tools, publisher, ctx);
+            const server = buildMcpServer(config, tools, publisher, ctx, scope);
 
             res.on('close', () => {
                 void transport.close();
