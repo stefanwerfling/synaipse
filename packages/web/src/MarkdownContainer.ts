@@ -55,10 +55,24 @@ interface ContainerToken extends Tokens.Generic {
     containerType: string;
     attrs: Record<string, AttrValue>;
     headerTitle: string;
+    /**
+     * When `containerType === 'infographic'` and the second header token
+     * is a hyphenated identifier instead of an `{ attrs }` payload, we
+     * route to the `@antv/infographic` renderer instead of our simple
+     * card. `antvLayout` carries the layout name (e.g.
+     * `list-row-horizontal-icon-arrow`), `antvSyntax` the raw body so it
+     * can be replayed verbatim into `Infographic#render()`.
+     */
+    antvLayout?: string;
+    antvSyntax?: string;
     tokens: Tokens.Generic[];
 }
 
-const FENCE_RE = /^:::[ \t]*([A-Za-z][\w-]*)[ \t]*(\{[^}\n]*\})?[ \t]*([^\n]*)\n([\s\S]*?)\n:::(?:\n|$)/;
+// Match shapes (in priority order at the alternation, so attrs win):
+//   { icon: "🚀" }                  → ATTRS branch
+//   list-row-horizontal-icon-arrow  → ANTV layout-name branch
+//   <missing>                       → no second token (plain ::: infographic)
+const FENCE_RE = /^:::[ \t]*([A-Za-z][\w-]*)[ \t]*(\{[^}\n]*\}|[a-z][a-z0-9-]*)?[ \t]*([^\n]*)\n([\s\S]*?)\n:::(?:\n|$)/;
 const START_RE = /(^|\n):::[ \t]*[A-Za-z]/;
 
 const COLOR_ALLOWLIST: ReadonlySet<string> = new Set([
@@ -166,24 +180,46 @@ export const setupContainerExtension = (marked: typeof MarkedNamespace): void =>
 
                 const raw = match[0] as string;
                 const containerType = match[1] as string;
-                const attrsRaw = match[2];
+                const secondToken = match[2];
                 const headerTitle = (match[3] ?? '') as string;
                 const body = (match[4] ?? '') as string;
+
+                // Second-token disambiguation: attrs-object starts with `{`,
+                // anything else (hyphenated identifier) is an antv layout name
+                // — but only for `infographic` since the antv library only
+                // renders that type.
+                const isAttrs = secondToken !== undefined && secondToken.startsWith('{');
+                const isAntv = secondToken !== undefined && !isAttrs && containerType === 'infographic';
 
                 const token: ContainerToken = {
                     type: 'container',
                     raw,
                     containerType,
-                    attrs: parseAttrs(attrsRaw),
+                    attrs: isAttrs ? parseAttrs(secondToken) : {},
                     headerTitle,
                     tokens: []
                 };
 
-                this.lexer.blockTokens(body, token.tokens);
+                if (isAntv) {
+                    token.antvLayout = secondToken;
+                    token.antvSyntax = body;
+                } else {
+                    this.lexer.blockTokens(body, token.tokens);
+                }
                 return token;
             },
             renderer(rawToken): string {
                 const token = rawToken as ContainerToken;
+
+                if (token.antvLayout !== undefined && token.antvSyntax !== undefined) {
+                    // Defer the SVG render to a post-pass in MarkdownPreview —
+                    // marked is sync and antv needs a live DOM container. Stash
+                    // layout + raw syntax as data-attrs; the post-pass parses
+                    // them and instantiates `new Infographic({container: this})`.
+                    const syntaxAttr = escapeHtml(JSON.stringify(`infographic ${token.antvLayout}\n${token.antvSyntax}`));
+                    return `<div class="md-antv-infographic" data-infographic-layout="${escapeHtml(token.antvLayout)}" data-infographic-syntax="${syntaxAttr}"></div>\n`;
+                }
+
                 const inner = this.parser.parse(token.tokens);
                 const header = renderHeaderParts(token);
                 const headerHtml = header.length > 0

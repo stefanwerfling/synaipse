@@ -113,6 +113,52 @@ export class MarkdownPreview {
         clear(this.element);
         this.element.innerHTML = renderMarkdown(this.content);
         this.transformWikilinks();
+        void this.applyAntvInfographics();
+    }
+
+    /**
+     * Post-render pass: turn `<div class="md-antv-infographic">` stubs
+     * left by the container extension into actual `@antv/infographic`
+     * SVGs. The library is imported on-demand the first time an
+     * infographic appears so the ~MB-sized dependency doesn't land in
+     * the initial bundle for notes that don't use it.
+     */
+    private async applyAntvInfographics(): Promise<void> {
+        const stubs = this.element.querySelectorAll<HTMLDivElement>('.md-antv-infographic');
+        if (stubs.length === 0) return;
+
+        let Infographic: typeof import('@antv/infographic').Infographic;
+        try {
+            ({Infographic} = await import('@antv/infographic'));
+        } catch (e) {
+            for (const stub of stubs) {
+                stub.textContent = `Infographic library failed to load: ${e instanceof Error ? e.message : String(e)}`;
+                stub.classList.add('md-antv-infographic-error');
+            }
+            return;
+        }
+
+        for (const stub of stubs) {
+            if (stub.dataset.rendered === 'true') continue;
+            const syntaxJson = stub.dataset.infographicSyntax;
+            if (syntaxJson === undefined) continue;
+
+            try {
+                const syntax = JSON.parse(syntaxJson) as string;
+                const width = stub.clientWidth > 0 ? stub.clientWidth : 900;
+                const infographic = new Infographic({
+                    container: stub,
+                    width,
+                    height: 540,
+                    padding: 24
+                });
+                infographic.render(syntax);
+                stub.dataset.rendered = 'true';
+            } catch (e) {
+                stub.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
+                stub.classList.add('md-antv-infographic-error');
+            }
+        }
     }
 
     private transformWikilinks(): void {

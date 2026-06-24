@@ -14,6 +14,7 @@
     "start": "node --enable-source-maps dist/server/index.js"
   },
   "dependencies": {
+    "@antv/infographic": "^0.2.19",
     "@synaipse/core": "*",
     "@synaipse/mcp-server": "*",
     "@synaipse/server-storage": "*",

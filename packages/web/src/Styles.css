@@ -4395,3 +4395,29 @@ body {
     background: rgba(107, 114, 128, 0.18);
     color: var(--text-2);
 }
+
+/* @antv/infographic mount points — left empty by the marked-extension,
+   populated by `MarkdownPreview.applyAntvInfographics()` once the SVG
+   renderer has run. Minimum height keeps the layout stable during the
+   async lazy-load. */
+.md-antv-infographic {
+    margin: var(--space-4) 0;
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.md-antv-infographic svg { display: block; max-width: 100%; height: auto; }
+
+.md-antv-infographic-error {
+    padding: var(--space-3) var(--space-4);
+    color: var(--red);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border-color: var(--red);
+}

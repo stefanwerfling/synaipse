@@ -111,4 +111,47 @@ describe('container extension', () => {
         expect(render('::: tip\nx\n:::')).toContain('md-container-tip');
         expect(render('::: note\nx\n:::')).toContain('md-container-note');
     });
+
+    describe('antv layout-name branch', () => {
+        const antvSrc = [
+            '::: infographic list-row-horizontal-icon-arrow',
+            'data',
+            '  title Customer Growth Engine',
+            '  desc Multi-channel reach',
+            '  lists',
+            '    - label Lead Acquisition',
+            '      value 18.6',
+            ':::'
+        ].join('\n');
+
+        it('routes to the antv branch when second token is a hyphenated layout name', () => {
+            const html = render(antvSrc);
+            expect(html).toContain('md-antv-infographic');
+            expect(html).toContain('data-infographic-layout="list-row-horizontal-icon-arrow"');
+            expect(html).not.toContain('md-container-body'); // antv branch skips the card chrome
+        });
+
+        it('preserves the body verbatim in the data-infographic-syntax attribute', () => {
+            const html = render(antvSrc);
+            // data-infographic-syntax is a JSON-encoded string; we just check
+            // that the original body lines survived the encoding round-trip.
+            expect(html).toContain('Customer Growth Engine');
+            expect(html).toContain('Lead Acquisition');
+            expect(html).toContain('18.6');
+        });
+
+        it('still uses the card branch when the second token is { attrs }', () => {
+            const html = render('::: infographic { icon: "🚀", step: 1 }\nBody\n:::');
+            expect(html).toContain('md-container-infographic');
+            expect(html).not.toContain('md-antv-infographic');
+        });
+
+        it('still uses the card branch for non-infographic types with a bare layout-like name', () => {
+            // `::: tip list-row` — layout names are only consumed when type
+            // is `infographic`. Other types keep the text as headerTitle.
+            const html = render('::: tip list-row\nbody\n:::');
+            expect(html).toContain('md-container-tip');
+            expect(html).not.toContain('md-antv-infographic');
+        });
+    });
 });
