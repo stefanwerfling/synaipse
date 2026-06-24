@@ -1,6 +1,7 @@
 import type {Frontmatter, Note} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
+import {EditorToolbar} from './EditorToolbar.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
 
@@ -26,6 +27,12 @@ const parseTagsInput = (raw: string): string[] => {
 
 const showPreviewStore = new PersistentValue<boolean>(STORAGE_SHOW_PREVIEW, true);
 
+// Below this viewport width the split-view leaves both panes too narrow
+// to be useful; we switch to a single-pane tabbed layout instead. Chosen
+// to give each pane at least ~400-450px when an editor sits next to the
+// left+right sidebars (~250px each on the standard layout).
+const TAB_MODE_BREAKPOINT_PX = 900;
+
 export class Editor {
     public readonly element: HTMLElement;
     private note: Note;
@@ -40,11 +47,20 @@ export class Editor {
     private tagsField!: HTMLInputElement;
     private textarea!: HTMLTextAreaElement;
     private splitContainer!: HTMLElement;
+    private editorPane!: HTMLElement;
     private previewHost!: HTMLElement;
     private actionsHost!: HTMLElement;
     private errorHost!: HTMLElement;
+    private tabBar!: HTMLElement;
+    private tabWriteBtn!: HTMLButtonElement;
+    private tabPreviewBtn!: HTMLButtonElement;
+    private toolbar!: EditorToolbar;
     private preview: MarkdownPreview;
     private previewUnsubscribe: () => void;
+    private mqMobile: MediaQueryList;
+    private viewMode: 'split' | 'tab';
+    private activeTab: 'write' | 'preview' = 'write';
+    private onMqChange: (e: MediaQueryListEvent) => void;
 
     public constructor(note: Note, private readonly cb: EditorCallbacks) {
         this.note = note;
@@ -52,6 +68,9 @@ export class Editor {
         this.tagsInput = this.initialTags();
         this.content = note.content;
         this.showPreview = showPreviewStore.get();
+
+        this.mqMobile = window.matchMedia(`(max-width: ${TAB_MODE_BREAKPOINT_PX}px)`);
+        this.viewMode = this.mqMobile.matches ? 'tab' : 'split';
 
         this.preview = new MarkdownPreview({
             ...(cb.resolveWikilink ? {resolveWikilink: cb.resolveWikilink} : {}),
@@ -66,8 +85,14 @@ export class Editor {
 
         this.previewUnsubscribe = showPreviewStore.subscribe((show) => {
             this.showPreview = show;
-            this.applyPreviewVisibility();
+            this.applyLayout();
         });
+
+        this.onMqChange = (e: MediaQueryListEvent) => {
+            this.viewMode = e.matches ? 'tab' : 'split';
+            this.applyLayout();
+        };
+        this.mqMobile.addEventListener('change', this.onMqChange);
     }
 
     public update(note: Note): void {
@@ -85,7 +110,9 @@ export class Editor {
 
     public destroy(): void {
         this.previewUnsubscribe();
+        this.mqMobile.removeEventListener('change', this.onMqChange);
         this.preview.destroy();
+        this.toolbar.destroy();
     }
 
     private initialTitle(): string {
@@ -170,11 +197,40 @@ export class Editor {
         }) as HTMLTextAreaElement;
         this.textarea.value = this.content;
 
+        this.toolbar = new EditorToolbar({
+            textarea: this.textarea,
+            onChange: (value) => {
+                this.content = value;
+                this.preview.update(value);
+            }
+        });
+
+        this.editorPane = el('div', {class: 'editor-pane'}, this.toolbar.element, this.textarea);
+
         this.previewHost = this.preview.element;
         this.splitContainer = el('div',
             {class: this.showPreview ? 'editor-split' : 'editor-split single'},
-            this.textarea,
+            this.editorPane,
             this.previewHost
+        );
+
+        this.tabWriteBtn = el('button', {
+            class: 'editor-tab-btn',
+            attrs: {type: 'button'},
+            text: 'Write',
+            on: {click: () => this.setActiveTab('write')}
+        }) as HTMLButtonElement;
+
+        this.tabPreviewBtn = el('button', {
+            class: 'editor-tab-btn',
+            attrs: {type: 'button'},
+            text: 'Preview',
+            on: {click: () => this.setActiveTab('preview')}
+        }) as HTMLButtonElement;
+
+        this.tabBar = el('div', {class: 'editor-tabs', attrs: {role: 'tablist'}},
+            this.tabWriteBtn,
+            this.tabPreviewBtn
         );
 
         this.errorHost = el('div', {class: 'editor-error', style: {display: 'none'}});
@@ -207,15 +263,47 @@ export class Editor {
         this.actionsHost = el('div', {class: 'editor-actions'}, saveBtn, cancelBtn, previewToggle);
 
         this.element.appendChild(fields);
+        this.element.appendChild(this.tabBar);
         this.element.appendChild(this.splitContainer);
         this.element.appendChild(this.errorHost);
         this.element.appendChild(this.actionsHost);
 
-        this.applyPreviewVisibility();
+        this.applyLayout();
     }
 
-    private applyPreviewVisibility(): void {
+    private setActiveTab(tab: 'write' | 'preview'): void {
+        if (this.activeTab === tab) return;
+        this.activeTab = tab;
+        this.applyLayout();
+    }
+
+    /**
+     * Single source of truth for visibility of the two panes.
+     * Two orthogonal inputs drive the layout:
+     *   - `viewMode` ('split' on wide viewports, 'tab' below the
+     *     breakpoint) — set by the media query listener.
+     *   - `showPreview` (user toggle in the actions bar) — only
+     *     consulted in split mode; in tab mode the user picks a tab
+     *     instead, so the toggle is hidden.
+     */
+    private applyLayout(): void {
+        const isTab = this.viewMode === 'tab';
+        this.element.classList.toggle('tab-mode', isTab);
+        this.splitContainer.classList.toggle('tab-mode', isTab);
+        this.tabBar.style.display = isTab ? '' : 'none';
+
+        if (isTab) {
+            this.splitContainer.className = 'editor-split single tab-mode';
+            const showWrite = this.activeTab === 'write';
+            this.editorPane.style.display = showWrite ? '' : 'none';
+            this.previewHost.style.display = showWrite ? 'none' : '';
+            this.tabWriteBtn.classList.toggle('active', showWrite);
+            this.tabPreviewBtn.classList.toggle('active', !showWrite);
+            return;
+        }
+
         this.splitContainer.className = this.showPreview ? 'editor-split' : 'editor-split single';
+        this.editorPane.style.display = '';
         this.previewHost.style.display = this.showPreview ? '' : 'none';
     }
 
