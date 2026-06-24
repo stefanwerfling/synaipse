@@ -589,6 +589,13 @@ body {
     text-overflow: ellipsis;
 }
 
+.note-list-lock {
+    font-size: 11px;
+    margin-right: 4px;
+    opacity: 0.75;
+    cursor: help;
+}
+
 .note-list-meta {
     margin-top: 2px;
     display: flex;
@@ -1470,6 +1477,30 @@ body {
 .chat-card-sources-pill:hover {
     color: var(--accent);
     border-color: var(--accent);
+}
+
+.chat-card-privacy-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--bg-2);
+    border: 1px solid rgba(110, 200, 130, 0.45);
+    border-radius: var(--r-pill);
+    color: var(--text-1);
+    font-size: 11px;
+    cursor: help;
+    user-select: none;
+    white-space: pre-line;
+}
+
+.chat-card-privacy-icon {
+    font-size: 11px;
+    line-height: 1;
+}
+
+.chat-card-privacy-label {
+    font-weight: 500;
 }
 
 .chat-card-sources-list {

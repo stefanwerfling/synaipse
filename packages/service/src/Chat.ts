@@ -1,5 +1,6 @@
 import type {SearchHit} from '@synaipse/core';
 import type {LlmProvider} from './Llm.js';
+import type {RedactionHit} from './Privacy.js';
 
 export interface ChatSource {
     index: number;
@@ -9,8 +10,15 @@ export interface ChatSource {
     snippet?: string;
 }
 
+export interface ChatPrivacyStats {
+    /** Notes dropped from the source pool because they're marked private (Layer 2). */
+    filteredPrivate?: number;
+    /** Per-kind counts of secrets scrubbed from the prompt (Layer 3). */
+    redactions?: RedactionHit[];
+}
+
 export type ChatEvent =
-    | {kind: 'start'; sources: ChatSource[]; model: string}
+    | ({kind: 'start'; sources: ChatSource[]; model: string} & ChatPrivacyStats)
     | {kind: 'token'; text: string}
     | {kind: 'done'; totalTokens: number}
     | {kind: 'error'; message: string};

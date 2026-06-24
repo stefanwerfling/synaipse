@@ -1070,6 +1070,104 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(userMsg).not.toContain('[redact:');
     });
 
+    it('noteFlags reports {private: true} for notes marked via path prefix', async () => {
+        await writeNote(vaultDir, 'Private/foo.md', '---\ntitle: Foo\n---\nbody');
+        await writeNote(vaultDir, 'public.md', '---\ntitle: Pub\n---\nbody');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const priv = service.listNotes().find((n) => n.id === 'Private/foo.md');
+        const pub = service.listNotes().find((n) => n.id === 'public.md');
+        if (priv === undefined || pub === undefined) throw new Error('note not found');
+
+        expect(service.noteFlags(priv)).toEqual({private: true});
+        expect(service.noteFlags(pub)).toEqual({private: false});
+    });
+
+    it('chat start event carries filteredPrivate count when private hits get dropped', async () => {
+        await writeNote(vaultDir, 'public.md', '---\ntitle: Public\n---\ncluster public body');
+        await writeNote(vaultDir, 'Private/a.md', '---\ntitle: A\n---\ncluster secret one');
+        await writeNote(vaultDir, 'Private/b.md', '---\ntitle: B\n---\ncluster secret two');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const start = events.find((e) => e.kind === 'start');
+
+        if (start?.kind === 'start') {
+            expect(start.filteredPrivate).toBe(2);
+            expect(start.sources.map((s) => s.noteId)).toEqual(['public.md']);
+        } else {
+            throw new Error('expected start event');
+        }
+    });
+
+    it('chat start event carries redactions array when external snippets contain secrets', async () => {
+        await writeNote(vaultDir, 'leaky.md',
+            '---\ntitle: Leaky\n---\n' +
+            'cluster body with alice@example.com and token sk-proj-abc123XYZ456defg7890hij and bob@y.com'
+        );
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const start = events.find((e) => e.kind === 'start');
+
+        if (start?.kind === 'start') {
+            const kinds = (start.redactions ?? []).map((r) => r.kind);
+            expect(kinds).toContain('email');
+            expect(kinds).toContain('openai_key');
+            const emailCount = start.redactions?.find((r) => r.kind === 'email')?.count ?? 0;
+            expect(emailCount).toBeGreaterThanOrEqual(1);
+        } else {
+            throw new Error('expected start event');
+        }
+    });
+
+    it('local provider yields no filteredPrivate / redactions stats', async () => {
+        await writeNote(vaultDir, 'Private/a.md', '---\ntitle: A\n---\ncluster secret with alice@example.com');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        const events = await collectChat(service.chat({question: 'cluster'}));
+        const start = events.find((e) => e.kind === 'start');
+
+        if (start?.kind === 'start') {
+            expect(start.filteredPrivate).toBeUndefined();
+            expect(start.redactions).toBeUndefined();
+        } else {
+            throw new Error('expected start event');
+        }
+    });
+
     it('chat hides private notes from sources when the chat provider is external', async () => {
         await writeNote(vaultDir, 'public.md', '---\ntitle: Public\n---\ncluster body content');
         await writeNote(vaultDir, 'Private/secrets.md', '---\ntitle: Secret\n---\ncluster sensitive details');

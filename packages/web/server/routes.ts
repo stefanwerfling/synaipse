@@ -216,15 +216,19 @@ export const routes = (
             return;
         }
 
-        json(res, 200, service.listNotes().map((n) => ({
-            id: n.id,
-            title: n.title,
-            tags: n.tags,
-            mtime: n.mtime,
-            aliases: Array.isArray(n.frontmatter.aliases)
-                ? n.frontmatter.aliases.filter((a): a is string => typeof a === 'string')
-                : []
-        })));
+        json(res, 200, service.listNotes().map((n) => {
+            const flags = service.noteFlags(n);
+            return {
+                id: n.id,
+                title: n.title,
+                tags: n.tags,
+                mtime: n.mtime,
+                aliases: Array.isArray(n.frontmatter.aliases)
+                    ? n.frontmatter.aliases.filter((a): a is string => typeof a === 'string')
+                    : [],
+                ...(flags.private ? {isPrivate: true as const} : {})
+            };
+        }));
         return;
     }
 

@@ -9,7 +9,7 @@ import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
-import {isNotePrivate, redactSensitive} from './Privacy.js';
+import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -41,7 +41,8 @@ import type {ChatAdapter} from '@synaipse/core';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
 import {HashCache} from '@synaipse/vault';
-export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, SummarizeEvent} from './Chat.js';
+export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, ChatPrivacyStats, SummarizeEvent} from './Chat.js';
+export type {RedactionHit, RedactionResult} from './Privacy.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
 export type {WriteAssetResult} from './Assets.js';
 export type {ActivityReport, ActivityCommit, ActivityBucket, ActivityCount} from './Activity.js';
@@ -791,6 +792,15 @@ export class SynaipseService {
     }
 
     /**
+     * Surface DSGVO note flags to UI / API consumers so the notes list can
+     * render a lock icon next to private notes. Structure is an object (not
+     * a bare boolean) so future flags can join without breaking the API.
+     */
+    public noteFlags(note: Note): {private: boolean} {
+        return {private: isNotePrivate(note)};
+    }
+
+    /**
      * DSGVO Layer 2 guard. Returns true when the configured chat provider is
      * allowed to receive the given note's content. Local providers always
      * pass; external providers refuse private notes (frontmatter flags,
@@ -899,7 +909,15 @@ export class SynaipseService {
 
         const externalProvider = !provider.isLocal();
 
-        yield* runChat({
+        let filteredPrivate = 0;
+        const redactCounts = new Map<string, number>();
+        const tallyRedactions = (hits: readonly RedactionHit[]): void => {
+            for (const h of hits) {
+                redactCounts.set(h.kind, (redactCounts.get(h.kind) ?? 0) + h.count);
+            }
+        };
+
+        const stream = runChat({
             search: async (q, prefix, limit) => {
                 const scoped = prefix !== undefined && prefix.length > 0;
                 // Over-fetch when scoping by prefix OR when DSGVO filtering may
@@ -911,31 +929,69 @@ export class SynaipseService {
                 const dsgvoFiltered = externalProvider
                     ? hits.filter((h) => {
                         const note = this.notes.tryGet(h.noteId);
-                        return note === undefined || !isNotePrivate(note);
+                        if (note !== undefined && isNotePrivate(note)) {
+                            filteredPrivate++;
+                            return false;
+                        }
+                        return true;
                     })
                     : hits;
 
+                // Slice first, then redact — otherwise the over-fetch pool
+                // would inflate redaction counts with snippets that never
+                // reach the LLM.
+                const sliced = scoped
+                    ? dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix as string)).slice(0, limit)
+                    : dsgvoFiltered.slice(0, limit);
+
+                if (!externalProvider) return sliced;
+
                 // Layer 3: scrub PII/secrets from search-engine-provided
-                // snippets via the same helper that summarize/compile use.
-                // readNote-derived snippets get the same treatment below.
-                const redacted = dsgvoFiltered.map((h) => h.snippet === undefined
-                    ? h
-                    : {...h, snippet: this.redactForChat(h.snippet)});
-
-                if (!scoped) {
-                    return redacted.slice(0, limit);
-                }
-
-                return redacted.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
+                // snippets. readNote-derived snippets get the same treatment
+                // below; both feed the same buildContext() prompt assembly.
+                return sliced.map((h) => {
+                    if (h.snippet === undefined) return h;
+                    const r = redactSensitive(h.snippet);
+                    tallyRedactions(r.hits);
+                    return {...h, snippet: r.redacted};
+                });
             },
             readNote: (id) => {
                 const note = this.notes.tryGet(id);
                 if (note === undefined) return undefined;
-                if (externalProvider && isNotePrivate(note)) return undefined;
-                return this.redactForChat(note.content);
+                if (!externalProvider) return note.content;
+                if (isNotePrivate(note)) {
+                    // Defense-in-depth: search() should already have dropped
+                    // private hits, so reaching here means a hit slipped past
+                    // the filter. Count it anyway so the UI total is honest.
+                    filteredPrivate++;
+                    return undefined;
+                }
+                const r = redactSensitive(note.content);
+                tallyRedactions(r.hits);
+                return r.redacted;
             },
             provider
         }, options);
+
+        // Amend the start event with the privacy stats accumulated during
+        // the (synchronous) source assembly above. Counts are stable by the
+        // time runChat yields 'start' — readNote/search have both finished.
+        for await (const event of stream) {
+            if (event.kind === 'start') {
+                const redactions = Array.from(redactCounts.entries())
+                    .map(([kind, count]) => ({kind, count}))
+                    .sort((a, b) => a.kind.localeCompare(b.kind));
+
+                yield {
+                    ...event,
+                    ...(filteredPrivate > 0 ? {filteredPrivate} : {}),
+                    ...(redactions.length > 0 ? {redactions} : {})
+                };
+            } else {
+                yield event;
+            }
+        }
     }
 
     public async historyEnabled(): Promise<boolean> {

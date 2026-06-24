@@ -5,12 +5,18 @@ import {renderMarkdownInto} from './MarkdownPreview.js';
 
 export type ChatSource = ChatSourceRef;
 
+interface PrivacyStats {
+    filteredPrivate?: number;
+    redactions?: ReadonlyArray<{kind: string; count: number}>;
+}
+
 interface Message {
     role: 'user' | 'assistant';
     text: string;
     sources?: ChatSource[];
     model?: string;
     streaming?: boolean;
+    privacy?: PrivacyStats;
 }
 
 const HISTORY_MAX_TURNS = 12;          // 6 user + 6 assistant
@@ -570,6 +576,11 @@ export class ChatPanel {
             sourcesList = list;
         }
 
+        if (msg.privacy !== undefined) {
+            const pill = this.buildPrivacyPill(msg.privacy);
+            if (pill !== null) footer.appendChild(pill);
+        }
+
         inner.appendChild(footer);
         if (sourcesList !== null) inner.appendChild(sourcesList);
 
@@ -620,6 +631,42 @@ export class ChatPanel {
         });
 
         return {pillBtn, list};
+    }
+
+    /**
+     * Small read-only pill summarizing what DSGVO Layer 2/3 did to this
+     * answer's prompt: how many private notes were dropped, how many
+     * PII/secret patterns were scrubbed. The tooltip lists the per-kind
+     * breakdown so a user investigating "why didn't note X show up" has a
+     * thread to pull. Returns null when there's nothing to report.
+     */
+    private buildPrivacyPill(stats: PrivacyStats): HTMLElement | null {
+        const parts: string[] = [];
+        const tooltipLines: string[] = [];
+
+        if (stats.filteredPrivate !== undefined && stats.filteredPrivate > 0) {
+            parts.push(`${stats.filteredPrivate} ausgeblendet`);
+            tooltipLines.push(`${stats.filteredPrivate} Note(s) wurden ausgeblendet (Privat-Marker)`);
+        }
+
+        const redactions = stats.redactions ?? [];
+        const redactTotal = redactions.reduce((sum, r) => sum + r.count, 0);
+
+        if (redactTotal > 0) {
+            parts.push(`${redactTotal} redacted`);
+            const detail = redactions.map((r) => `${r.count} ${r.kind}`).join(', ');
+            tooltipLines.push(`${redactTotal} PII/Secret-Treffer geschwärzt: ${detail}`);
+        }
+
+        if (parts.length === 0) return null;
+
+        return el('span', {
+            class: 'chat-card-privacy-pill',
+            attrs: {title: tooltipLines.join('\n')}
+        },
+            el('span', {class: 'chat-card-privacy-icon', text: '🛡'}),
+            el('span', {class: 'chat-card-privacy-label', text: parts.join(' · ')})
+        );
     }
 
     // -- streaming + send ---------------------------------------------------
@@ -751,6 +798,20 @@ export class ChatPanel {
 
             if (typeof event.model === 'string') {
                 target.model = event.model;
+            }
+
+            const filteredPrivate = typeof event.filteredPrivate === 'number' ? event.filteredPrivate : undefined;
+            const redactionsRaw = Array.isArray(event.redactions)
+                ? (event.redactions as Array<{kind?: unknown; count?: unknown}>)
+                    .filter((r) => typeof r.kind === 'string' && typeof r.count === 'number')
+                    .map((r) => ({kind: r.kind as string, count: r.count as number}))
+                : undefined;
+
+            if (filteredPrivate !== undefined || (redactionsRaw !== undefined && redactionsRaw.length > 0)) {
+                target.privacy = {
+                    ...(filteredPrivate !== undefined ? {filteredPrivate} : {}),
+                    ...(redactionsRaw !== undefined && redactionsRaw.length > 0 ? {redactions: redactionsRaw} : {})
+                };
             }
         } else if (event.kind === 'sources') {
             const raw = (event.sources as Array<{index: number; url: string; title: string; snippet: string}> | undefined) ?? [];

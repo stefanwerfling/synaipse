@@ -26,6 +26,8 @@ export interface NoteSummary {
     tags: string[];
     mtime: number;
     aliases: string[];
+    /** DSGVO Layer 2 marker. Present only when true — omitted otherwise to keep the list-notes payload lean. */
+    isPrivate?: true;
 }
 
 export const api = {

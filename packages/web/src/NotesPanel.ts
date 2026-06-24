@@ -481,12 +481,20 @@ export class NotesPanel {
             meta.appendChild(chipHost);
         }
 
+        const lockIcon = n.isPrivate === true
+            ? el('span', {
+                class: 'note-list-lock',
+                text: '🔒',
+                attrs: {title: 'DSGVO: privat — wird nicht an externe LLMs gesendet'}
+            })
+            : null;
+
         return el('li', {
             class: n.id === this.activeId ? 'note-list-item active' : 'note-list-item',
             style: {top: `${top}px`, height: `${noteRowHeight(n)}px`},
             on: {click: () => this.handleSelect(n.id)}
         },
-            el('div', {class: 'note-list-title', text: n.title}),
+            el('div', {class: 'note-list-title'}, lockIcon, n.title),
             meta
         );
     }
