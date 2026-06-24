@@ -10,6 +10,7 @@ import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
+import {stripContainers} from './Containers.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -861,10 +862,15 @@ export class SynaipseService {
                 }
             }
 
-            if (externalProvider && snippet !== undefined) {
-                const r = redactSensitive(snippet);
-                tallyRedactions(r.hits);
-                snippet = r.redacted;
+            if (snippet !== undefined) {
+                // Strip container fences always (LLM noise), redact only
+                // when external (PII leaving the host).
+                snippet = stripContainers(snippet);
+                if (externalProvider) {
+                    const r = redactSensitive(snippet);
+                    tallyRedactions(r.hits);
+                    snippet = r.redacted;
+                }
             }
 
             return {
@@ -904,16 +910,20 @@ export class SynaipseService {
     }
 
     /**
-     * DSGVO Layer 3: when the chat provider is external, scrub PII / secrets
-     * (emails, IBANs, API tokens, phone numbers, …) from content before it
-     * leaves the host. Local providers pass content through unchanged
-     * because nothing is leaving anyway. See Privacy.ts for the detector
-     * catalogue + redaction marker shape.
+     * Two-stage LLM input preparation:
+     *   1. `stripContainers` runs always — `:::infographic` & friends are
+     *      visual sugar for the web UI, but for the LLM they're noise that
+     *      bloats tokens and confuses structure.
+     *   2. DSGVO Layer 3: when the chat provider is external, scrub PII /
+     *      secrets (emails, IBANs, API tokens, …). Local providers skip
+     *      step 2 because nothing leaves the host. See Privacy.ts for the
+     *      detector catalogue + redaction marker shape.
      */
-    private redactForChat(content: string): string {
+    private prepareForChat(content: string): string {
+        const stripped = stripContainers(content);
         const provider = this.chatProvider;
-        if (provider === null || provider.isLocal()) return content;
-        return redactSensitive(content).redacted;
+        if (provider === null || provider.isLocal()) return stripped;
+        return redactSensitive(stripped).redacted;
     }
 
     public researchEnabled(): boolean {
@@ -968,7 +978,7 @@ export class SynaipseService {
 
         let finalSummary = '';
 
-        for await (const event of runSummarize(provider, this.redactForChat(note.content), opts.abort)) {
+        for await (const event of runSummarize(provider, this.prepareForChat(note.content), opts.abort)) {
             yield event;
 
             if (event.kind === 'done') {
@@ -1032,14 +1042,15 @@ export class SynaipseService {
                     ? dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix as string)).slice(0, limit)
                     : dsgvoFiltered.slice(0, limit);
 
-                if (!externalProvider) return sliced;
-
-                // Layer 3: scrub PII/secrets from search-engine-provided
-                // snippets. readNote-derived snippets get the same treatment
-                // below; both feed the same buildContext() prompt assembly.
+                // Strip container fences always (LLM noise reduction);
+                // Layer 3 redaction only when external. readNote-derived
+                // snippets get the same treatment below; both feed the same
+                // buildContext() prompt assembly.
                 return sliced.map((h) => {
                     if (h.snippet === undefined) return h;
-                    const r = redactSensitive(h.snippet);
+                    const stripped = stripContainers(h.snippet);
+                    if (!externalProvider) return {...h, snippet: stripped};
+                    const r = redactSensitive(stripped);
                     tallyRedactions(r.hits);
                     return {...h, snippet: r.redacted};
                 });
@@ -1047,7 +1058,8 @@ export class SynaipseService {
             readNote: (id) => {
                 const note = this.notes.tryGet(id);
                 if (note === undefined) return undefined;
-                if (!externalProvider) return note.content;
+                const stripped = stripContainers(note.content);
+                if (!externalProvider) return stripped;
                 if (isNotePrivate(note)) {
                     // Defense-in-depth: search() should already have dropped
                     // private hits, so reaching here means a hit slipped past
@@ -1055,7 +1067,7 @@ export class SynaipseService {
                     filteredPrivate++;
                     return undefined;
                 }
-                const r = redactSensitive(note.content);
+                const r = redactSensitive(stripped);
                 tallyRedactions(r.hits);
                 return r.redacted;
             },
@@ -1291,7 +1303,7 @@ export class SynaipseService {
 
         let final: CompileResult | null = null;
 
-        for await (const event of runCompile(provider, this.redactForChat(note.content), opts.abort)) {
+        for await (const event of runCompile(provider, this.prepareForChat(note.content), opts.abort)) {
             yield event;
             if (event.kind === 'done') final = event.result;
         }
@@ -1395,9 +1407,9 @@ export class SynaipseService {
                 : candidates;
             const llmCandidates = filtered.map((c) => c.snippet === undefined
                 ? c
-                : {...c, snippet: this.redactForChat(c.snippet)});
+                : {...c, snippet: this.prepareForChat(c.snippet)});
             const rawSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
-            const noteSnippet = this.redactForChat(rawSnippet);
+            const noteSnippet = this.prepareForChat(rawSnippet);
             let finalAccepted: AcceptedLink[] | null = null;
 
             for await (const event of runRelink(

@@ -1070,6 +1070,62 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(userMsg).not.toContain('[redact:');
     });
 
+    it('summarize strips ::: container fences before sending to the LLM (external)', async () => {
+        await writeNote(vaultDir, 'roadmap.md', '---\ntitle: Roadmap\n---\n# Plan\n\n::: infographic { icon: "🚀", step: 1 }\nPhase Alpha\n:::\n\n::: infographic { step: 2 }\nPhase Beta\n:::');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events: ChatEvent[] = [];
+        for await (const e of service.summarizeNote('roadmap.md') as AsyncGenerator<ChatEvent, void, void>) {
+            events.push(e);
+        }
+
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const userMsg = body.messages.find((m: {role: string}) => m.role === 'user')?.content as string;
+
+        expect(userMsg).not.toContain(':::');
+        expect(userMsg).not.toContain('icon:');
+        expect(userMsg).toContain('Phase Alpha');
+        expect(userMsg).toContain('Phase Beta');
+    });
+
+    it('summarize strips ::: container fences even for local providers', async () => {
+        await writeNote(vaultDir, 'roadmap.md', '---\ntitle: Roadmap\n---\n::: infographic\nPhase Alpha\n:::');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        for await (const _e of service.summarizeNote('roadmap.md') as AsyncGenerator<ChatEvent, void, void>) {
+            // drain
+        }
+
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const userMsg = body.messages.find((m: {role: string}) => m.role === 'user')?.content as string;
+
+        expect(userMsg).not.toContain(':::');
+        expect(userMsg).toContain('Phase Alpha');
+    });
+
     it('noteFlags reports {private: true} for notes marked via path prefix', async () => {
         await writeNote(vaultDir, 'Private/foo.md', '---\ntitle: Foo\n---\nbody');
         await writeNote(vaultDir, 'public.md', '---\ntitle: Pub\n---\nbody');
