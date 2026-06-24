@@ -8,6 +8,8 @@ import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {buildWikilinkResolver, slugify, WikilinkResolver} from './Wikilinks.js';
+import {fuzzyMatch} from './Fuzzy.js';
+import type {WikilinkMatch} from './WikilinkAutocomplete.js';
 
 export interface NotesPanelOptions {
     onNotesChanged: () => void;
@@ -248,6 +250,27 @@ export class NotesPanel {
         this.resolver = buildWikilinkResolver(notes);
         this.snippetCache.clear();
         this.renderNoteList();
+    }
+
+    private searchTitles(query: string): readonly WikilinkMatch[] {
+        if (query.length === 0) {
+            return this.notes
+                .filter((n) => n.title.length > 0)
+                .slice(0, 8)
+                .map((n) => ({noteId: n.id, title: n.title}));
+        }
+
+        const scored: Array<{noteId: string; title: string; score: number}> = [];
+        for (const n of this.notes) {
+            if (n.title.length === 0) continue;
+            const r = fuzzyMatch(query, n.title);
+            if (r.matched) {
+                scored.push({noteId: n.id, title: n.title, score: r.score});
+            }
+        }
+
+        scored.sort((a, b) => b.score - a.score);
+        return scored.slice(0, 8);
     }
 
     public destroy(): void {
@@ -1080,7 +1103,8 @@ export class NotesPanel {
             resolveWikilink: this.resolver,
             onWikilinkClick: (noteId) => void this.openNoteFromWikilink(noteId),
             onUnresolvedClick: (title) => void this.createFromWikilink(title),
-            fetchSnippet: this.fetchSnippet
+            fetchSnippet: this.fetchSnippet,
+            searchTitles: (query) => this.searchTitles(query)
         });
 
         this.viewer.appendChild(this.currentEditor.element);

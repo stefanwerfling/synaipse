@@ -4,6 +4,7 @@ import {clear, el} from './Dom.js';
 import {EditorToolbar} from './EditorToolbar.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
+import {WikilinkAutocomplete, type WikilinkMatch} from './WikilinkAutocomplete.js';
 
 const STORAGE_SHOW_PREVIEW = 'synaipse.editor.showPreview';
 
@@ -14,6 +15,11 @@ export interface EditorCallbacks {
     onWikilinkClick?: (noteId: string) => void;
     onUnresolvedClick?: (title: string) => void;
     fetchSnippet?: (noteId: string) => Promise<NoteSnippet>;
+    /**
+     * Fuzzy-search across note titles for the `[[` autocomplete popup.
+     * If omitted, autocomplete is silently disabled.
+     */
+    searchTitles?: (query: string) => readonly WikilinkMatch[];
 }
 
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -55,6 +61,7 @@ export class Editor {
     private tabWriteBtn!: HTMLButtonElement;
     private tabPreviewBtn!: HTMLButtonElement;
     private toolbar!: EditorToolbar;
+    private autocomplete: WikilinkAutocomplete | null = null;
     private preview: MarkdownPreview;
     private previewUnsubscribe: () => void;
     private mqMobile: MediaQueryList;
@@ -113,6 +120,7 @@ export class Editor {
         this.mqMobile.removeEventListener('change', this.onMqChange);
         this.preview.destroy();
         this.toolbar.destroy();
+        this.autocomplete?.destroy();
     }
 
     private initialTitle(): string {
@@ -206,6 +214,19 @@ export class Editor {
         });
 
         this.editorPane = el('div', {class: 'editor-pane'}, this.toolbar.element, this.textarea);
+
+        if (this.cb.searchTitles !== undefined) {
+            const search = this.cb.searchTitles;
+            this.autocomplete = new WikilinkAutocomplete({
+                textarea: this.textarea,
+                host: this.editorPane,
+                searchTitles: (q) => search(q),
+                onChange: (value) => {
+                    this.content = value;
+                    this.preview.update(value);
+                }
+            });
+        }
 
         this.previewHost = this.preview.element;
         this.splitContainer = el('div',

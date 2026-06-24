@@ -3413,6 +3413,55 @@ body {
 .editor.tab-mode .preview-toggle { display: none; }
 .editor-split.tab-mode { grid-template-columns: 1fr; }
 
+/* Wikilink autocomplete popup — appears at the bottom of the editor pane
+   while the user is typing inside an unclosed `[[…`. Pinned to the
+   pane's bottom so we don't need to compute caret pixel positions. */
+.editor-pane { position: relative; }
+
+.editor-autocomplete {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: var(--space-2);
+    z-index: 50;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: var(--space-1);
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.editor-autocomplete-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-2);
+    color: var(--text-1);
+    cursor: pointer;
+    transition: background var(--t-fast), color var(--t-fast);
+}
+
+.editor-autocomplete-item:hover,
+.editor-autocomplete-item.active {
+    background: var(--accent-soft);
+    color: var(--text-0);
+}
+
+.editor-autocomplete-title { font-weight: 500; }
+
+.editor-autocomplete-id {
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
 .editor-body {
     min-height: 320px;
     padding: var(--space-4);
