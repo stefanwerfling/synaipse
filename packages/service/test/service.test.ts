@@ -1143,6 +1143,64 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         }
     });
 
+    it('chatPreview returns same counts as chat start event without calling the LLM', async () => {
+        await writeNote(vaultDir, 'public.md', '---\ntitle: Public\n---\ncluster public body');
+        await writeNote(vaultDir, 'leaky.md', '---\ntitle: Leaky\n---\ncluster with alice@example.com and sk-proj-abc123XYZ456defg7890hij');
+        await writeNote(vaultDir, 'Private/a.md', '---\ntitle: A\n---\ncluster secret one');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const preview = await service.chatPreview({question: 'cluster'});
+
+        expect(preview.providerIsLocal).toBe(false);
+        expect(preview.filteredPrivate).toBe(1);
+        expect(preview.redactions.map((r) => r.kind)).toEqual(
+            expect.arrayContaining(['email', 'openai_key'])
+        );
+        expect(preview.sources.map((s) => s.noteId)).not.toContain('Private/a.md');
+        // No LLM call should have happened — preview is a dry run.
+        expect(fakeFetch).not.toHaveBeenCalled();
+    });
+
+    it('chatPreview against a local provider yields zero counts and no redaction', async () => {
+        await writeNote(vaultDir, 'leaky.md', '---\ntitle: Leaky\n---\ncluster with alice@example.com');
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        const preview = await service.chatPreview({question: 'cluster'});
+
+        expect(preview.providerIsLocal).toBe(true);
+        expect(preview.filteredPrivate).toBe(0);
+        expect(preview.redactions).toEqual([]);
+        // Local provider passes content through — snippet should contain the
+        // raw email, not a redaction marker.
+        const leaky = preview.sources.find((s) => s.noteId === 'leaky.md');
+        expect(leaky?.snippet ?? '').toContain('alice@example.com');
+    });
+
+    it('chatPreview returns providerIsLocal=null when no chat provider is configured', async () => {
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const preview = await service.chatPreview({question: 'cluster'});
+
+        expect(preview.providerIsLocal).toBeNull();
+        expect(preview.filteredPrivate).toBe(0);
+        expect(preview.redactions).toEqual([]);
+        expect(preview.sources).toEqual([]);
+    });
+
     it('local provider yields no filteredPrivate / redactions stats', async () => {
         await writeNote(vaultDir, 'Private/a.md', '---\ntitle: A\n---\ncluster secret with alice@example.com');
 

@@ -2,7 +2,7 @@ import type {Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Sea
 import {ProjectScopeError} from '@synaipse/core';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
-import {runChat, runSummarize, type ChatEvent, type ChatOptions, type SummarizeEvent} from './Chat.js';
+import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource, type SummarizeEvent} from './Chat.js';
 import {type WriteAssetResult} from './Assets.js';
 import {FilesystemAssetStore, type AssetStore} from './AssetStore.js';
 import {buildActivityReport, type ActivityReport} from './Activity.js';
@@ -798,6 +798,94 @@ export class SynaipseService {
      */
     public noteFlags(note: Note): {private: boolean} {
         return {private: isNotePrivate(note)};
+    }
+
+    /**
+     * Dry-run of `chat()` that stops after source assembly — no LLM call,
+     * no token cost. Returns the exact stats the UI's preview modal needs
+     * to ask the user "send N notes with M redactions, OK?" before the
+     * actual external call. Mirrors the search/filter/redact/snippet
+     * hydration logic of chat() (see comment in chat() for the slice-
+     * before-redact ordering and why it matters for honest counts).
+     */
+    public async chatPreview(options: ChatOptions): Promise<{
+        providerIsLocal: boolean | null;
+        filteredPrivate: number;
+        redactions: RedactionHit[];
+        sources: ChatSource[];
+    }> {
+        const provider = this.chatProvider;
+
+        if (provider === null) {
+            return {providerIsLocal: null, filteredPrivate: 0, redactions: [], sources: []};
+        }
+
+        const externalProvider = !provider.isLocal();
+        const limit = options.limit ?? 12;
+        const prefix = options.pathPrefix;
+        const scoped = prefix !== undefined && prefix.length > 0;
+        const overFetch = (scoped || externalProvider) ? Math.max(limit * 6, 60) : limit;
+
+        let filteredPrivate = 0;
+        const redactCounts = new Map<string, number>();
+        const tallyRedactions = (hits: readonly RedactionHit[]): void => {
+            for (const h of hits) {
+                redactCounts.set(h.kind, (redactCounts.get(h.kind) ?? 0) + h.count);
+            }
+        };
+
+        const rawHits = await this.search(options.question, 'hybrid', overFetch);
+
+        const dsgvoFiltered = externalProvider
+            ? rawHits.filter((h) => {
+                const note = this.notes.tryGet(h.noteId);
+                if (note !== undefined && isNotePrivate(note)) {
+                    filteredPrivate++;
+                    return false;
+                }
+                return true;
+            })
+            : rawHits;
+
+        const sliced = scoped
+            ? dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix as string)).slice(0, limit)
+            : dsgvoFiltered.slice(0, limit);
+
+        const sources: ChatSource[] = sliced.map((hit, i) => {
+            let snippet = hit.snippet;
+
+            if (snippet === undefined) {
+                const note = this.notes.tryGet(hit.noteId);
+                if (note !== undefined && !(externalProvider && isNotePrivate(note))) {
+                    snippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 500).trim();
+                }
+            }
+
+            if (externalProvider && snippet !== undefined) {
+                const r = redactSensitive(snippet);
+                tallyRedactions(r.hits);
+                snippet = r.redacted;
+            }
+
+            return {
+                index: i + 1,
+                noteId: hit.noteId,
+                title: hit.title,
+                score: hit.score,
+                ...(snippet !== undefined ? {snippet} : {})
+            };
+        });
+
+        const redactions: RedactionHit[] = Array.from(redactCounts.entries())
+            .map(([kind, count]) => ({kind, count}))
+            .sort((a, b) => a.kind.localeCompare(b.kind));
+
+        return {
+            providerIsLocal: provider.isLocal(),
+            filteredPrivate,
+            redactions,
+            sources
+        };
     }
 
     /**

@@ -1479,6 +1479,125 @@ body {
     border-color: var(--accent);
 }
 
+/* DSGVO preview modal — last gate before vault content reaches an external LLM. */
+.preview-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 130;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.preview-dialog {
+    background: var(--bg-1);
+    border: 1px solid rgba(240, 170, 90, 0.55);
+    border-radius: var(--r-3);
+    width: min(560px, 100%);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+
+.preview-head {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.preview-head h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-0);
+}
+
+.preview-close {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+}
+
+.preview-close:hover {
+    color: var(--red);
+}
+
+.preview-lead {
+    margin: 0;
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    color: var(--text-1);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.preview-lead code {
+    background: var(--bg-2);
+    padding: 1px 6px;
+    border-radius: var(--r-1);
+    font-size: 12px;
+}
+
+.preview-stats {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.preview-stats li {
+    color: var(--text-1);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.preview-stat-icon {
+    margin-right: 4px;
+}
+
+.preview-stat-detail {
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.preview-stat-empty {
+    color: var(--text-3);
+    font-style: italic;
+}
+
+.preview-skip {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-soft);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.preview-skip-input {
+    margin-top: 2px;
+}
+
+.preview-footer {
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
 .chat-card-privacy-pill {
     display: inline-flex;
     align-items: center;

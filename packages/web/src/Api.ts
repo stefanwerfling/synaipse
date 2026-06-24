@@ -75,6 +75,18 @@ export const api = {
     }> => {
         return json(await fetch('/api/info'));
     },
+    chatPreview: async (payload: {question: string; pathPrefix?: string}): Promise<{
+        providerIsLocal: boolean | null;
+        filteredPrivate: number;
+        redactions: Array<{kind: string; count: number}>;
+        sources: Array<{index: number; noteId: string; title: string; score: number; snippet?: string}>;
+    }> => {
+        return json(await fetch('/api/chat/preview', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }));
+    },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {
         const url = new URL(`/api/notes/${encodeURIComponent(id)}/history`, window.location.origin);
         url.searchParams.set('limit', String(limit));

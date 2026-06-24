@@ -802,6 +802,25 @@ export const routes = (
         return;
     }
 
+    if (path === '/api/chat/preview') {
+        if (method !== 'POST') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const body = await readJson<{question?: unknown; pathPrefix?: unknown}>(req);
+        const question = asString(body.question, 'question');
+        const pathPrefix = typeof body.pathPrefix === 'string' ? body.pathPrefix : undefined;
+
+        const preview = await service.chatPreview({
+            question,
+            ...(pathPrefix !== undefined ? {pathPrefix} : {})
+        });
+
+        json(res, 200, preview);
+        return;
+    }
+
     if (path === '/api/chat') {
         if (method !== 'POST') {
             methodNotAllowed(res);

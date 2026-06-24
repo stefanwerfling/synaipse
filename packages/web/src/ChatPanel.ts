@@ -2,6 +2,7 @@ import {api, type ChatSession, type ChatTurnDto, type ChatSourceRef} from './Api
 import {ChatSidebar} from './ChatSidebar.js';
 import {clear, el} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
+import {PreviewDialog, previewSkipFlag} from './PreviewDialog.js';
 
 export type ChatSource = ChatSourceRef;
 
@@ -67,6 +68,8 @@ export class ChatPanel {
     private model = '—';
     private enabled = false;
     private researchEnabled = false;
+    private chatProvider: string | null = null;
+    private chatProviderIsLocal: boolean | null = null;
     private stickyContext: {label: string; text: string} | null = null;
 
     /** Server-side chat note id, or null if this session hasn't been saved yet. */
@@ -177,6 +180,8 @@ export class ChatPanel {
         this.enabled = enabled;
         this.researchEnabled = research === true;
         this.model = model ?? '—';
+        this.chatProvider = provider ?? null;
+        this.chatProviderIsLocal = providerIsLocal ?? null;
 
         this.renderProviderBadge(provider ?? null, providerIsLocal ?? null);
 
@@ -634,6 +639,45 @@ export class ChatPanel {
     }
 
     /**
+     * Dry-run the chat against /api/chat/preview to count private filters
+     * and redaction hits, then ask the user before the actual external
+     * call. Returns true when the call may proceed (no privacy hits, or
+     * user confirmed), false when the user cancelled. On API/network
+     * failure we err on the side of *blocking* — silently letting the
+     * call through would defeat the gate.
+     */
+    private async runPreviewGate(question: string): Promise<boolean> {
+        let preview;
+        try {
+            preview = await api.chatPreview({question});
+        } catch (cause) {
+            console.error('DSGVO preview failed', cause);
+            window.alert('DSGVO-Vorschau konnte nicht geladen werden — Senden wird abgebrochen. Siehe Browser-Konsole für Details.');
+            return false;
+        }
+
+        const redactTotal = preview.redactions.reduce((sum, r) => sum + r.count, 0);
+
+        // Nothing privacy-relevant to confirm — skip the modal, send straight through.
+        if (preview.filteredPrivate === 0 && redactTotal === 0) {
+            return true;
+        }
+
+        const dialog = new PreviewDialog();
+        const result = await dialog.open({
+            provider: this.chatProvider ?? 'external',
+            filteredPrivate: preview.filteredPrivate,
+            redactions: preview.redactions
+        });
+
+        if (result.confirmed && result.rememberSkip) {
+            previewSkipFlag.set();
+        }
+
+        return result.confirmed;
+    }
+
+    /**
      * Small read-only pill summarizing what DSGVO Layer 2/3 did to this
      * answer's prompt: how many private notes were dropped, how many
      * PII/secret patterns were scrubbed. The tooltip lists the per-kind
@@ -708,6 +752,20 @@ export class ChatPanel {
         const question = sticky === null
             ? rawQuestion
             : `Bezug auf folgenden Auszug aus **${sticky.label}**:\n\n> ${sticky.text.replace(/\n/g, '\n> ')}\n\n---\n\n${rawQuestion}`;
+
+        // DSGVO preview gate (only for vault-grounded chat; research consumes
+        // web results, not vault notes, so the privacy story is different).
+        if (opts.research !== true
+            && this.chatProviderIsLocal === false
+            && !previewSkipFlag.isSet()
+        ) {
+            const allowed = await this.runPreviewGate(question);
+            if (!allowed) {
+                // User declined — restore the input so they can edit/retry.
+                this.input.value = rawQuestion;
+                return;
+            }
+        }
 
         if (sticky !== null) this.clearStickyContext();
 
