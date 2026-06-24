@@ -33,6 +33,7 @@ const buildBenchConfig = (vaultDir: string, cacheFile: string) => ({
     vaultPath: vaultDir,
     indexCachePath: cacheFile,
     chatStoreDir: path.join(vaultDir, '..', 'chats'),
+    auditLogPath: path.join(vaultDir, '.audit.jsonl'),
     embeddings: {provider: 'none' as const},
     qdrant: {url: 'http://localhost:6333', collection: 'bench'},
     server: {name: 'synaipse-bench', version: '0.0.0'},

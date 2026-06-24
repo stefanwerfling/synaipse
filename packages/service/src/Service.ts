@@ -11,6 +11,7 @@ import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResul
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
+import {AuditLog, type AuditEntry} from './AuditLog.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -277,6 +278,7 @@ export class SynaipseService {
     private readonly watcher: VaultWatcher;
     private readonly skipWatcher: boolean;
     private readonly chats: ChatAdapter;
+    private readonly auditLog: AuditLog;
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
@@ -306,6 +308,7 @@ export class SynaipseService {
         this.history = overrides.history ?? new VaultHistory(this.vault);
         this.assetStore = overrides.assetStore ?? new FilesystemAssetStore(this.vault.root);
         this.chats = overrides.chats ?? new FilesystemChatAdapter(new ChatRepo(config.chatStoreDir));
+        this.auditLog = new AuditLog(config.auditLogPath);
         this.watcher = new VaultWatcher(config.vaultPath);
         this.skipWatcher = overrides.skipWatcher ?? false;
         this.project = config.project?.name ?? null;
@@ -926,6 +929,49 @@ export class SynaipseService {
         return redactSensitive(stripped).redacted;
     }
 
+    /**
+     * DSGVO Layer 4: append an audit log entry after an external LLM
+     * call has completed. Silently skipped for local providers and when
+     * no provider is configured. Errors writing the log are swallowed
+     * (and console-warned) so an I/O hiccup on the audit file doesn't
+     * tear down the user's chat / summarize / compile flow — the LLM
+     * call already succeeded, the log is best-effort observability.
+     */
+    private async recordExternalCall(params: Omit<AuditEntry, 'ts' | 'provider' | 'providerKind'>): Promise<void> {
+        const provider = this.chatProvider;
+        if (provider === null || provider.isLocal()) return;
+
+        const entry: AuditEntry = {
+            ts: Date.now(),
+            provider: provider.kind,
+            providerKind: 'external',
+            ...params
+        };
+
+        try {
+            await this.auditLog.append(entry);
+        } catch (cause) {
+            console.warn('[synaipse] audit log append failed:', cause);
+        }
+    }
+
+    /**
+     * Read audit entries for the `/api/audit` UI. Filter is forwarded
+     * 1:1 to the storage layer.
+     */
+    public async getAuditEntries(opts: {
+        limit?: number;
+        afterTs?: number;
+        provider?: string;
+        kind?: AuditEntry['kind'];
+    } = {}): Promise<AuditEntry[]> {
+        return this.auditLog.read(opts);
+    }
+
+    public async getAuditCount(): Promise<number> {
+        return this.auditLog.count();
+    }
+
     public researchEnabled(): boolean {
         return this.researchProvider !== null && this.chatProvider !== null;
     }
@@ -945,10 +991,23 @@ export class SynaipseService {
             return;
         }
 
+        const researchStart = Date.now();
+        // Research uses web sources, not vault notes — no note-IDs to log,
+        // and there's no Layer-3 redaction in this path (the LLM sees the
+        // raw web content). The audit entry captures the question + duration
+        // so the user can still review *what was asked* of an external LLM.
         yield* runResearch(
             {llm: this.chatProvider, search: this.researchProvider},
             {question, ...(opts.abort !== undefined ? {abort: opts.abort} : {})}
         );
+
+        await this.recordExternalCall({
+            kind: 'research',
+            noteIds: [],
+            redactions: [],
+            question: question.slice(0, 200),
+            durationMs: Date.now() - researchStart
+        });
     }
 
     /** Exposed so other features (crawler-compile, deep-research) can borrow the configured LLM. */
@@ -977,6 +1036,14 @@ export class SynaipseService {
         }
 
         let finalSummary = '';
+        const summarizeStart = Date.now();
+        // Compute Layer-3 redaction stats on the same content the LLM sees
+        // so the audit log can report `N emails redacted`. Strip first
+        // because the LLM sees stripped content (Layer 3 + container-strip).
+        const preparedSummarize = stripContainers(note.content);
+        const summarizeRedactions = provider.isLocal()
+            ? []
+            : redactSensitive(preparedSummarize).hits;
 
         for await (const event of runSummarize(provider, this.prepareForChat(note.content), opts.abort)) {
             yield event;
@@ -985,6 +1052,13 @@ export class SynaipseService {
                 finalSummary = event.summary;
             }
         }
+
+        await this.recordExternalCall({
+            kind: 'summarize',
+            noteIds: [id],
+            redactions: summarizeRedactions,
+            durationMs: Date.now() - summarizeStart
+        });
 
         if (finalSummary.length > 0 && opts.saveToFrontmatter === true) {
             try {
@@ -1006,6 +1080,8 @@ export class SynaipseService {
         }
 
         const externalProvider = !provider.isLocal();
+        const chatStart = Date.now();
+        let chatSourceIds: string[] = [];
 
         let filteredPrivate = 0;
         const redactCounts = new Map<string, number>();
@@ -1083,6 +1159,8 @@ export class SynaipseService {
                     .map(([kind, count]) => ({kind, count}))
                     .sort((a, b) => a.kind.localeCompare(b.kind));
 
+                chatSourceIds = event.sources.map((s) => s.noteId);
+
                 yield {
                     ...event,
                     ...(filteredPrivate > 0 ? {filteredPrivate} : {}),
@@ -1092,6 +1170,19 @@ export class SynaipseService {
                 yield event;
             }
         }
+
+        const finalRedactions = Array.from(redactCounts.entries())
+            .map(([kind, count]) => ({kind, count}))
+            .sort((a, b) => a.kind.localeCompare(b.kind));
+
+        await this.recordExternalCall({
+            kind: 'chat',
+            noteIds: chatSourceIds,
+            redactions: finalRedactions,
+            ...(filteredPrivate > 0 ? {filteredPrivate} : {}),
+            question: options.question.slice(0, 200),
+            durationMs: Date.now() - chatStart
+        });
     }
 
     public async historyEnabled(): Promise<boolean> {
@@ -1302,11 +1393,23 @@ export class SynaipseService {
         }
 
         let final: CompileResult | null = null;
+        const compileStart = Date.now();
+        const preparedCompile = stripContainers(note.content);
+        const compileRedactions = provider.isLocal()
+            ? []
+            : redactSensitive(preparedCompile).hits;
 
         for await (const event of runCompile(provider, this.prepareForChat(note.content), opts.abort)) {
             yield event;
             if (event.kind === 'done') final = event.result;
         }
+
+        await this.recordExternalCall({
+            kind: 'compile',
+            noteIds: [id],
+            redactions: compileRedactions,
+            durationMs: Date.now() - compileStart
+        });
 
         if (final === null) return;
 
@@ -1395,6 +1498,7 @@ export class SynaipseService {
 
         if (useLlm) {
             const external = this.chatProvider !== null && !this.chatProvider.isLocal();
+            const relinkStart = Date.now();
             // Layer 2: drop private candidates from the LLM input pool.
             // Layer 3: redact snippets in the prompt; titles + scores stay
             // pristine so the LLM can echo titles back and we can match
@@ -1405,11 +1509,29 @@ export class SynaipseService {
                     return cand === undefined || !isNotePrivate(cand);
                 })
                 : candidates;
+            const filteredOut = candidates.length - filtered.length;
             const llmCandidates = filtered.map((c) => c.snippet === undefined
                 ? c
                 : {...c, snippet: this.prepareForChat(c.snippet)});
             const rawSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
             const noteSnippet = this.prepareForChat(rawSnippet);
+
+            // Tally Layer-3 redactions on the actual prompt inputs so the
+            // audit log can report how much PII was stripped pre-send.
+            const relinkRedactionCounts = new Map<string, number>();
+            if (external) {
+                const tally = (text: string): void => {
+                    for (const h of redactSensitive(stripContainers(text)).hits) {
+                        relinkRedactionCounts.set(h.kind, (relinkRedactionCounts.get(h.kind) ?? 0) + h.count);
+                    }
+                };
+                tally(rawSnippet);
+                for (const c of filtered) if (c.snippet !== undefined) tally(c.snippet);
+            }
+            const relinkRedactions = Array.from(relinkRedactionCounts.entries())
+                .map(([kind, count]) => ({kind, count}))
+                .sort((a, b) => a.kind.localeCompare(b.kind));
+
             let finalAccepted: AcceptedLink[] | null = null;
 
             for await (const event of runRelink(
@@ -1429,6 +1551,14 @@ export class SynaipseService {
             }
 
             accepted = finalAccepted ?? [];
+
+            await this.recordExternalCall({
+                kind: 'relink',
+                noteIds: [id, ...filtered.slice(0, 10).map((c) => c.noteId)],
+                redactions: relinkRedactions,
+                ...(filteredOut > 0 ? {filteredPrivate: filteredOut} : {}),
+                durationMs: Date.now() - relinkStart
+            });
         } else {
             // Deterministic fallback: top-5 by hybrid score. Use the search
             // snippet (first ~140 chars) as the reason so the reader sees

@@ -9,6 +9,7 @@ const buildConfig = (vaultPath: string, indexCachePath: string, project = 'proj'
     vaultPath,
     indexCachePath,
     chatStoreDir: path.join(vaultPath, '..', 'chats'),
+    auditLogPath: path.join(vaultPath, '.audit.jsonl'),
     embeddings: {provider: 'none' as const},
     qdrant: {url: 'http://localhost:6333', collection: 'test'},
     server: {name: 'synaipse-test', version: '0.0.0'},

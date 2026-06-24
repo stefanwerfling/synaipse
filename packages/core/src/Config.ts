@@ -224,6 +224,7 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
         vaultPath,
         indexCachePath: path.resolve(env.SYNAIPSE_INDEX_CACHE ?? path.join(vaultPath, '.synaipse-index.json')),
         chatStoreDir: path.resolve(env.SYNAIPSE_CHAT_STORE_DIR ?? path.join(vaultPath, '.synaipse-chats')),
+        auditLogPath: path.resolve(env.SYNAIPSE_AUDIT_LOG ?? path.join(vaultPath, '.synaipse-audit.jsonl')),
         embeddings: {provider},
         qdrant: {
             url: env.QDRANT_URL ?? 'http://localhost:6333',

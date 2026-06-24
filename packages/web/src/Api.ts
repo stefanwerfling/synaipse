@@ -30,6 +30,21 @@ export interface NoteSummary {
     isPrivate?: true;
 }
 
+export type AuditKind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research';
+
+export interface AuditEntry {
+    ts: number;
+    provider: string;
+    providerKind: 'local' | 'external';
+    kind: AuditKind;
+    noteIds: string[];
+    redactions: Array<{kind: string; count: number}>;
+    filteredPrivate?: number;
+    question?: string;
+    tokens?: {input?: number; output?: number; total?: number};
+    durationMs?: number;
+}
+
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
         return json(await fetch('/api/notes'));
@@ -86,6 +101,17 @@ export const api = {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         }));
+    },
+    audit: async (opts: {limit?: number; afterTs?: number; provider?: string; kind?: AuditKind} = {}): Promise<{
+        entries: AuditEntry[];
+        total: number;
+    }> => {
+        const url = new URL('/api/audit', window.location.origin);
+        if (opts.limit !== undefined) url.searchParams.set('limit', String(opts.limit));
+        if (opts.afterTs !== undefined) url.searchParams.set('afterTs', String(opts.afterTs));
+        if (opts.provider !== undefined) url.searchParams.set('provider', opts.provider);
+        if (opts.kind !== undefined) url.searchParams.set('kind', opts.kind);
+        return json(await fetch(url));
     },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {
         const url = new URL(`/api/notes/${encodeURIComponent(id)}/history`, window.location.origin);

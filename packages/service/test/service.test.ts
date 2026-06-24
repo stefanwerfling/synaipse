@@ -10,6 +10,7 @@ const buildConfig = (vaultPath: string, indexCachePath: string) => ({
     vaultPath,
     indexCachePath,
     chatStoreDir: path.join(vaultPath, '..', 'chats'),
+    auditLogPath: path.join(vaultPath, '.audit.jsonl'),
     embeddings: {provider: 'none' as const},
     qdrant: {url: 'http://localhost:6333', collection: 'test'},
     server: {name: 'synaipse-test', version: '0.0.0'},
@@ -1150,6 +1151,75 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(systemMsg).toContain('VISUAL INFOGRAPHICS');
         expect(systemMsg).toContain('::: infographic');
         expect(systemMsg).toContain('list-row-horizontal-icon-arrow');
+    });
+
+    it('summarize against external provider writes an audit log entry (DSGVO Layer 4)', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Note\n---\nKontakt: alice@example.com\n\nBody');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        for await (const _e of service.summarizeNote('note.md')) { /* drain */ }
+
+        const entries = await service.getAuditEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.kind).toBe('summarize');
+        expect(entries[0]?.providerKind).toBe('external');
+        expect(entries[0]?.noteIds).toEqual(['note.md']);
+        expect(entries[0]?.redactions.find((r) => r.kind === 'email')?.count).toBe(1);
+        expect(entries[0]?.durationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('local provider does NOT write an audit log entry (only external calls are audited)', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Note\n---\nBody');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        for await (const _e of service.summarizeNote('note.md')) { /* drain */ }
+
+        expect(await service.getAuditEntries()).toEqual([]);
+        expect(await service.getAuditCount()).toBe(0);
+    });
+
+    it('chat against external provider writes one audit log entry capturing sources + question', async () => {
+        await writeNote(vaultDir, 'doc.md', '---\ntitle: Doc\n---\nCluster information here');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'ok'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        await collectChat(service.chat({question: 'cluster?'}));
+
+        const entries = await service.getAuditEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.kind).toBe('chat');
+        expect(entries[0]?.question).toBe('cluster?');
     });
 
     it('summarize does NOT embed the infographic guide — it only writes a 2-3 sentence plain text', async () => {

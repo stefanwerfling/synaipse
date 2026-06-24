@@ -4421,3 +4421,194 @@ body {
     font-size: 12px;
     border-color: var(--red);
 }
+
+/* ============================================================
+   DSGVO Layer 4 — Audit Panel (persistent log of external LLM calls)
+   ============================================================ */
+
+.audit-panel {
+    padding: var(--space-4);
+    overflow-y: auto;
+    height: 100%;
+}
+
+.audit-head h2 {
+    margin: 0 0 var(--space-2);
+    color: var(--text-0);
+}
+
+.audit-subtitle {
+    margin: 0 0 var(--space-4);
+    color: var(--text-2);
+    font-size: 13px;
+}
+
+.audit-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.audit-filter {
+    height: 30px;
+    padding: 0 var(--space-2);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 12px;
+}
+
+.audit-stats {
+    margin-left: auto;
+    color: var(--text-3);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.audit-list { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.audit-empty {
+    margin-top: var(--space-4);
+    padding: var(--space-4);
+    background: var(--bg-1);
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-3);
+    color: var(--text-2);
+    font-size: 13px;
+    text-align: center;
+}
+
+.audit-error {
+    padding: var(--space-3) var(--space-4);
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid var(--red);
+    border-radius: var(--r-3);
+    color: var(--red);
+}
+
+.audit-entry {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    overflow: hidden;
+}
+
+.audit-entry-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    transition: background var(--t-fast);
+}
+
+.audit-entry-head:hover { background: var(--bg-2); }
+
+.audit-entry-ts {
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 145px;
+}
+
+.audit-entry-kind {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 var(--space-2);
+    border-radius: var(--r-pill);
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 80px;
+    justify-content: center;
+}
+
+.audit-entry-kind-chat       { background: var(--accent-soft); color: var(--accent); }
+.audit-entry-kind-summarize  { background: rgba(167, 139, 250, 0.14); color: var(--purple); }
+.audit-entry-kind-compile    { background: rgba(244, 114, 182, 0.14); color: var(--pink); }
+.audit-entry-kind-relink     { background: rgba(52, 211, 153, 0.14); color: var(--green); }
+.audit-entry-kind-research   { background: var(--gold-soft); color: var(--gold); }
+
+.audit-entry-provider {
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    flex: 0 0 auto;
+}
+
+.audit-entry-counts {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
+.audit-pill {
+    padding: 2px var(--space-2);
+    background: var(--bg-3);
+    border-radius: var(--r-pill);
+    color: var(--text-2);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.audit-pill-redact  { background: rgba(255, 209, 102, 0.14); color: var(--gold); }
+.audit-pill-blocked { background: rgba(248, 113, 113, 0.14); color: var(--red); }
+
+.audit-entry-duration {
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+    text-align: right;
+}
+
+.audit-entry-details {
+    padding: var(--space-3) var(--space-3) var(--space-3) calc(145px + var(--space-3) * 2);
+    background: var(--bg-2);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: 12px;
+}
+
+.audit-detail-row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: baseline;
+}
+
+.audit-detail-label {
+    color: var(--text-3);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    min-width: 100px;
+}
+
+.audit-detail-value {
+    color: var(--text-1);
+    flex: 1 1 auto;
+    word-break: break-word;
+}
+
+.audit-detail-value code {
+    background: var(--bg-3);
+    padding: 1px 6px;
+    border-radius: var(--r-2);
+    font-size: 11px;
+}
+
+.audit-detail-question {
+    font-style: italic;
+    color: var(--text-2);
+}

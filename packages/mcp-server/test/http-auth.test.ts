@@ -11,6 +11,7 @@ const buildConfig = (vaultPath: string, indexCachePath: string, token?: string):
     vaultPath,
     indexCachePath,
     chatStoreDir: path.join(vaultPath, '..', 'chats'),
+    auditLogPath: path.join(vaultPath, '.audit.jsonl'),
     embeddings: {provider: 'none'},
     qdrant: {url: 'http://localhost:6333', collection: 'test'},
     server: {

@@ -802,6 +802,49 @@ export const routes = (
         return;
     }
 
+    if (path === '/api/audit') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        // DSGVO Layer 4: read the persistent log of external LLM calls.
+        // Query params (all optional): ?limit=N, ?afterTs=<ms-epoch>,
+        // ?provider=<id>, ?kind=chat|summarize|compile|relink|research.
+        // Newest entries come first so the UI can render them top-to-bottom
+        // without re-sorting client-side.
+        const params = new URL(req.url ?? '/', 'http://x').searchParams;
+        const limitRaw = params.get('limit');
+        const afterTsRaw = params.get('afterTs');
+        const provider = params.get('provider') ?? undefined;
+        const kindRaw = params.get('kind');
+        const kind = kindRaw === 'chat' || kindRaw === 'summarize'
+            || kindRaw === 'compile' || kindRaw === 'relink' || kindRaw === 'research'
+            ? kindRaw
+            : undefined;
+
+        type Kind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research';
+        const opts: {limit?: number; afterTs?: number; provider?: string; kind?: Kind} = {};
+        if (limitRaw !== null) {
+            const n = Number(limitRaw);
+            if (Number.isFinite(n) && n > 0) opts.limit = Math.floor(n);
+        }
+        if (afterTsRaw !== null) {
+            const n = Number(afterTsRaw);
+            if (Number.isFinite(n)) opts.afterTs = n;
+        }
+        if (provider !== undefined) opts.provider = provider;
+        if (kind !== undefined) opts.kind = kind;
+
+        const [entries, total] = await Promise.all([
+            service.getAuditEntries(opts),
+            service.getAuditCount()
+        ]);
+
+        json(res, 200, {entries, total});
+        return;
+    }
+
     if (path === '/api/chat/preview') {
         if (method !== 'POST') {
             methodNotAllowed(res);

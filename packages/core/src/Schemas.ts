@@ -109,6 +109,7 @@ export const ConfigSchema = Vts.object({
     vaultPath: Vts.string(),
     indexCachePath: Vts.string(),
     chatStoreDir: Vts.string(),
+    auditLogPath: Vts.string(),
     embeddings: Vts.object({
         provider: EmbeddingsProviderSchema
     }),
