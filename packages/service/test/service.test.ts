@@ -1011,6 +1011,65 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(fakeFetch).toHaveBeenCalledOnce();
     });
 
+    it('summarize redacts emails/secrets from the LLM payload when external', async () => {
+        await writeNote(vaultDir, 'leaky.md', '---\ntitle: Leaky\n---\nKontakt: alice@example.com — Token sk-proj-abc123XYZ456defg7890hij\n\nMehr Notizen über Cluster.');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        const events: ChatEvent[] = [];
+        for await (const e of service.summarizeNote('leaky.md') as AsyncGenerator<ChatEvent, void, void>) {
+            events.push(e);
+        }
+
+        expect(fakeFetch).toHaveBeenCalledOnce();
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const userMsg = body.messages.find((m: {role: string}) => m.role === 'user')?.content as string;
+
+        expect(userMsg).toContain('[redact:email]');
+        expect(userMsg).toContain('[redact:openai-key]');
+        expect(userMsg).not.toContain('alice@example.com');
+        expect(userMsg).not.toContain('sk-proj-abc123');
+        expect(userMsg).toContain('Cluster');
+    });
+
+    it('summarize leaves content untouched when provider is local', async () => {
+        await writeNote(vaultDir, 'leaky.md', '---\ntitle: Leaky\n---\nKontakt: alice@example.com');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://127.0.0.1:11434', model: 'm'}
+        });
+        await service.start();
+
+        const events: ChatEvent[] = [];
+        for await (const e of service.summarizeNote('leaky.md') as AsyncGenerator<ChatEvent, void, void>) {
+            events.push(e);
+        }
+
+        const [, init] = fakeFetch.mock.calls[0] as [string, RequestInit];
+        const body = JSON.parse(init.body as string);
+        const userMsg = body.messages.find((m: {role: string}) => m.role === 'user')?.content as string;
+
+        expect(userMsg).toContain('alice@example.com');
+        expect(userMsg).not.toContain('[redact:');
+    });
+
     it('chat hides private notes from sources when the chat provider is external', async () => {
         await writeNote(vaultDir, 'public.md', '---\ntitle: Public\n---\ncluster body content');
         await writeNote(vaultDir, 'Private/secrets.md', '---\ntitle: Secret\n---\ncluster sensitive details');

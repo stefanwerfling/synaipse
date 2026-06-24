@@ -9,7 +9,7 @@ import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
-import {isNotePrivate} from './Privacy.js';
+import {isNotePrivate, redactSensitive} from './Privacy.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -805,6 +805,19 @@ export class SynaipseService {
         return !isNotePrivate(note);
     }
 
+    /**
+     * DSGVO Layer 3: when the chat provider is external, scrub PII / secrets
+     * (emails, IBANs, API tokens, phone numbers, …) from content before it
+     * leaves the host. Local providers pass content through unchanged
+     * because nothing is leaving anyway. See Privacy.ts for the detector
+     * catalogue + redaction marker shape.
+     */
+    private redactForChat(content: string): string {
+        const provider = this.chatProvider;
+        if (provider === null || provider.isLocal()) return content;
+        return redactSensitive(content).redacted;
+    }
+
     public researchEnabled(): boolean {
         return this.researchProvider !== null && this.chatProvider !== null;
     }
@@ -857,7 +870,7 @@ export class SynaipseService {
 
         let finalSummary = '';
 
-        for await (const event of runSummarize(provider, note.content, opts.abort)) {
+        for await (const event of runSummarize(provider, this.redactForChat(note.content), opts.abort)) {
             yield event;
 
             if (event.kind === 'done') {
@@ -902,17 +915,24 @@ export class SynaipseService {
                     })
                     : hits;
 
+                // Layer 3: scrub PII/secrets from search-engine-provided
+                // snippets via the same helper that summarize/compile use.
+                // readNote-derived snippets get the same treatment below.
+                const redacted = dsgvoFiltered.map((h) => h.snippet === undefined
+                    ? h
+                    : {...h, snippet: this.redactForChat(h.snippet)});
+
                 if (!scoped) {
-                    return dsgvoFiltered.slice(0, limit);
+                    return redacted.slice(0, limit);
                 }
 
-                return dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
+                return redacted.filter((h) => h.noteId.startsWith(prefix)).slice(0, limit);
             },
             readNote: (id) => {
                 const note = this.notes.tryGet(id);
                 if (note === undefined) return undefined;
                 if (externalProvider && isNotePrivate(note)) return undefined;
-                return note.content;
+                return this.redactForChat(note.content);
             },
             provider
         }, options);
@@ -1127,7 +1147,7 @@ export class SynaipseService {
 
         let final: CompileResult | null = null;
 
-        for await (const event of runCompile(provider, note.content, opts.abort)) {
+        for await (const event of runCompile(provider, this.redactForChat(note.content), opts.abort)) {
             yield event;
             if (event.kind === 'done') final = event.result;
         }
@@ -1218,13 +1238,22 @@ export class SynaipseService {
             && this.chatProviderMayReceive(note);
 
         if (useLlm) {
-            const llmCandidates = this.chatProvider !== null && this.chatProvider.isLocal()
-                ? candidates
-                : candidates.filter((c) => {
+            const external = this.chatProvider !== null && !this.chatProvider.isLocal();
+            // Layer 2: drop private candidates from the LLM input pool.
+            // Layer 3: redact snippets in the prompt; titles + scores stay
+            // pristine so the LLM can echo titles back and we can match
+            // candidates by title afterwards.
+            const filtered = external
+                ? candidates.filter((c) => {
                     const cand = this.notes.tryGet(c.noteId);
                     return cand === undefined || !isNotePrivate(cand);
-                });
-            const noteSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
+                })
+                : candidates;
+            const llmCandidates = filtered.map((c) => c.snippet === undefined
+                ? c
+                : {...c, snippet: this.redactForChat(c.snippet)});
+            const rawSnippet = note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 1200);
+            const noteSnippet = this.redactForChat(rawSnippet);
             let finalAccepted: AcceptedLink[] | null = null;
 
             for await (const event of runRelink(
