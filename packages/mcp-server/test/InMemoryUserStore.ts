@@ -3,6 +3,7 @@ import {
     verifyToken,
     type CreateUserInput,
     type CreateUserResult,
+    type RotateUserResult,
     type UserRecord,
     type UserStore
 } from '@synaipse/core';
@@ -74,6 +75,23 @@ export class InMemoryUserStore implements UserStore {
             }
         }
         return false;
+    }
+
+    public async rotateByLabel(label: string, expiresAt?: number | null): Promise<RotateUserResult | null> {
+        for (const row of this.rows.values()) {
+            if (row.label !== label) continue;
+
+            const {plain, hashHex, saltHex, hint} = generateToken();
+            row.hashHex = hashHex;
+            row.saltHex = saltHex;
+            row.tokenHint = hint;
+            row.lastUsedAt = null;
+            row.revokedAt = null;
+            row.expiresAt = expiresAt ?? null;
+
+            return {user: this.toRecord(row), plainToken: plain};
+        }
+        return null;
     }
 
     public async touchLastUsed(id: number): Promise<void> {

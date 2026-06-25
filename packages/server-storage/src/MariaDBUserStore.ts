@@ -4,6 +4,7 @@ import {
     verifyToken,
     type CreateUserInput,
     type CreateUserResult,
+    type RotateUserResult,
     type UserRecord,
     type UserStore
 } from '@synaipse/core';
@@ -166,6 +167,43 @@ export class MariaDBUserStore implements UserStore {
             );
 
             return result.affectedRows > 0;
+        } finally {
+            await conn.release();
+        }
+    }
+
+    public async rotateByLabel(label: string, expiresAt?: number | null): Promise<RotateUserResult | null> {
+        const {plain, hashHex, saltHex, hint} = generateToken();
+        const expires = expiresAt !== undefined && expiresAt !== null
+            ? new Date(expiresAt)
+            : null;
+
+        const conn = await this.pool.getConnection();
+
+        try {
+            const result = await conn.query(
+                `UPDATE users
+                    SET token_hash = ?, token_salt = ?, token_hint = ?,
+                        last_used_at = NULL, revoked_at = NULL, expires_at = ?
+                  WHERE vault_id = ? AND label = ?`,
+                [hashHex, saltHex, hint, expires, this.config.vaultId, label]
+            );
+
+            if (result.affectedRows === 0) {
+                return null;
+            }
+
+            const rows = await conn.query<UserRow[]>(
+                'SELECT * FROM users WHERE vault_id = ? AND label = ?',
+                [this.config.vaultId, label]
+            );
+
+            const row = rows[0];
+            if (row === undefined) {
+                throw new Error('user update succeeded but row not readable');
+            }
+
+            return {user: rowToRecord(row), plainToken: plain};
         } finally {
             await conn.release();
         }

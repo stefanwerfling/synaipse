@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {
     CreateUserInput,
     CreateUserResult,
+    RotateUserResult,
     UserRecord,
     UserStore
 } from '@synaipse/core';
@@ -85,6 +86,17 @@ export class CachedUserStore implements UserStore {
             this.cache.clear();
         }
         return ok;
+    }
+
+    public async rotateByLabel(label: string, expiresAt?: number | null): Promise<RotateUserResult | null> {
+        const result = await this.inner.rotateByLabel(label, expiresAt);
+        // After rotation, the old token (potentially still in the cache) is
+        // dead. Same semantics as revoke — flush the whole cache so a
+        // stale entry can't silently keep authenticating the prior secret.
+        if (result !== null) {
+            this.cache.clear();
+        }
+        return result;
     }
 
     public async touchLastUsed(id: number): Promise<void> {

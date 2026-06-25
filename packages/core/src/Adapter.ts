@@ -88,6 +88,11 @@ export interface CreateUserResult {
     plainToken: string;
 }
 
+export interface RotateUserResult {
+    user: UserRecord;
+    plainToken: string;
+}
+
 /**
  * Storage port for token-auth users. Implementations:
  * - InMemoryUserStore (test helper, packages/mcp-server/test)
@@ -102,6 +107,13 @@ export interface UserStore {
     findByToken(plainToken: string): Promise<UserRecord | null>;
     listUsers(): Promise<UserRecord[]>;
     revokeByLabel(label: string): Promise<boolean>;
+    /**
+     * Rotate the bearer for an existing label in-place: new hash/salt/hint,
+     * `revoked_at` and `last_used_at` cleared, optional new `expires_at`.
+     * Preserves id + createdAt + scope (read/write/pathPrefixes/tools).
+     * Returns null if no row with the given label exists in this vault.
+     */
+    rotateByLabel(label: string, expiresAt?: number | null): Promise<RotateUserResult | null>;
     touchLastUsed(id: number): Promise<void>;
     close(): Promise<void>;
 }

@@ -55,7 +55,7 @@ const main = async (): Promise<number> => {
     const sub = args[0];
 
     if (sub === undefined) {
-        process.stderr.write('usage: npm run user <create|list|revoke|import-yaml> [flags]\n');
+        process.stderr.write('usage: npm run user <create|list|revoke|rotate|import-yaml> [flags]\n');
         return 2;
     }
 
@@ -149,6 +149,30 @@ const main = async (): Promise<number> => {
                 return 1;
             }
             log(`[user] revoked "${flags.label}"`);
+            return 0;
+        }
+
+        if (sub === 'rotate') {
+            const flags = parseFlags(args.slice(1));
+            if (flags.label === undefined || flags.label.length === 0) {
+                process.stderr.write('user rotate requires --label=<name>\n');
+                return 2;
+            }
+
+            const expiresAt = flags.expiresInDays !== undefined
+                ? Date.now() + flags.expiresInDays * 86_400_000
+                : null;
+
+            const result = await bundle.users.rotateByLabel(flags.label, expiresAt);
+            if (result === null) {
+                log(`[user] no user with label "${flags.label}"`);
+                return 1;
+            }
+
+            log(`[user] rotated "${result.user.label}" (id=${result.user.id}, new hint=${result.user.tokenHint})`);
+            log(`[user] expires: ${result.user.expiresAt !== null ? new Date(result.user.expiresAt).toISOString() : 'never'}`);
+            log('[user] new token (shown ONCE — store it now):');
+            process.stdout.write(`${result.plainToken}\n`);
             return 0;
         }
 
