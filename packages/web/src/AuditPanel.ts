@@ -194,6 +194,9 @@ export class AuditPanel {
             el('span', {class: 'audit-entry-ts', text: formatTs(e.ts)}),
             el('span', {class: `audit-entry-kind audit-entry-kind-${e.kind}`, text: kindLabelText}),
             el('span', {class: 'audit-entry-provider', text: e.provider}),
+            e.tokenLabel !== undefined
+                ? el('span', {class: 'audit-entry-token', text: `🔑 ${e.tokenLabel}`})
+                : el('span', {style: {display: 'none'}}),
             el('span', {class: 'audit-entry-counts'},
                 isEmbed && e.embedCalls !== undefined && e.embedCalls > 1
                     ? el('span', {class: 'audit-pill', text: `${e.embedCalls} Calls`})

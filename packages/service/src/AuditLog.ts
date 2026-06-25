@@ -63,6 +63,8 @@ export interface AuditEntry {
     embedSource?: 'search' | 'related' | 'suggest-links';
     /** `embed` only: number of embedQuery calls aggregated into this entry. For `search`/`related` always 1; for `suggest-links` one per scoped note, batched into a single log line so the audit log doesn't drown in per-iteration entries. */
     embedCalls?: number;
+    /** Operator-defined token label from the MCP per-token ACL, when the call came in via MCP. Absent for Web-UI requests (no token identity) and for the legacy single-token "admin" alias when no label was set. */
+    tokenLabel?: string;
 }
 
 export class AuditLog {

@@ -45,6 +45,7 @@ export interface AuditEntry {
     durationMs?: number;
     embedSource?: 'search' | 'related' | 'suggest-links';
     embedCalls?: number;
+    tokenLabel?: string;
 }
 
 export const api = {

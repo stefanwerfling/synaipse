@@ -5,7 +5,7 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import type {Config} from '@synaipse/core';
-import {NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
+import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
@@ -71,7 +71,14 @@ const buildMcpServer = (
         }
 
         try {
-            const outcome = await tool.handle(args, ctx);
+            // Audit-context: the service-layer audit-log writer reads the
+            // active TokenScope.label via AsyncLocalStorage so embed/chat
+            // entries get tagged with the calling MCP token without
+            // threading the label through every service-method signature.
+            const outcome = await auditContextStorage.run(
+                {tokenLabel: scope.label},
+                () => tool.handle(args, ctx)
+            );
 
             if (outcome.event !== undefined) {
                 publisher.publish({

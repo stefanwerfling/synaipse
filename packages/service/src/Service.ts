@@ -12,6 +12,7 @@ import {createLlmProvider, isLocalUrl, type LlmConfig, type LlmProvider, type Ll
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
 import {AuditLog, type AuditEntry} from './AuditLog.js';
+import {getAuditTokenLabel} from './AuditContext.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -980,11 +981,13 @@ export class SynaipseService {
         const provider = this.chatProvider;
         if (provider === null || provider.isLocal()) return;
 
+        const tokenLabel = getAuditTokenLabel();
         const entry: AuditEntry = {
             ts: Date.now(),
             provider: provider.kind,
             providerKind: 'external',
-            ...params
+            ...params,
+            ...(tokenLabel !== undefined ? {tokenLabel} : {})
         };
 
         try {
@@ -1009,6 +1012,7 @@ export class SynaipseService {
     }): Promise<void> {
         if (!this.embedderIsExternal || this.embedderProviderId === null) return;
 
+        const tokenLabel = getAuditTokenLabel();
         const entry: AuditEntry = {
             ts: Date.now(),
             provider: this.embedderProviderId,
@@ -1019,7 +1023,8 @@ export class SynaipseService {
             embedSource: params.source,
             embedCalls: params.embedCalls ?? 1,
             ...(params.question !== undefined ? {question: params.question} : {}),
-            ...(params.durationMs !== undefined ? {durationMs: params.durationMs} : {})
+            ...(params.durationMs !== undefined ? {durationMs: params.durationMs} : {}),
+            ...(tokenLabel !== undefined ? {tokenLabel} : {})
         };
 
         try {

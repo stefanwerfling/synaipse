@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import type {SearchHit} from '@synaipse/core';
 import {SynaipseService} from '../src/Service.js';
+import {auditContextStorage} from '../src/AuditContext.js';
 import type {ChatEvent} from '../src/Chat.js';
 
 const buildConfig = (vaultPath: string, indexCachePath: string) => ({
@@ -1220,6 +1221,52 @@ describe('SynaipseService DSGVO Layer 2 (per-note sensitivity)', () => {
         expect(entries).toHaveLength(1);
         expect(entries[0]?.kind).toBe('chat');
         expect(entries[0]?.question).toBe('cluster?');
+    });
+
+    it('audit entry carries tokenLabel when the call runs inside an auditContextStorage scope', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Note\n---\nBody');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        await auditContextStorage.run({tokenLabel: 'mcp-editor-bot'}, async () => {
+            for await (const _e of service!.summarizeNote('note.md')) { /* drain */ }
+        });
+
+        const entries = await service.getAuditEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.tokenLabel).toBe('mcp-editor-bot');
+    });
+
+    it('audit entry omits tokenLabel when the call runs outside any auditContextStorage scope', async () => {
+        await writeNote(vaultDir, 'note.md', '---\ntitle: Note\n---\nBody');
+
+        const fakeFetch = vi.fn(async () => ollamaStreamResponse([
+            JSON.stringify({message: {role: 'assistant', content: 'summary'}}) + '\n',
+            JSON.stringify({done: true}) + '\n'
+        ])) as unknown as typeof fetch;
+        vi.stubGlobal('fetch', fakeFetch);
+
+        service = new SynaipseService({
+            ...buildConfig(vaultDir, cacheFile),
+            chat: {provider: 'ollama' as const, url: 'http://fake-ollama', model: 'm'}
+        });
+        await service.start();
+
+        for await (const _e of service.summarizeNote('note.md')) { /* drain */ }
+
+        const entries = await service.getAuditEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.tokenLabel).toBeUndefined();
     });
 
     it('summarize does NOT embed the infographic guide — it only writes a 2-3 sentence plain text', async () => {
