@@ -30,7 +30,7 @@ export interface NoteSummary {
     isPrivate?: true;
 }
 
-export type AuditKind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research';
+export type AuditKind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research' | 'embed';
 
 export interface AuditEntry {
     ts: number;
@@ -43,6 +43,8 @@ export interface AuditEntry {
     question?: string;
     tokens?: {input?: number; output?: number; total?: number};
     durationMs?: number;
+    embedSource?: 'search' | 'related' | 'suggest-links';
+    embedCalls?: number;
 }
 
 export const api = {
@@ -102,7 +104,7 @@ export const api = {
             body: JSON.stringify(payload)
         }));
     },
-    audit: async (opts: {limit?: number; afterTs?: number; provider?: string; kind?: AuditKind} = {}): Promise<{
+    audit: async (opts: {limit?: number; afterTs?: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {}): Promise<{
         entries: AuditEntry[];
         total: number;
     }> => {
@@ -111,6 +113,7 @@ export const api = {
         if (opts.afterTs !== undefined) url.searchParams.set('afterTs', String(opts.afterTs));
         if (opts.provider !== undefined) url.searchParams.set('provider', opts.provider);
         if (opts.kind !== undefined) url.searchParams.set('kind', opts.kind);
+        if (opts.includeEmbed === true) url.searchParams.set('includeEmbed', '1');
         return json(await fetch(url));
     },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {

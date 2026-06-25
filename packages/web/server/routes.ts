@@ -818,13 +818,15 @@ export const routes = (
         const afterTsRaw = params.get('afterTs');
         const provider = params.get('provider') ?? undefined;
         const kindRaw = params.get('kind');
-        const kind = kindRaw === 'chat' || kindRaw === 'summarize'
-            || kindRaw === 'compile' || kindRaw === 'relink' || kindRaw === 'research'
-            ? kindRaw
-            : undefined;
+        const includeEmbed = params.get('includeEmbed') === '1';
 
-        type Kind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research';
-        const opts: {limit?: number; afterTs?: number; provider?: string; kind?: Kind} = {};
+        type Kind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research' | 'embed';
+        const isKind = (v: string | null): v is Kind =>
+            v === 'chat' || v === 'summarize' || v === 'compile'
+            || v === 'relink' || v === 'research' || v === 'embed';
+        const kind = isKind(kindRaw) ? kindRaw : undefined;
+
+        const opts: {limit?: number; afterTs?: number; provider?: string; kind?: Kind; excludeKinds?: readonly Kind[]} = {};
         if (limitRaw !== null) {
             const n = Number(limitRaw);
             if (Number.isFinite(n) && n > 0) opts.limit = Math.floor(n);
@@ -835,10 +837,18 @@ export const routes = (
         }
         if (provider !== undefined) opts.provider = provider;
         if (kind !== undefined) opts.kind = kind;
+        // Embed entries default off — they're high-frequency and a different
+        // privacy class than chat completions (no note bodies, just queries).
+        // The panel sends includeEmbed=1 when the user explicitly opts in.
+        // When an explicit kind=embed filter is set we honour it regardless.
+        if (!includeEmbed && kind !== 'embed') {
+            opts.excludeKinds = ['embed'];
+        }
 
+        const countOpts = opts.excludeKinds !== undefined ? {excludeKinds: opts.excludeKinds} : {};
         const [entries, total] = await Promise.all([
             service.getAuditEntries(opts),
-            service.getAuditCount()
+            service.getAuditCount(countOpts)
         ]);
 
         json(res, 200, {entries, total});

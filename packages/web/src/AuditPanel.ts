@@ -23,7 +23,14 @@ const KIND_LABELS: Record<AuditKind, string> = {
     summarize: 'Summarize',
     compile: 'Compile',
     relink: 'Relink',
-    research: 'Research'
+    research: 'Research',
+    embed: 'Embedder'
+};
+
+const EMBED_SOURCE_LABELS: Record<NonNullable<AuditEntry['embedSource']>, string> = {
+    'search': 'Suche',
+    'related': 'Verwandte Notes',
+    'suggest-links': 'Link-Vorschläge'
 };
 
 const formatTs = (ms: number): string => {
@@ -47,6 +54,7 @@ export class AuditPanel {
     private readonly headStats: HTMLElement;
     private readonly providerFilter: HTMLSelectElement;
     private readonly kindFilter: HTMLSelectElement;
+    private readonly includeEmbedToggle: HTMLInputElement;
     private knownProviders = new Set<string>();
 
     public constructor() {
@@ -81,9 +89,24 @@ export class AuditPanel {
             on: {click: () => void this.refresh()}
         });
 
+        // Embedder calls fire on every search/related/suggest-links — they'd
+        // drown the chat-completion entries the user actually wants to audit.
+        // Default off; the toggle reveals them when needed.
+        this.includeEmbedToggle = el('input', {
+            attrs: {type: 'checkbox', id: 'audit-include-embed'},
+            on: {change: () => void this.refresh()}
+        }) as HTMLInputElement;
+        const embedLabel = el('label', {
+            class: 'audit-toggle',
+            attrs: {for: 'audit-include-embed'},
+            text: ' Embedder-Calls anzeigen'
+        });
+        embedLabel.insertBefore(this.includeEmbedToggle, embedLabel.firstChild);
+
         const filterBar = el('div', {class: 'audit-filter-bar'},
             this.kindFilter,
             this.providerFilter,
+            embedLabel,
             refreshBtn,
             this.headStats
         );
@@ -105,11 +128,12 @@ export class AuditPanel {
     }
 
     private async refresh(): Promise<void> {
-        const opts: {limit: number; provider?: string; kind?: AuditKind} = {limit: 200};
+        const opts: {limit: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {limit: 200};
         const p = this.providerFilter.value;
         const k = this.kindFilter.value;
         if (p.length > 0) opts.provider = p;
         if (k.length > 0) opts.kind = k as AuditKind;
+        if (this.includeEmbedToggle.checked) opts.includeEmbed = true;
 
         let result;
         try {
@@ -161,13 +185,19 @@ export class AuditPanel {
     private renderEntry(e: AuditEntry): HTMLElement {
         const redactTotal = sumRedactions(e);
         const noteCount = e.noteIds.length;
+        const isEmbed = e.kind === 'embed';
+        const kindLabelText = isEmbed && e.embedSource !== undefined
+            ? `${KIND_LABELS[e.kind]} · ${EMBED_SOURCE_LABELS[e.embedSource]}`
+            : KIND_LABELS[e.kind];
 
         const head = el('div', {class: 'audit-entry-head'},
             el('span', {class: 'audit-entry-ts', text: formatTs(e.ts)}),
-            el('span', {class: `audit-entry-kind audit-entry-kind-${e.kind}`, text: KIND_LABELS[e.kind]}),
+            el('span', {class: `audit-entry-kind audit-entry-kind-${e.kind}`, text: kindLabelText}),
             el('span', {class: 'audit-entry-provider', text: e.provider}),
             el('span', {class: 'audit-entry-counts'},
-                el('span', {class: 'audit-pill', text: `${noteCount} ${noteCount === 1 ? 'Quelle' : 'Quellen'}`}),
+                isEmbed && e.embedCalls !== undefined && e.embedCalls > 1
+                    ? el('span', {class: 'audit-pill', text: `${e.embedCalls} Calls`})
+                    : el('span', {class: 'audit-pill', text: `${noteCount} ${noteCount === 1 ? 'Quelle' : 'Quellen'}`}),
                 redactTotal > 0
                     ? el('span', {class: 'audit-pill audit-pill-redact', text: `${redactTotal} redacted`})
                     : el('span', {style: {display: 'none'}}),

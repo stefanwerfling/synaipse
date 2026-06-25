@@ -36,27 +36,33 @@ import type {RedactionHit} from './Privacy.js';
  * UI gets latest-first by default.
  */
 
+export type AuditKind = 'chat' | 'summarize' | 'compile' | 'relink' | 'research' | 'embed';
+
 export interface AuditEntry {
     /** Unix epoch ms when the call started. */
     ts: number;
-    /** Provider identifier: 'claude-shell' | 'anthropic' | 'ollama' | 'openai' | … */
+    /** Provider identifier: 'claude-shell' | 'anthropic' | 'ollama' | 'openai' | 'voyage' | … */
     provider: string;
     /** Whether the provider is local (loopback/RFC1918) or external. Local entries are NOT logged but we keep the field for forward-compatibility. */
     providerKind: 'local' | 'external';
-    /** Which LLM touchpoint produced this entry. */
-    kind: 'chat' | 'summarize' | 'compile' | 'relink' | 'research';
-    /** Note IDs that made it into the LLM context after Layer 2 filtering. */
+    /** Which LLM touchpoint produced this entry. `embed` = vector-embedder query (a separate provider from chat); the other kinds are chat-completion calls. */
+    kind: AuditKind;
+    /** Note IDs that made it into the LLM context after Layer 2 filtering. For `embed`: the source notes whose content was embedded (empty when the query is free-text user input). */
     noteIds: string[];
-    /** Per-kind redaction counts from Layer 3 (already aggregated). */
+    /** Per-kind redaction counts from Layer 3 (already aggregated). Always [] for `kind=embed` — the embedder receives a snippet but the audit treats embed as a single coarse-grained event, not per-chunk. */
     redactions: RedactionHit[];
     /** Notes blocked by Layer 2 (path/tag/frontmatter marker). Only set when > 0. */
     filteredPrivate?: number;
-    /** First 200 chars of the question/prompt — only kept for chat/research where a user question exists. */
+    /** First 200 chars of the question/prompt — only kept for chat/research/embed where a user question or sample exists. */
     question?: string;
-    /** Token counts when the provider reports them. */
+    /** Token counts when the provider reports them. Not populated for `embed`. */
     tokens?: {input?: number; output?: number; total?: number};
     /** Wall time of the call in ms. */
     durationMs?: number;
+    /** `embed` only: which operation triggered the embedder call. Lets the user trace high-frequency embed traffic back to a specific UI action / MCP tool. */
+    embedSource?: 'search' | 'related' | 'suggest-links';
+    /** `embed` only: number of embedQuery calls aggregated into this entry. For `search`/`related` always 1; for `suggest-links` one per scoped note, batched into a single log line so the audit log doesn't drown in per-iteration entries. */
+    embedCalls?: number;
 }
 
 export class AuditLog {
@@ -84,9 +90,15 @@ export class AuditLog {
         limit?: number;
         afterTs?: number;
         provider?: string;
-        kind?: AuditEntry['kind'];
+        kind?: AuditKind;
+        /** Drop entries with `kind` ∈ excludeKinds. Used by the panel to hide noisy embed entries by default. */
+        excludeKinds?: readonly AuditKind[];
     } = {}): Promise<AuditEntry[]> {
         if (!existsSync(this.filePath)) return [];
+
+        const exclude = opts.excludeKinds !== undefined && opts.excludeKinds.length > 0
+            ? new Set(opts.excludeKinds)
+            : null;
 
         const out: AuditEntry[] = [];
         const stream = createReadStream(this.filePath, {encoding: 'utf8'});
@@ -107,6 +119,7 @@ export class AuditLog {
             if (opts.afterTs !== undefined && entry.ts <= opts.afterTs) continue;
             if (opts.provider !== undefined && entry.provider !== opts.provider) continue;
             if (opts.kind !== undefined && entry.kind !== opts.kind) continue;
+            if (exclude !== null && exclude.has(entry.kind)) continue;
 
             out.push(entry);
         }
@@ -121,15 +134,30 @@ export class AuditLog {
     /**
      * Total entry count. Cheap-ish: walks the file once line-by-line.
      * Used by the UI footer ("128 external calls logged") without
-     * loading all entries.
+     * loading all entries. With `excludeKinds`, only counts entries
+     * whose kind is not excluded — keeps the total honest when the UI
+     * hides embed entries by default.
      */
-    public async count(): Promise<number> {
+    public async count(opts: {excludeKinds?: readonly AuditKind[]} = {}): Promise<number> {
         if (!existsSync(this.filePath)) return 0;
+        const exclude = opts.excludeKinds !== undefined && opts.excludeKinds.length > 0
+            ? new Set(opts.excludeKinds)
+            : null;
         const stream = createReadStream(this.filePath, {encoding: 'utf8'});
         const rl = createInterface({input: stream, crlfDelay: Infinity});
         let n = 0;
         for await (const line of rl) {
-            if (line.length > 0) n++;
+            if (line.length === 0) continue;
+            if (exclude === null) {
+                n++;
+                continue;
+            }
+            try {
+                const entry = JSON.parse(line) as AuditEntry;
+                if (!exclude.has(entry.kind)) n++;
+            } catch {
+                n++;
+            }
         }
         return n;
     }

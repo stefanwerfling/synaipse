@@ -8,7 +8,7 @@ import {FilesystemAssetStore, type AssetStore} from './AssetStore.js';
 import {buildActivityReport, type ActivityReport} from './Activity.js';
 import {computeLayout, type GraphLayout} from './Layout.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
-import {createLlmProvider, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
+import {createLlmProvider, isLocalUrl, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
 import {AuditLog, type AuditEntry} from './AuditLog.js';
@@ -285,6 +285,10 @@ export class SynaipseService {
     private readonly chatProvider: LlmProvider | null;
     private readonly researchProvider: WebSearchProvider | null;
     private readonly embedExcludePrefixes: readonly string[];
+    /** Identifier of the active embedder provider ('voyage' | 'ollama' | 'huggingface') or null when embeddings are disabled. Used for audit-log labelling. */
+    private readonly embedderProviderId: string | null;
+    /** True iff embedder calls leave the host (voyage always; ollama with a non-loopback URL). False for huggingface (in-process) and ollama-on-loopback. */
+    private readonly embedderIsExternal: boolean;
     private cachedLayout: GraphLayout | null = null;
     private cachedLayoutKey: string | null = null;
     private cachedGraph: Graph | null = null;
@@ -324,6 +328,25 @@ export class SynaipseService {
         this.embedExcludePrefixes = config.embedExcludePrefixes ?? [];
 
         const embedder = createEmbedder(config);
+
+        // Classify the embedder for audit-log routing. Same DSGVO posture as
+        // chat providers: anything that hits a non-loopback URL is "external"
+        // and must be auditable; in-process (huggingface) and ollama-on-loopback
+        // stay silent. Voyage has no URL knob — always external.
+        const provider = config.embeddings.provider;
+        if (provider === 'voyage') {
+            this.embedderProviderId = 'voyage';
+            this.embedderIsExternal = true;
+        } else if (provider === 'huggingface') {
+            this.embedderProviderId = 'huggingface';
+            this.embedderIsExternal = false;
+        } else if (provider === 'ollama') {
+            this.embedderProviderId = 'ollama';
+            this.embedderIsExternal = config.ollama !== undefined && !isLocalUrl(config.ollama.url);
+        } else {
+            this.embedderProviderId = null;
+            this.embedderIsExternal = false;
+        }
 
         if (embedder === null) {
             this.index = null;
@@ -512,15 +535,31 @@ export class SynaipseService {
             if (this.index === null) {
                 return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
             }
-            return annotateSingleSignal(await this.index.semanticSearch(query, limit), 'semantic');
+            const semStart = Date.now();
+            const hits = await this.index.semanticSearch(query, limit);
+            void this.recordExternalEmbed({
+                source: 'search',
+                noteIds: [],
+                question: query.slice(0, 200),
+                durationMs: Date.now() - semStart
+            });
+            return annotateSingleSignal(hits, 'semantic');
         }
 
         // hybrid: title + fulltext + (semantic if available) + (graph if seeds)
         const ft = this.fulltextIndex.search(query, limit);
         const titles = this.fulltextIndex.searchTitle(query, limit);
-        const sem = this.index !== null
-            ? await this.index.semanticSearch(query, limit)
-            : [];
+        let sem: SearchHit[] = [];
+        if (this.index !== null) {
+            const semStart = Date.now();
+            sem = await this.index.semanticSearch(query, limit);
+            void this.recordExternalEmbed({
+                source: 'search',
+                noteIds: [],
+                question: query.slice(0, 200),
+                durationMs: Date.now() - semStart
+            });
+        }
 
         const signals: RankedSignal[] = [
             {name: 'title', hits: titles},
@@ -956,6 +995,41 @@ export class SynaipseService {
     }
 
     /**
+     * Audit a single semantic-search call against the embedder. Skipped
+     * silently when the embedder is local or absent. `embedCalls` lets
+     * callers batch loop-heavy operations (suggestLinks does N embeds
+     * per invocation) into a single log line instead of flooding the file.
+     */
+    private async recordExternalEmbed(params: {
+        source: NonNullable<AuditEntry['embedSource']>;
+        noteIds: string[];
+        question?: string;
+        embedCalls?: number;
+        durationMs?: number;
+    }): Promise<void> {
+        if (!this.embedderIsExternal || this.embedderProviderId === null) return;
+
+        const entry: AuditEntry = {
+            ts: Date.now(),
+            provider: this.embedderProviderId,
+            providerKind: 'external',
+            kind: 'embed',
+            noteIds: params.noteIds,
+            redactions: [],
+            embedSource: params.source,
+            embedCalls: params.embedCalls ?? 1,
+            ...(params.question !== undefined ? {question: params.question} : {}),
+            ...(params.durationMs !== undefined ? {durationMs: params.durationMs} : {})
+        };
+
+        try {
+            await this.auditLog.append(entry);
+        } catch (cause) {
+            console.warn('[synaipse] audit log append failed:', cause);
+        }
+    }
+
+    /**
      * Read audit entries for the `/api/audit` UI. Filter is forwarded
      * 1:1 to the storage layer.
      */
@@ -964,12 +1038,13 @@ export class SynaipseService {
         afterTs?: number;
         provider?: string;
         kind?: AuditEntry['kind'];
+        excludeKinds?: readonly AuditEntry['kind'][];
     } = {}): Promise<AuditEntry[]> {
         return this.auditLog.read(opts);
     }
 
-    public async getAuditCount(): Promise<number> {
-        return this.auditLog.count();
+    public async getAuditCount(opts: {excludeKinds?: readonly AuditEntry['kind'][]} = {}): Promise<number> {
+        return this.auditLog.count(opts);
     }
 
     public researchEnabled(): boolean {
@@ -2036,7 +2111,14 @@ export class SynaipseService {
 
         if (this.index !== null && note.content.length > 0) {
             const sample = note.content.slice(0, SEMANTIC_SAMPLE_CHARS);
+            const embedStart = Date.now();
             const hits = await this.index.semanticSearch(sample, limit * 2);
+            void this.recordExternalEmbed({
+                source: 'related',
+                noteIds: [note.id],
+                question: sample.slice(0, 200),
+                durationMs: Date.now() - embedStart
+            });
 
             for (const hit of hits) {
                 add(hit.noteId, hit.score, 'semantic');
@@ -2181,6 +2263,13 @@ export class SynaipseService {
         };
 
         if (this.index !== null) {
+            // suggestLinks loops the whole scope and embeds each note's sample
+            // separately. We aggregate into a single audit entry — otherwise a
+            // 500-note vault produces 500 log lines for one user action.
+            const embedSourceNotes: NoteId[] = [];
+            const embedStart = Date.now();
+            let embedCalls = 0;
+
             for (const note of scoped) {
                 if (note.content.length === 0) {
                     continue;
@@ -2189,6 +2278,8 @@ export class SynaipseService {
                 const linked = linkedSet(note);
                 const sample = note.content.slice(0, SEMANTIC_SAMPLE_CHARS);
                 const hits = await this.index.semanticSearch(sample, 20);
+                embedCalls += 1;
+                embedSourceNotes.push(note.id);
                 const seen = new Set<NoteId>();
 
                 for (const hit of hits) {
@@ -2212,6 +2303,15 @@ export class SynaipseService {
 
                     recordPair(note.id, hit.noteId, hit.score, 'semantic');
                 }
+            }
+
+            if (embedCalls > 0) {
+                void this.recordExternalEmbed({
+                    source: 'suggest-links',
+                    noteIds: embedSourceNotes,
+                    embedCalls,
+                    durationMs: Date.now() - embedStart
+                });
             }
         }
 

@@ -120,4 +120,41 @@ describe('AuditLog', () => {
             {kind: 'iban', count: 1}
         ]);
     });
+
+    it('excludeKinds drops matching entries from read()', async () => {
+        await log.append(sample({ts: 1, kind: 'chat', question: 'a'}));
+        await log.append(sample({ts: 2, kind: 'embed', question: 'b'}));
+        await log.append(sample({ts: 3, kind: 'chat', question: 'c'}));
+        await log.append(sample({ts: 4, kind: 'embed', question: 'd'}));
+
+        const out = await log.read({excludeKinds: ['embed']});
+        expect(out.map((e) => e.question)).toEqual(['c', 'a']);
+    });
+
+    it('count(excludeKinds) skips matching kinds', async () => {
+        await log.append(sample({ts: 1, kind: 'chat'}));
+        await log.append(sample({ts: 2, kind: 'embed'}));
+        await log.append(sample({ts: 3, kind: 'embed'}));
+        await log.append(sample({ts: 4, kind: 'research'}));
+
+        expect(await log.count()).toBe(4);
+        expect(await log.count({excludeKinds: ['embed']})).toBe(2);
+    });
+
+    it('preserves embed-specific fields round-trip', async () => {
+        const entry = sample({
+            ts: 1,
+            provider: 'voyage',
+            kind: 'embed',
+            noteIds: ['n1.md', 'n2.md'],
+            embedSource: 'suggest-links',
+            embedCalls: 42,
+            durationMs: 1234
+        });
+        await log.append(entry);
+        const [out] = await log.read();
+        expect(out?.embedSource).toBe('suggest-links');
+        expect(out?.embedCalls).toBe(42);
+        expect(out?.kind).toBe('embed');
+    });
 });
