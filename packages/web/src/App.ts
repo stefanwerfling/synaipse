@@ -16,6 +16,7 @@ import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {Search} from './Search.js';
 import {TagBar, TagEntry} from './TagBar.js';
+import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 
 const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
 const STORAGE_HIDE_ISOLATED = 'synaipse.graph.hideIsolated';
@@ -63,6 +64,7 @@ export class App {
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
     private importDialog!: ImportDialog;
+    private themeToggleBtn!: HTMLButtonElement;
 
     private selectedTags: PersistentValue<ReadonlySet<string>>;
     private hideIsolated: PersistentValue<boolean>;
@@ -448,14 +450,31 @@ export class App {
             on: {click: () => void this.importDialog.open()}
         });
 
+        this.themeToggleBtn = el('button', {
+            class: 'theme-toggle',
+            attrs: {type: 'button'},
+            on: {click: () => toggleTheme()}
+        }) as HTMLButtonElement;
+        this.updateThemeToggle(getTheme());
+        onThemeChange((theme) => this.updateThemeToggle(theme));
+
         return el('header', {class: 'topbar'},
             brand,
             el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             importBtn,
+            this.themeToggleBtn,
             this.activityBtn
         );
+    }
+
+    private updateThemeToggle(theme: Theme): void {
+        const isLight = theme === 'light';
+
+        this.themeToggleBtn.textContent = isLight ? '☾' : '☀';
+        this.themeToggleBtn.title = isLight ? 'Switch to dark theme' : 'Switch to light theme';
+        this.themeToggleBtn.setAttribute('aria-label', this.themeToggleBtn.title);
     }
 
     private setActivityBadge(count: number): void {

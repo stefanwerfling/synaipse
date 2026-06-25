@@ -1,4 +1,5 @@
-:root {
+:root,
+:root[data-theme='dark'] {
     --bg-0: #0b0d12;
     --bg-1: #11141a;
     --bg-2: #161a22;
@@ -57,6 +58,42 @@
     font-family: var(--font-sans);
     font-feature-settings: 'cv11';
     -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme='light'] {
+    --bg-0: #f7f8fa;
+    --bg-1: #ffffff;
+    --bg-2: #eef0f4;
+    --bg-3: #e2e6ee;
+    --bg-elev: rgba(255, 255, 255, 0.96);
+
+    --border-soft: #e3e6ec;
+    --border: #cdd2dc;
+    --border-strong: #a9b0bf;
+
+    --text-0: #0f172a;
+    --text-1: #1f2937;
+    --text-2: #4b5563;
+    --text-3: #6b7280;
+
+    --accent: #2f5fcc;
+    --accent-hover: #2b55ba;
+    --accent-press: #244aa3;
+    --accent-soft: rgba(47, 95, 204, 0.10);
+    --accent-glow: 0 0 0 3px rgba(47, 95, 204, 0.20);
+
+    --gold: #b8860b;
+    --gold-soft: rgba(184, 134, 11, 0.12);
+    --green: #047857;
+    --red: #b91c1c;
+    --purple: #6d28d9;
+    --pink: #be185d;
+
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+    --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.10);
+    --shadow-lg: 0 18px 42px rgba(15, 23, 42, 0.14);
+
+    color-scheme: light;
 }
 
 * {
@@ -2028,6 +2065,28 @@ body {
     border-color: var(--accent);
 }
 
+.theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-2);
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+
+.theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
 .import-overlay {
     position: fixed;
     inset: 0;
@@ -2230,8 +2289,8 @@ body {
 }
 
 .import-row-badge.update {
-    background: rgba(255, 200, 100, 0.15);
-    color: #ffc864;
+    background: var(--gold-soft);
+    color: var(--gold);
 }
 
 .import-preview {
@@ -2480,7 +2539,7 @@ body {
 }
 
 .status-running { background: var(--accent-soft); color: var(--accent); }
-.status-done { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.status-done { background: rgba(52, 211, 153, 0.15); color: var(--green); }
 .status-failed { background: rgba(248, 113, 113, 0.15); color: var(--red); }
 .status-stopped { background: rgba(140, 147, 164, 0.15); color: var(--text-3); }
 
@@ -2498,7 +2557,7 @@ body {
     transition: width 0.2s ease;
 }
 
-.job-progress-fill.done { background: #34d399; }
+.job-progress-fill.done { background: var(--green); }
 .job-progress-fill.failed { background: var(--red); }
 .job-progress-fill.stopped { background: var(--text-3); }
 

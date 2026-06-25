@@ -1,6 +1,8 @@
 import './Styles.css';
-import 'highlight.js/styles/github-dark.css';
 import {App} from './App.js';
+import {initTheme} from './Theme.js';
+
+initTheme();
 
 const host = document.getElementById('root');
 
