@@ -95,6 +95,62 @@ describe('InvertedIndex.search', () => {
     });
 });
 
+describe('InvertedIndex.search — BM25 length normalization', () => {
+    it('short focused note outranks long off-topic note that mentions the term more often', () => {
+        const idx = new InvertedIndex();
+        const longBody = ('lorem ipsum dolor sit amet consectetur adipiscing elit '.repeat(100))
+            + ' qdrant qdrant qdrant qdrant qdrant qdrant qdrant qdrant qdrant qdrant';
+        const shortBody = 'qdrant client setup and collection configuration. qdrant runs in docker. qdrant qdrant qdrant';
+        idx.build([
+            note('long.md', 'Long Off Topic', longBody),
+            note('short.md', 'Short Focused', shortBody),
+            note('decoy.md', 'Decoy', 'unrelated body about other topics')
+        ]);
+
+        const hits = idx.search('qdrant', 5);
+        expect(hits[0]?.noteId).toBe('short.md');
+        const longIdx = hits.findIndex((h) => h.noteId === 'long.md');
+        const shortIdx = hits.findIndex((h) => h.noteId === 'short.md');
+        expect(shortIdx).toBeLessThan(longIdx);
+    });
+
+    it('IDF favours rare terms — a common term distributes weight thinly', () => {
+        const idx = new InvertedIndex();
+        idx.build([
+            note('a.md', 'A', 'docker setup'),
+            note('b.md', 'B', 'docker compose'),
+            note('c.md', 'C', 'docker swarm'),
+            note('d.md', 'D', 'docker secret'),
+            note('e.md', 'E', 'docker qdrant'),
+            note('f.md', 'F', 'qdrant store')
+        ]);
+
+        // "qdrant" appears in 2/6 docs, "docker" in 5/6 — rare term must dominate.
+        const hits = idx.search('docker qdrant', 6);
+        const qdrantNotes = new Set(['e.md', 'f.md']);
+        expect(qdrantNotes.has(hits[0]?.noteId ?? '')).toBe(true);
+        expect(qdrantNotes.has(hits[1]?.noteId ?? '')).toBe(true);
+    });
+
+    it('TF saturation — repeating a term 10× is not 10× the score of mentioning it once', () => {
+        const idx = new InvertedIndex();
+        const body1 = 'qdrant ' + 'filler '.repeat(40);
+        const body10 = 'qdrant '.repeat(10) + 'filler '.repeat(31);
+        idx.build([
+            note('one.md', 'One', body1),
+            note('ten.md', 'Ten', body10)
+        ]);
+
+        const oneHit = idx.search('qdrant', 5).find((h) => h.noteId === 'one.md');
+        const tenHit = idx.search('qdrant', 5).find((h) => h.noteId === 'ten.md');
+        expect(oneHit).toBeDefined();
+        expect(tenHit).toBeDefined();
+        const ratio = (tenHit?.score ?? 0) / (oneHit?.score ?? 1);
+        expect(ratio).toBeGreaterThan(1);
+        expect(ratio).toBeLessThan(5);
+    });
+});
+
 describe('InvertedIndex.searchTitle', () => {
     it('only returns notes with title hits', () => {
         const idx = new InvertedIndex();
