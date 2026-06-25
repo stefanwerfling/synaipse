@@ -4671,3 +4671,73 @@ body {
     font-style: italic;
     color: var(--text-2);
 }
+
+/* === TYPED LINKS (frontmatter `links: [{target, kind}]`) === */
+
+.md-preview-typed-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4) 0;
+    padding: var(--space-3);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+}
+
+.typed-link-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: default;
+    transition: border-color var(--t-fast), background var(--t-fast);
+}
+
+button.typed-link-badge {
+    cursor: pointer;
+}
+
+button.typed-link-badge:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.typed-link-glyph {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.typed-link-kind {
+    color: var(--text-3);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.typed-link-target {
+    color: var(--text-0);
+    font-weight: 500;
+}
+
+.typed-link-supersedes .typed-link-glyph { color: var(--gold); }
+.typed-link-duplicates .typed-link-glyph { color: var(--text-2); }
+.typed-link-relates_to .typed-link-glyph { color: var(--accent); }
+.typed-link-replies_to .typed-link-glyph { color: var(--green); }
+
+.typed-link-unresolved {
+    opacity: 0.55;
+    border-style: dashed;
+}
+
+.typed-link-unresolved .typed-link-target {
+    text-decoration: line-through;
+    color: var(--text-2);
+}

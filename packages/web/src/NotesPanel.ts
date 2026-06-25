@@ -1,4 +1,5 @@
 import type {Note} from '@synaipse/core';
+import {extractTypedLinks} from '@synaipse/core';
 import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
@@ -786,6 +787,7 @@ export class NotesPanel {
 
         this.viewer.appendChild(this.viewerPreview.element);
         this.viewerPreview.update(this.active.content);
+        this.viewerPreview.setTypedLinks(extractTypedLinks(this.active.frontmatter));
         this.renderLinks();
         this.attachSelectionListener();
     }

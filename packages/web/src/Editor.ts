@@ -1,4 +1,5 @@
 import type {Frontmatter, Note} from '@synaipse/core';
+import {extractTypedLinks} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {EditorToolbar} from './EditorToolbar.js';
@@ -89,6 +90,7 @@ export class Editor {
         this.element = el('div', {class: 'editor'});
         this.build();
         this.preview.update(this.content);
+        this.preview.setTypedLinks(extractTypedLinks(this.note.frontmatter));
 
         this.previewUnsubscribe = showPreviewStore.subscribe((show) => {
             this.showPreview = show;
@@ -113,6 +115,7 @@ export class Editor {
         this.textarea.value = this.content;
         this.renderError();
         this.preview.update(this.content);
+        this.preview.setTypedLinks(extractTypedLinks(this.note.frontmatter));
     }
 
     public destroy(): void {

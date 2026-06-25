@@ -1,10 +1,27 @@
 import {marked} from 'marked';
 import {markedHighlight} from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
+import type {TypedLink, TypedLinkKind} from '@synaipse/core';
 import {clear, el} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
+
+const KIND_GLYPH: Readonly<Record<TypedLinkKind, string>> = {
+    supersedes: '→',
+    duplicates: '≡',
+    relates_to: '↔',
+    replies_to: '↩'
+};
+
+const sameTypedLinks = (a: readonly TypedLink[], b: readonly TypedLink[]): boolean => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i]?.target !== b[i]?.target) return false;
+        if (a[i]?.kind !== b[i]?.kind) return false;
+    }
+    return true;
+};
 
 let highlightConfigured = false;
 
@@ -137,6 +154,7 @@ const isInsideCode = (node: Node): boolean => {
 export class MarkdownPreview {
     public readonly element: HTMLElement;
     private content = '';
+    private typedLinks: readonly TypedLink[] = [];
     private hoverCard: HTMLElement | null = null;
     private hoverHandle: HoverHandle | null = null;
     private openTimer: number | null = null;
@@ -155,6 +173,21 @@ export class MarkdownPreview {
         this.render();
     }
 
+    /**
+     * Render typed-link badges from a note's frontmatter (`links: [{target,
+     * kind}]`) in a sticky header inside the preview. Empty array hides
+     * the header entirely. Resolves targets via opts.resolveWikilink the
+     * same way body wikilinks do — clickable when the target resolves,
+     * grey "unresolved" style otherwise.
+     */
+    public setTypedLinks(links: readonly TypedLink[]): void {
+        if (sameTypedLinks(this.typedLinks, links)) {
+            return;
+        }
+        this.typedLinks = links;
+        this.render();
+    }
+
     public destroy(): void {
         this.clearTimers();
         this.hideCard();
@@ -162,9 +195,59 @@ export class MarkdownPreview {
 
     private render(): void {
         clear(this.element);
-        this.element.innerHTML = renderMarkdown(this.content);
+
+        if (this.typedLinks.length > 0) {
+            this.element.appendChild(this.renderTypedLinks());
+        }
+
+        const body = document.createElement('div');
+        body.className = 'md-preview-body';
+        body.innerHTML = renderMarkdown(this.content);
+        this.element.appendChild(body);
+
         this.transformWikilinks();
         void applyAntvInfographicsTo(this.element);
+    }
+
+    private renderTypedLinks(): HTMLElement {
+        const host = el('div', {
+            class: 'md-preview-typed-links',
+            attrs: {'aria-label': 'Frontmatter cross-references'}
+        });
+
+        for (const link of this.typedLinks) {
+            host.appendChild(this.renderTypedLinkBadge(link));
+        }
+
+        return host;
+    }
+
+    private renderTypedLinkBadge(link: TypedLink): HTMLElement {
+        const noteId = this.opts.resolveWikilink?.(link.target);
+        const glyph = KIND_GLYPH[link.kind];
+        const klass = `typed-link-badge typed-link-${link.kind}${noteId === undefined ? ' typed-link-unresolved' : ''}`;
+        const title = noteId !== undefined
+            ? `${link.kind} → ${noteId}`
+            : `${link.kind} → ${link.target} (unresolved)`;
+
+        if (noteId !== undefined && this.opts.onWikilinkClick !== undefined) {
+            const onClick = this.opts.onWikilinkClick;
+            return el('button', {
+                class: klass,
+                attrs: {type: 'button', title},
+                on: {click: () => onClick(noteId, link.target)}
+            },
+                el('span', {class: 'typed-link-glyph', text: glyph}),
+                el('span', {class: 'typed-link-kind', text: link.kind.replace(/_/g, ' ')}),
+                el('span', {class: 'typed-link-target', text: link.target})
+            );
+        }
+
+        return el('span', {class: klass, attrs: {title}},
+            el('span', {class: 'typed-link-glyph', text: glyph}),
+            el('span', {class: 'typed-link-kind', text: link.kind.replace(/_/g, ' ')}),
+            el('span', {class: 'typed-link-target', text: link.target})
+        );
     }
 
     private transformWikilinks(): void {
