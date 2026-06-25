@@ -1,5 +1,6 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import type {SearchMode} from '@synaipse/core';
+import {extractTypedLinks} from '@synaipse/core';
 import {SynaipseService, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
 
@@ -407,7 +408,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
     {
         definition: {
             name: 'synaipse_outgoing_links',
-            description: 'List wikilinks contained in the given note (resolved + unresolved).',
+            description: 'List wikilinks contained in the given note. Returns body wikilinks (`[[Target]]` in markdown, resolved + unresolved) and, when present, typed links declared in frontmatter under `links:` (each `{target, kind}` where kind ∈ supersedes|duplicates|relates_to|replies_to). Typed links carry explicit semantics for cross-reference reasoning; body wikilinks still drive search/graph topology.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -419,7 +420,11 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const id = asString(args.id, 'id');
             const note = service.readNote(id);
-            return {response: ok({wikilinks: note.wikilinks}), event: {kind: 'list', touched: [id]}};
+            const typed = extractTypedLinks(note.frontmatter);
+            return {
+                response: ok({wikilinks: note.wikilinks, typed}),
+                event: {kind: 'list', touched: [id]}
+            };
         }
     },
     {

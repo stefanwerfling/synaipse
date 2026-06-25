@@ -21,6 +21,27 @@ export const NOTE_TYPES: readonly NoteType[] = [
     'external'
 ] as const;
 
+/**
+ * Semantic relations for explicit, typed wikilinks stored in frontmatter
+ * under the `links:` array. Mirrors the discussion in the project backlog
+ * (#7 typed wikilinks). A typed link is purely a metadata declaration —
+ * search ranking and graph topology continue to derive from body wikilinks.
+ */
+export type TypedLinkKind = 'supersedes' | 'duplicates' | 'relates_to' | 'replies_to';
+
+export const TYPED_LINK_KINDS: readonly TypedLinkKind[] = [
+    'supersedes',
+    'duplicates',
+    'relates_to',
+    'replies_to'
+] as const;
+
+export interface TypedLink {
+    /** Wikilink target (title or alias, same resolution as body `[[Target]]`). */
+    target: string;
+    kind: TypedLinkKind;
+}
+
 export interface Frontmatter {
     [key: string]: unknown;
     title?: string;
@@ -34,6 +55,7 @@ export interface Frontmatter {
     sources?: string[];
     supersedes?: string[];
     project?: string;
+    links?: TypedLink[];
 }
 
 export interface Note {
