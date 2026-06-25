@@ -36,6 +36,7 @@ export class InMemoryUserStore implements UserStore {
             createdAt: Date.now(),
             lastUsedAt: null,
             revokedAt: null,
+            expiresAt: input.expiresAt ?? null,
             hashHex,
             saltHex
         };
@@ -47,9 +48,11 @@ export class InMemoryUserStore implements UserStore {
     public async findByToken(plainToken: string): Promise<UserRecord | null> {
         if (plainToken.length < 8) return null;
         const hint = plainToken.slice(0, 8);
+        const now = Date.now();
 
         for (const row of this.rows.values()) {
             if (row.revokedAt !== null) continue;
+            if (row.expiresAt !== null && row.expiresAt <= now) continue;
             if (row.tokenHint !== hint) continue;
             if (verifyToken(plainToken, row.hashHex, row.saltHex)) {
                 return this.toRecord(row);
@@ -95,7 +98,8 @@ export class InMemoryUserStore implements UserStore {
             tokenHint: row.tokenHint,
             createdAt: row.createdAt,
             lastUsedAt: row.lastUsedAt,
-            revokedAt: row.revokedAt
+            revokedAt: row.revokedAt,
+            expiresAt: row.expiresAt
         };
     }
 }

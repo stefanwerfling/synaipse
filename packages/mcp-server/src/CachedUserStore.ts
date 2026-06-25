@@ -63,7 +63,13 @@ export class CachedUserStore implements UserStore {
         const record = await this.inner.findByToken(plainToken);
 
         if (record !== null) {
-            this.cache.set(key, {record, expiresAt: this.now() + this.ttlMs});
+            // Cache expiry is bounded by min(now+ttlMs, record.expiresAt).
+            // Without the cap, a user expiring in 10s could be cached for
+            // the full TTL (default 60s) — that's a 50s window of accepting
+            // an already-expired bearer.
+            const ttlExpiry = this.now() + this.ttlMs;
+            const userExpiry = record.expiresAt ?? Number.POSITIVE_INFINITY;
+            this.cache.set(key, {record, expiresAt: Math.min(ttlExpiry, userExpiry)});
         }
 
         return record;

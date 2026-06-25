@@ -22,6 +22,7 @@ interface UserRow {
     created_at: Date;
     last_used_at: Date | null;
     revoked_at: Date | null;
+    expires_at: Date | null;
 }
 
 const parseJsonArray = (raw: string | object): string[] => {
@@ -53,7 +54,8 @@ const rowToRecord = (row: UserRow): UserRecord => ({
     tokenHint: row.token_hint,
     createdAt: row.created_at.getTime(),
     lastUsedAt: row.last_used_at?.getTime() ?? null,
-    revokedAt: row.revoked_at?.getTime() ?? null
+    revokedAt: row.revoked_at?.getTime() ?? null,
+    expiresAt: row.expires_at?.getTime() ?? null
 });
 
 export class MariaDBUserStore implements UserStore {
@@ -66,14 +68,17 @@ export class MariaDBUserStore implements UserStore {
         const {plain, hashHex, saltHex, hint} = generateToken();
         const pathPrefixes = JSON.stringify(input.pathPrefixes ?? []);
         const tools = JSON.stringify(input.tools ?? []);
+        const expiresAt = input.expiresAt !== undefined && input.expiresAt !== null
+            ? new Date(input.expiresAt)
+            : null;
 
         const conn = await this.pool.getConnection();
 
         try {
             const result = await conn.query(
                 `INSERT INTO users
-                    (vault_id, label, token_hash, token_salt, token_hint, can_read, can_write, path_prefixes, tools)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (vault_id, label, token_hash, token_salt, token_hint, can_read, can_write, path_prefixes, tools, expires_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     this.config.vaultId,
                     input.label,
@@ -83,7 +88,8 @@ export class MariaDBUserStore implements UserStore {
                     input.read ? 1 : 0,
                     input.write ? 1 : 0,
                     pathPrefixes,
-                    tools
+                    tools,
+                    expiresAt
                 ]
             );
 
@@ -114,7 +120,10 @@ export class MariaDBUserStore implements UserStore {
         try {
             const rows = await conn.query<UserRow[]>(
                 `SELECT * FROM users
-                  WHERE vault_id = ? AND token_hint = ? AND revoked_at IS NULL`,
+                  WHERE vault_id = ?
+                    AND token_hint = ?
+                    AND revoked_at IS NULL
+                    AND (expires_at IS NULL OR expires_at > NOW())`,
                 [this.config.vaultId, hint]
             );
 

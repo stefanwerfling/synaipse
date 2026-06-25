@@ -17,6 +17,7 @@ interface ParsedFlags {
     write: boolean;
     prefix: string[];
     tool: string[];
+    expiresInDays?: number;
 }
 
 const parseFlags = (argv: readonly string[]): ParsedFlags => {
@@ -33,6 +34,12 @@ const parseFlags = (argv: readonly string[]): ParsedFlags => {
             out.prefix.push(arg.slice('--prefix='.length));
         } else if (arg.startsWith('--tool=')) {
             out.tool.push(arg.slice('--tool='.length));
+        } else if (arg.startsWith('--expires-in-days=')) {
+            const raw = arg.slice('--expires-in-days='.length);
+            const parsed = Number.parseFloat(raw);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                out.expiresInDays = parsed;
+            }
         }
     }
 
@@ -81,16 +88,22 @@ const main = async (): Promise<number> => {
                 return 2;
             }
 
+            const expiresAt = flags.expiresInDays !== undefined
+                ? Date.now() + flags.expiresInDays * 86_400_000
+                : null;
+
             const {user, plainToken} = await bundle.users.createUser({
                 label: flags.label,
                 read: flags.read,
                 write: flags.write,
                 pathPrefixes: flags.prefix,
-                tools: flags.tool
+                tools: flags.tool,
+                expiresAt
             });
 
             log(`[user] created "${user.label}" (id=${user.id}, hint=${user.tokenHint})`);
             log(`[user] scope: read=${user.read} write=${user.write} prefixes=${user.pathPrefixes.length === 0 ? '-' : user.pathPrefixes.join(',')} tools=${user.tools.length === 0 ? '-' : user.tools.join(',')}`);
+            log(`[user] expires: ${user.expiresAt !== null ? new Date(user.expiresAt).toISOString() : 'never'}`);
             log('[user] token (shown ONCE — store it now):');
             process.stdout.write(`${plainToken}\n`);
             return 0;
@@ -103,15 +116,22 @@ const main = async (): Promise<number> => {
                 return 0;
             }
 
+            const now = Date.now();
             for (const u of users) {
-                const status = u.revokedAt !== null ? 'REVOKED' : 'active';
+                // Priority: revoked > expired > active. A user can be both
+                // revoked AND expired — REVOKED wins because it's the more
+                // recent operator action and bears intent.
+                const status = u.revokedAt !== null
+                    ? 'REVOKED'
+                    : (u.expiresAt !== null && u.expiresAt <= now ? 'EXPIRED' : 'active');
                 const lastUsed = u.lastUsedAt !== null ? new Date(u.lastUsedAt).toISOString() : 'never';
+                const expires = u.expiresAt !== null ? new Date(u.expiresAt).toISOString() : 'never';
                 const scope = `r=${u.read ? 'y' : 'n'} w=${u.write ? 'y' : 'n'}`;
                 const restrict = [
                     u.pathPrefixes.length > 0 ? `paths=${u.pathPrefixes.join(',')}` : null,
                     u.tools.length > 0 ? `tools=${u.tools.join(',')}` : null
                 ].filter((s): s is string => s !== null).join(' ');
-                log(`[user] ${status.padEnd(7)} #${u.id} ${u.label} (hint=${u.tokenHint}) ${scope}${restrict.length > 0 ? ' ' + restrict : ''} last=${lastUsed}`);
+                log(`[user] ${status.padEnd(7)} #${u.id} ${u.label} (hint=${u.tokenHint}) ${scope}${restrict.length > 0 ? ' ' + restrict : ''} last=${lastUsed} expires=${expires}`);
             }
             return 0;
         }

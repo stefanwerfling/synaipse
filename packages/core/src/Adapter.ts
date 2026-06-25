@@ -69,6 +69,8 @@ export interface UserRecord {
     createdAt: number;
     lastUsedAt: number | null;
     revokedAt: number | null;
+    /** Epoch ms; null means "never expires". findByToken filters out rows where expiresAt is in the past. */
+    expiresAt: number | null;
 }
 
 export interface CreateUserInput {
@@ -77,6 +79,8 @@ export interface CreateUserInput {
     write: boolean;
     pathPrefixes?: readonly string[];
     tools?: readonly string[];
+    /** Epoch ms when the token should stop working. Omit for indefinite lifetime. */
+    expiresAt?: number | null;
 }
 
 export interface CreateUserResult {
