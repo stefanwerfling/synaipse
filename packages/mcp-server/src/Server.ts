@@ -10,8 +10,10 @@ import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
 import {resolveContextFromRequest} from './Project.js';
-import {checkScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
+import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
+
+const ADMIN_FLUSH_AUTH_CACHE_PATH = '/admin/flush-auth-cache';
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
@@ -170,6 +172,42 @@ export const buildMcpHttpHandler = (
                     return;
                 }
                 scope = resolved;
+            }
+
+            // Admin: flush the auth cache. Routed before the MCP transport
+            // so cached scope verification can be evicted on demand without
+            // restarting the server. Only available when a CachedUserStore
+            // is wired in (mode=server with TTL>0).
+            const pathOnly = (req.url ?? '').split('?')[0];
+            if (pathOnly === `${options.basePath}${ADMIN_FLUSH_AUTH_CACHE_PATH}`) {
+                if (req.method !== 'POST') {
+                    res.statusCode = 405;
+                    res.setHeader('Allow', 'POST');
+                    res.end('method not allowed');
+                    return;
+                }
+
+                if (!(userStore instanceof CachedUserStore)) {
+                    res.statusCode = 404;
+                    res.end('auth cache not active');
+                    return;
+                }
+
+                if (!isAdminScope(scope)) {
+                    res.statusCode = 403;
+                    res.end('admin scope required (unrestricted read+write)');
+                    return;
+                }
+
+                const flushed = userStore.size();
+                userStore.flush();
+                process.stderr.write(
+                    `[synaipse-mcp] auth-cache flushed (${flushed} entries) by token "${scope.label}"\n`
+                );
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({flushed}));
+                return;
             }
 
             const transport = new StreamableHTTPServerTransport({} as never);

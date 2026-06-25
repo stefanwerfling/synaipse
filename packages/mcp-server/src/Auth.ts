@@ -149,6 +149,22 @@ export const NO_AUTH_SCOPE: TokenScope = {
 };
 
 /**
+ * True if the scope is unrestricted admin: read + write, no path-prefix
+ * narrowing, no tool whitelist. Both the legacy single-token ADMIN_SCOPE
+ * and any user created via `npm run user create --read --write` (without
+ * --prefix or --tool) pass this check. Used by privileged admin
+ * endpoints (e.g. POST /admin/flush-auth-cache) where path/tool ACLs
+ * don't apply but we still need to gate on "can this caller do
+ * everything?".
+ */
+export const isAdminScope = (scope: TokenScope): boolean => {
+    return scope.read
+        && scope.write
+        && scope.pathPrefixes.length === 0
+        && scope.tools.length === 0;
+};
+
+/**
  * Decide whether a tool invocation passes the per-token ACL. Returns
  * a string error message on denial, or null on allow. The caller
  * surfaces the error to the MCP client.
