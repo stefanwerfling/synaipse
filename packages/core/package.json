@@ -18,6 +18,10 @@
     "./config": {
       "types": "./dist/Config.d.ts",
       "import": "./dist/Config.js"
+    },
+    "./token-hash": {
+      "types": "./dist/TokenHash.d.ts",
+      "import": "./dist/TokenHash.js"
     }
   },
   "scripts": {

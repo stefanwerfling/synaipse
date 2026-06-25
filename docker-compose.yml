@@ -62,3 +62,66 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+
+  # All-in-one Synaipse app: Web API on 3001, built static frontend
+  # served from the same port, MCP HTTP transport mounted at /mcp.
+  # Image is built from the repo root Dockerfile.
+  synaipse-web:
+    image: synaipse:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synaipse-web
+    profiles: [server]
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "${SYNAIPSE_WEB_PORT:-3001}:3001"
+    environment:
+      SYNAIPSE_MODE: server
+      # Vault path must exist but isn't used for note IO in server-mode —
+      # /tmp/vault avoids accidentally writing to a real vault.
+      SYNAIPSE_VAULT_PATH: /tmp/vault
+      SYNAIPSE_INDEX_CACHE: /tmp/vault/.synaipse-index.json
+      # Talk to the sibling MariaDB by service name, not 127.0.0.1.
+      SYNAIPSE_MARIADB_HOST: mariadb
+      SYNAIPSE_MARIADB_PORT: 3306
+      SYNAIPSE_MARIADB_USER: ${SYNAIPSE_MARIADB_USER:-synaipse}
+      SYNAIPSE_MARIADB_PASSWORD: ${SYNAIPSE_MARIADB_PASSWORD:-synaipse}
+      SYNAIPSE_MARIADB_DATABASE: ${SYNAIPSE_MARIADB_DATABASE:-synaipse}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-none}
+      WEB_API_PORT: 3001
+      MCP_SERVER_NAME: synaipse
+      MCP_SERVER_VERSION: 0.1.0
+      # Optional bearer for hybrid mode-local fallback. With mode=server
+      # the users table is authoritative — populate it via the user CLI:
+      #   docker compose run --rm synaipse-user create --label=admin --read --write
+      SYNAIPSE_MCP_TOKEN: ${SYNAIPSE_MCP_TOKEN:-}
+    command: ["node", "--enable-source-maps", "packages/web/dist/server/index.js"]
+
+  # One-shot helper for `npm run user` inside the compose network. Invoke
+  # with `docker compose run --rm synaipse-user create --label=foo --read --write`.
+  # Profile=server-tools so it doesn't auto-start with `up`.
+  synaipse-user:
+    image: synaipse:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [server]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      SYNAIPSE_MODE: server
+      SYNAIPSE_VAULT_PATH: /tmp/vault
+      SYNAIPSE_INDEX_CACHE: /tmp/vault/.synaipse-index.json
+      SYNAIPSE_MARIADB_HOST: mariadb
+      SYNAIPSE_MARIADB_PORT: 3306
+      SYNAIPSE_MARIADB_USER: ${SYNAIPSE_MARIADB_USER:-synaipse}
+      SYNAIPSE_MARIADB_PASSWORD: ${SYNAIPSE_MARIADB_PASSWORD:-synaipse}
+      SYNAIPSE_MARIADB_DATABASE: ${SYNAIPSE_MARIADB_DATABASE:-synaipse}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-none}
+    entrypoint: ["node", "--enable-source-maps", "packages/mcp-server/dist/UserCli.js"]
+    command: []

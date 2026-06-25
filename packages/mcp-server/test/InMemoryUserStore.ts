@@ -1,12 +1,11 @@
 import {
-    generateToken,
-    verifyToken,
     type CreateUserInput,
     type CreateUserResult,
     type RotateUserResult,
     type UserRecord,
     type UserStore
 } from '@synaipse/core';
+import {generateToken, verifyToken} from '@synaipse/core/token-hash';
 
 interface Row extends UserRecord {
     hashHex: string;

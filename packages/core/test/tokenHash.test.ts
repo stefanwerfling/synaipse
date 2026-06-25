@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {generateToken, verifyToken, hintOf} from '../src/Index.js';
+import {generateToken, verifyToken, hintOf} from '../src/TokenHash.js';
 
 describe('generateToken', () => {
     it('produces a 43-char base64url plain token', () => {

@@ -5,4 +5,9 @@ export * from './Errors.js';
 export * from './Adapter.js';
 export * from './Chat.js';
 export * from './TypedLinks.js';
-export * from './TokenHash.js';
+
+// TokenHash is deliberately NOT in the barrel: it imports node:crypto, and
+// pulling it into the browser bundle (web frontend imports @synaipse/core
+// for types) makes vite reject the build. Server-side consumers import the
+// subpath directly:
+//   import {generateToken} from '@synaipse/core/token-hash';

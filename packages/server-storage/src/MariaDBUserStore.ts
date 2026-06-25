@@ -1,13 +1,12 @@
 import type {Pool} from 'mariadb';
 import {
-    generateToken,
-    verifyToken,
     type CreateUserInput,
     type CreateUserResult,
     type RotateUserResult,
     type UserRecord,
     type UserStore
 } from '@synaipse/core';
+import {generateToken, verifyToken} from '@synaipse/core/token-hash';
 import type {ResolvedMariaDBConfig} from './Pool.js';
 
 interface UserRow {

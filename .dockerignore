@@ -1,0 +1,42 @@
+# Build artefacts — Dockerfile regenerates them in the builder stage
+**/dist
+**/dist-tsbuild
+**/*.tsbuildinfo
+
+# Node modules — installed fresh inside the image
+**/node_modules
+
+# Local data / git / cache
+.git
+.gitignore
+.github
+data
+.synaipse-sessions
+.synaipse-chats
+.ngit
+
+# Dev / IDE
+.vscode
+.idea
+.claude
+*.log
+.DS_Store
+
+# Secrets — must come from runtime env, not be baked in
+.env
+.env.local
+*.pem
+*.key
+
+# Tests + bench (not needed in runtime image; tsc still compiles `src/`)
+**/test
+**/benchmark
+**/coverage
+**/vitest.config.*
+
+# Docs (not needed at runtime)
+doc
+
+# Dockerfile recursion guard
+Dockerfile
+.dockerignore
