@@ -254,6 +254,57 @@ const runCrawler = async (name: string): Promise<number> => {
         return failed === 0 ? 0 : 1;
     }
 
+    if (name === 'decay') {
+        // Safety default: dry-run unless --commit is given. Move = writeNote +
+        // deleteNote, which is not transactional — better to look first.
+        const commit = args.includes('--commit');
+        const daysArg = args.find((a) => a.startsWith('--days='));
+        const days = daysArg !== undefined ? Number.parseInt(daysArg.slice(7), 10) : 90;
+        const limitArg = args.find((a) => a.startsWith('--limit='));
+        const limit = limitArg !== undefined ? Number.parseInt(limitArg.slice(8), 10) : Number.POSITIVE_INFINITY;
+        const prefixArg = args.find((a) => a.startsWith('--prefix='));
+        const pathPrefix = prefixArg !== undefined ? prefixArg.slice(9) : '';
+
+        const service = new SynaipseService(config);
+        await service.start();
+
+        const mode = commit ? 'COMMIT' : 'dry-run';
+        const scope = pathPrefix.length > 0 ? ` under ${pathPrefix}` : '';
+        log(`[decay] ${mode} — orphan + tagless + mtime>${days}d${scope}, limit=${Number.isFinite(limit) ? limit : '∞'}`);
+
+        const report = await service.archiveStaleNotes({
+            olderThanDays: days,
+            ...(pathPrefix.length > 0 ? {pathPrefix} : {}),
+            ...(Number.isFinite(limit) ? {limit} : {}),
+            dryRun: !commit
+        });
+
+        if (report.candidates.length === 0) {
+            log('[decay] no candidates — vault is tidy');
+            return 0;
+        }
+
+        for (const c of report.candidates) {
+            const status = commit
+                ? (report.archived.includes(c.id) ? '✓' : '!')
+                : '·';
+            log(`[decay] ${status} ${c.ageDays}d  ${c.id}`);
+        }
+
+        if (commit) {
+            log(`[decay] done — archived ${report.archived.length}, failed ${report.failed.length}`);
+
+            for (const f of report.failed) {
+                log(`[decay] ! ${f.id}: ${f.error}`);
+            }
+
+            return report.failed.length === 0 ? 0 : 1;
+        }
+
+        log(`[decay] ${report.candidates.length} candidates — re-run with --commit to archive`);
+        return 0;
+    }
+
     process.stderr.write(`unknown crawler: ${name}\n`);
     return 2;
 };

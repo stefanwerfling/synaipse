@@ -27,5 +27,8 @@ export type {
     PrimeResult,
     PrimerEntry,
     PrimerReason,
-    TodoItem
+    TodoItem,
+    ArchiveReport
 } from './Service.js';
+export {findDecayCandidates, archivePathFor} from './MemoryDecay.js';
+export type {DecayCandidate, DecayOptions} from './MemoryDecay.js';

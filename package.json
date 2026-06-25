@@ -28,6 +28,7 @@
     "crawl:code": "npm --workspace @synaipse/crawler run start --silent -- code",
     "compile": "npm --workspace @synaipse/crawler run start --silent -- compile",
     "relink": "npm --workspace @synaipse/crawler run start --silent -- relink",
+    "decay": "npm --workspace @synaipse/crawler run start --silent -- decay",
     "docker:up:voyage": "docker-compose --profile voyage up -d",
     "docker:up:ollama": "docker-compose --profile ollama up -d",
     "docker:up:server": "docker-compose --profile server up -d",

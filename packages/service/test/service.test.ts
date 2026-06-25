@@ -1683,3 +1683,60 @@ describe('SynaipseService graph signal in hybrid search', () => {
         expect(hits.indexOf(near as SearchHit)).toBeLessThan(hits.indexOf(far as SearchHit));
     });
 });
+
+describe('SynaipseService.archiveStaleNotes', () => {
+    const ageMs = (days: number): Date => new Date(Date.now() - days * 86_400_000);
+
+    it('moves orphan untouched notes to Archive/ and skips anchored ones', async () => {
+        // candidate — old, no backlinks, no tags
+        await writeNote(vaultDir, 'Dust/forgotten.md', '---\ntitle: Forgotten\n---\nbody');
+        // anchored via backlink from anchor.md
+        await writeNote(vaultDir, 'Dust/linked.md', '---\ntitle: Linked\n---\nbody');
+        await writeNote(vaultDir, 'anchor.md', '---\ntitle: Anchor\n---\nrefs [[Linked]]');
+        // tagged — excluded
+        await writeNote(vaultDir, 'Dust/tagged.md', '---\ntitle: Tagged\ntags: [keep]\n---\nbody');
+        // pinned — excluded
+        await writeNote(vaultDir, 'Dust/pinned.md', '---\ntitle: Pinned\npinned: true\n---\nbody');
+
+        // backdate the four Dust notes to 200 days old; anchor stays fresh
+        const oldDate = ageMs(200);
+        for (const rel of ['Dust/forgotten.md', 'Dust/linked.md', 'Dust/tagged.md', 'Dust/pinned.md']) {
+            await utimes(path.join(vaultDir, rel), oldDate, oldDate);
+        }
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const report = await service.archiveStaleNotes({olderThanDays: 90});
+
+        expect(report.archived).toEqual(['Dust/forgotten.md']);
+        expect(report.failed).toEqual([]);
+        expect(report.candidates.map((c) => c.id)).toEqual(['Dust/forgotten.md']);
+
+        const ids = service.listNotes().map((n) => n.id).sort();
+        expect(ids).toContain('Archive/Dust/forgotten.md');
+        expect(ids).not.toContain('Dust/forgotten.md');
+        expect(ids).toContain('Dust/linked.md');
+        expect(ids).toContain('Dust/tagged.md');
+        expect(ids).toContain('Dust/pinned.md');
+    });
+
+    it('dry-run returns candidates without touching the vault', async () => {
+        await writeNote(vaultDir, 'forgotten.md', '---\ntitle: Forgotten\n---\nbody');
+        const oldDate = ageMs(200);
+        await utimes(path.join(vaultDir, 'forgotten.md'), oldDate, oldDate);
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const report = await service.archiveStaleNotes({olderThanDays: 90, dryRun: true});
+
+        expect(report.dryRun).toBe(true);
+        expect(report.candidates.map((c) => c.id)).toEqual(['forgotten.md']);
+        expect(report.archived).toEqual([]);
+
+        const ids = service.listNotes().map((n) => n.id);
+        expect(ids).toContain('forgotten.md');
+        expect(ids).not.toContain('Archive/forgotten.md');
+    });
+});

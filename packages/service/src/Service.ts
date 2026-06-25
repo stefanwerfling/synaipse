@@ -69,6 +69,7 @@ import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
+import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
 export interface IndexingStats {
     total: number;
@@ -114,6 +115,13 @@ export interface StaleNotesOptions {
     olderThanDays?: number;
     pathPrefix?: string;
     limit?: number;
+}
+
+export interface ArchiveReport {
+    candidates: DecayCandidate[];
+    archived: NoteId[];
+    failed: Array<{id: NoteId; error: string}>;
+    dryRun: boolean;
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -2049,6 +2057,77 @@ export class SynaipseService {
         }
 
         return result.sort((a, b) => b.ageDays - a.ageDays).slice(0, limit);
+    }
+
+    /**
+     * Find notes that have decayed (no backlinks, no tags, mtime older than N
+     * days, not pinned, not prime, not already archived) and move them to
+     * `<archivePrefix><original-id>`. Dry-run returns the candidate list
+     * without touching the vault.
+     *
+     * Move = writeNote(archive-path) + deleteNote(original). Wikilinks
+     * resolve by title/alias, not by path, so outgoing links survive the
+     * move. Incoming links can't break because candidates have zero backlinks
+     * by definition.
+     */
+    public async archiveStaleNotes(
+        opts: DecayOptions & {dryRun?: boolean} = {},
+        now: number = Date.now()
+    ): Promise<ArchiveReport> {
+        const archivePrefix = opts.archivePrefix ?? 'Archive/';
+        const dryRun = opts.dryRun === true;
+
+        const candidates = findDecayCandidates(this.notes.list(), now, opts);
+        const archived: NoteId[] = [];
+        const failed: Array<{id: NoteId; error: string}> = [];
+
+        if (dryRun) {
+            return {candidates, archived, failed, dryRun: true};
+        }
+
+        for (const candidate of candidates) {
+            const note = this.notes.tryGet(candidate.id);
+
+            if (note === undefined) {
+                failed.push({id: candidate.id, error: 'note vanished mid-run'});
+                continue;
+            }
+
+            const destination = archivePathFor(candidate.id, archivePrefix);
+
+            try {
+                await this.notes.write(
+                    {path: destination, content: note.content, frontmatter: note.frontmatter},
+                    {message: buildCommitMessage('archive_stale', destination, this.project)}
+                );
+
+                await this.notes.delete(candidate.id, {
+                    message: buildCommitMessage('archive_stale', candidate.id, this.project)
+                });
+
+                if (this.index !== null) {
+                    await this.index.deleteNote(candidate.id);
+                }
+
+                this.fulltextIndex.removeNote(candidate.id);
+
+                const moved = this.notes.tryGet(destination);
+                if (moved !== undefined) {
+                    await this.maybeIndexNote(moved);
+                    this.fulltextIndex.addNote(moved);
+                }
+
+                archived.push(candidate.id);
+            } catch (cause) {
+                failed.push({id: candidate.id, error: String(cause)});
+            }
+        }
+
+        if (archived.length > 0) {
+            this.invalidateTopologyCaches();
+        }
+
+        return {candidates, archived, failed, dryRun: false};
     }
 
     public onVaultChange(listener: VaultChangeListener): () => void {
