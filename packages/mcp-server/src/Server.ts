@@ -11,6 +11,17 @@ import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
 import {resolveContextFromRequest} from './Project.js';
 import {checkScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
+import {CachedUserStore} from './CachedUserStore.js';
+
+const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
+
+const resolveAuthCacheTtlMs = (): number => {
+    const raw = process.env.SYNAIPSE_AUTH_CACHE_TTL_MS;
+    if (raw === undefined || raw.trim() === '') return DEFAULT_AUTH_CACHE_TTL_MS;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AUTH_CACHE_TTL_MS;
+    return parsed;
+};
 
 export type TransportMode = 'stdio' | 'http';
 
@@ -207,6 +218,11 @@ const buildOverrides = async (config: Config): Promise<OverridesResult> => {
     const {createServerAdapters} = await import('@synaipse/server-storage');
     const bundle = await createServerAdapters(config.mariadb);
 
+    const cacheTtl = resolveAuthCacheTtlMs();
+    const userStore: UserStore = cacheTtl > 0
+        ? new CachedUserStore(bundle.users, cacheTtl)
+        : bundle.users;
+
     return {
         overrides: {
             notes: bundle.notes,
@@ -215,7 +231,7 @@ const buildOverrides = async (config: Config): Promise<OverridesResult> => {
             assetStore: new NoopAssetStore(),
             skipWatcher: true
         },
-        userStore: bundle.users,
+        userStore,
         close: () => bundle.close()
     };
 };
@@ -223,7 +239,9 @@ const buildOverrides = async (config: Config): Promise<OverridesResult> => {
 export const startServer = async (config: Config, options: StartServerOptions): Promise<void> => {
     const {overrides, userStore, close: closeAdapters} = await buildOverrides(config);
     if (config.mode === 'server') {
-        process.stderr.write('[synaipse-mcp] server-mode: MariaDB-backed adapters wired in\n');
+        const cacheTtl = resolveAuthCacheTtlMs();
+        const cacheNote = cacheTtl > 0 ? `auth-cache TTL=${cacheTtl}ms` : 'auth-cache OFF';
+        process.stderr.write(`[synaipse-mcp] server-mode: MariaDB-backed adapters wired in (${cacheNote})\n`);
         if (config.server.tokens !== undefined && config.server.tokens.length > 0) {
             process.stderr.write(
                 '[synaipse-mcp] WARN: config.server.tokens is set but mode=server — '

@@ -4,3 +4,4 @@
  * importing the CLI entrypoint `Index.js` would also start the server.
  */
 export {buildMcpHttpHandler, startServer, type StartServerOptions, type TransportMode} from './Server.js';
+export {CachedUserStore} from './CachedUserStore.js';
