@@ -19,6 +19,7 @@
     "bench": "vitest run --config vitest.bench.config.ts",
     "mcp": "npm --workspace @synaipse/mcp-server run start",
     "mcp:http": "npm --workspace @synaipse/mcp-server run start:http",
+    "user": "npm --workspace @synaipse/mcp-server run user --silent --",
     "web": "npm --workspace @synaipse/web run dev",
     "vault:init": "node scripts/init-vault.mjs",
     "install-skill": "node scripts/install-skill.mjs",

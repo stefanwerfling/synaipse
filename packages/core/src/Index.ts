@@ -5,3 +5,4 @@ export * from './Errors.js';
 export * from './Adapter.js';
 export * from './Chat.js';
 export * from './TypedLinks.js';
+export * from './TokenHash.js';

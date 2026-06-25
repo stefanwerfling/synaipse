@@ -56,6 +56,13 @@ const mockRes = (): FakeRes => {
     return res;
 };
 
+/**
+ * Auth resolution moved from sync to async in the MariaDB-user-store
+ * slice. `handler(req, res)` returns synchronously but the 401 / 200
+ * decision lands in a microtask. Flush them before asserting.
+ */
+const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
+
 describe('MCP HTTP bearer auth', () => {
     let vaultDir: string;
     let service: SynaipseService;
@@ -80,6 +87,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp');
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).toBe(401);
         expect(res.headers['www-authenticate']).toMatch(/^Bearer/);
@@ -95,6 +103,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp', {authorization: 'Bearer not-the-right-one'});
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).toBe(401);
     });
@@ -124,6 +133,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp');
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).not.toBe(401);
     });
@@ -137,6 +147,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/other');
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).toBe(404);
     });
@@ -150,6 +161,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp', {authorization: 'Bearer short'});
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).toBe(401);
     });
@@ -175,6 +187,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp', {authorization: 'Bearer reader-token'});
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).not.toBe(401);
     });
@@ -195,6 +208,7 @@ describe('MCP HTTP bearer auth', () => {
         const req = mockReq('/mcp', {authorization: 'Bearer not-the-token'});
         const res = mockRes();
         handler(req, res as never);
+        await flush();
 
         expect(res.statusCode).toBe(401);
     });

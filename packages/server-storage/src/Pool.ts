@@ -26,7 +26,7 @@ export interface ResolvedMariaDBConfig extends MariaDBConfig {
 // sit beside `src/` (not inside it) so tsc leaves them alone.
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
-const MIGRATION_FILES = ['001_notes.sql', '002_chats.sql'] as const;
+const MIGRATION_FILES = ['001_notes.sql', '002_chats.sql', '003_users.sql'] as const;
 
 export const createPool = (cfg: MariaDBConfig): Pool => {
     return mariadb.createPool({

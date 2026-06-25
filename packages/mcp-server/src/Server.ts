@@ -4,7 +4,7 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import type {Config} from '@synaipse/core';
+import type {Config, UserStore} from '@synaipse/core';
 import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
@@ -124,15 +124,16 @@ const buildMcpServer = (
 export const buildMcpHttpHandler = (
     config: Config,
     service: SynaipseService,
-    options: {basePath: string; eventsUrl: string | null}
+    options: {basePath: string; eventsUrl: string | null; userStore?: UserStore | null}
 ): http.RequestListener => {
     const publisher = new EventPublisher(options.eventsUrl);
     const tools = buildTools(service);
-    const authConfigured = isAuthConfigured(config);
+    const userStore = options.userStore ?? null;
+    const authConfigured = isAuthConfigured(config, userStore);
 
     if (!authConfigured) {
         process.stderr.write(
-            '[synaipse-mcp] WARN: no SYNAIPSE_MCP_TOKEN or server.tokens configured — '
+            '[synaipse-mcp] WARN: no SYNAIPSE_MCP_TOKEN, server.tokens, or user store configured — '
             + 'HTTP endpoint is unauthenticated. Safe only for localhost; '
             + 'set auth before exposing the port to LAN / remote.\n'
         );
@@ -145,21 +146,21 @@ export const buildMcpHttpHandler = (
             return;
         }
 
-        let scope: TokenScope;
-        if (!authConfigured) {
-            scope = NO_AUTH_SCOPE;
-        } else {
-            const resolved = resolveTokenScope(req.headers.authorization, config);
-            if (resolved === null) {
-                res.statusCode = 401;
-                res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
-                res.end('unauthorised');
-                return;
-            }
-            scope = resolved;
-        }
-
         void (async () => {
+            let scope: TokenScope;
+            if (!authConfigured) {
+                scope = NO_AUTH_SCOPE;
+            } else {
+                const resolved = await resolveTokenScope(req.headers.authorization, config, userStore);
+                if (resolved === null) {
+                    res.statusCode = 401;
+                    res.setHeader('WWW-Authenticate', 'Bearer realm="synaipse-mcp"');
+                    res.end('unauthorised');
+                    return;
+                }
+                scope = resolved;
+            }
+
             const transport = new StreamableHTTPServerTransport({} as never);
             const ctx: ToolContext = resolveContextFromRequest({
                 url: req.url ?? '/',
@@ -188,9 +189,15 @@ export const buildMcpHttpHandler = (
     };
 };
 
-const buildOverrides = async (config: Config): Promise<{overrides: ServiceOverrides; close: () => Promise<void>}> => {
+interface OverridesResult {
+    overrides: ServiceOverrides;
+    userStore: UserStore | null;
+    close: () => Promise<void>;
+}
+
+const buildOverrides = async (config: Config): Promise<OverridesResult> => {
     if (config.mode !== 'server') {
-        return {overrides: {}, close: () => Promise.resolve()};
+        return {overrides: {}, userStore: null, close: () => Promise.resolve()};
     }
 
     if (config.mariadb === undefined) {
@@ -208,14 +215,21 @@ const buildOverrides = async (config: Config): Promise<{overrides: ServiceOverri
             assetStore: new NoopAssetStore(),
             skipWatcher: true
         },
+        userStore: bundle.users,
         close: () => bundle.close()
     };
 };
 
 export const startServer = async (config: Config, options: StartServerOptions): Promise<void> => {
-    const {overrides, close: closeAdapters} = await buildOverrides(config);
+    const {overrides, userStore, close: closeAdapters} = await buildOverrides(config);
     if (config.mode === 'server') {
         process.stderr.write('[synaipse-mcp] server-mode: MariaDB-backed adapters wired in\n');
+        if (config.server.tokens !== undefined && config.server.tokens.length > 0) {
+            process.stderr.write(
+                '[synaipse-mcp] WARN: config.server.tokens is set but mode=server — '
+                + 'yaml tokens are ignored. Use `npm run user create` or `npm run user import-yaml` to populate the users table.\n'
+            );
+        }
     }
 
     const service = new SynaipseService(config, overrides);
@@ -226,7 +240,8 @@ export const startServer = async (config: Config, options: StartServerOptions): 
     if (options.transport === 'http') {
         const handler = buildMcpHttpHandler(config, service, {
             basePath: options.httpPath,
-            eventsUrl: options.eventsUrl
+            eventsUrl: options.eventsUrl,
+            userStore
         });
 
         httpServer = http.createServer(handler);

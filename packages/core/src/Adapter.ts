@@ -52,3 +52,52 @@ export interface NoteAdapter {
     /** Re-read entries from disk if a parallel process touched them. Returns true if anything changed. */
     syncEntries(): Promise<boolean>;
 }
+
+/**
+ * Token-auth user record. Mirrors `config.server.tokens[]` from yaml mode
+ * but lives in a database in server mode. Plain tokens are never stored —
+ * verification runs against {tokenHash, tokenSalt} (scrypt).
+ */
+export interface UserRecord {
+    id: number;
+    label: string;
+    read: boolean;
+    write: boolean;
+    pathPrefixes: readonly string[];
+    tools: readonly string[];
+    tokenHint: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+    revokedAt: number | null;
+}
+
+export interface CreateUserInput {
+    label: string;
+    read: boolean;
+    write: boolean;
+    pathPrefixes?: readonly string[];
+    tools?: readonly string[];
+}
+
+export interface CreateUserResult {
+    user: UserRecord;
+    plainToken: string;
+}
+
+/**
+ * Storage port for token-auth users. Implementations:
+ * - InMemoryUserStore (test helper, packages/mcp-server/test)
+ * - MariaDBUserStore (@synaipse/server-storage) — backed by the `users` table
+ *
+ * Only MariaDBUserStore wires into HTTP middleware (mode=server). Local
+ * mode keeps using `config.server.tokens` yaml — see
+ * packages/mcp-server/src/Auth.ts:resolveTokenScope.
+ */
+export interface UserStore {
+    createUser(input: CreateUserInput): Promise<CreateUserResult>;
+    findByToken(plainToken: string): Promise<UserRecord | null>;
+    listUsers(): Promise<UserRecord[]>;
+    revokeByLabel(label: string): Promise<boolean>;
+    touchLastUsed(id: number): Promise<void>;
+    close(): Promise<void>;
+}

@@ -1,5 +1,5 @@
 import {timingSafeEqual} from 'node:crypto';
-import type {Config} from '@synaipse/core';
+import type {Config, UserRecord, UserStore} from '@synaipse/core';
 
 /**
  * Per-token ACL. The legacy single `config.server.token` (Phase-1 MCP
@@ -65,15 +65,38 @@ const tokensMatch = (a: string, b: string): boolean => {
     return timingSafeEqual(ba, bb);
 };
 
+const userRecordToScope = (user: UserRecord): TokenScope => ({
+    label: user.label,
+    read: user.read,
+    write: user.write,
+    pathPrefixes: user.pathPrefixes,
+    tools: user.tools
+});
+
 /**
  * Resolve which scope applies to a request. Returns null when no token
  * configuration is present at all (the caller decides whether that's a
  * grant-all dev mode or a 401), or when the request's token didn't
  * match any configured entry.
+ *
+ * When `userStore` is provided (mode=server), it takes precedence over
+ * `config.server.tokens` — yaml entries are ignored. Local mode passes
+ * userStore=null and uses the yaml path exclusively.
  */
-export const resolveTokenScope = (authHeader: string | undefined, config: Config): TokenScope | null => {
+export const resolveTokenScope = async (
+    authHeader: string | undefined,
+    config: Config,
+    userStore: UserStore | null = null
+): Promise<TokenScope | null> => {
     const provided = parseBearer(authHeader);
     if (provided === null) return null;
+
+    if (userStore !== null) {
+        const user = await userStore.findByToken(provided);
+        if (user === null) return null;
+        void userStore.touchLastUsed(user.id);
+        return userRecordToScope(user);
+    }
 
     const granular = config.server.tokens;
     if (granular !== undefined) {
@@ -99,11 +122,12 @@ export const resolveTokenScope = (authHeader: string | undefined, config: Config
 };
 
 /**
- * True if any auth configuration exists (legacy single-token OR granular
- * tokens array with at least one entry). Drives the "missing auth"
- * warning at startup.
+ * True if any auth configuration exists (legacy single-token, granular
+ * tokens array with entries, OR a backing user store). Drives the
+ * "missing auth" warning at startup.
  */
-export const isAuthConfigured = (config: Config): boolean => {
+export const isAuthConfigured = (config: Config, userStore: UserStore | null = null): boolean => {
+    if (userStore !== null) return true;
     const s = config.server;
     if (s.token !== undefined && s.token.length > 0) return true;
     if (s.tokens !== undefined && s.tokens.length > 0) return true;

@@ -24,7 +24,8 @@
     "clean": "tsc --build --clean",
     "start": "node --enable-source-maps dist/Index.js",
     "start:http": "SYNAIPSE_MCP_TRANSPORT=http node --enable-source-maps dist/Index.js",
-    "dev": "node --enable-source-maps --watch dist/Index.js"
+    "dev": "node --enable-source-maps --watch dist/Index.js",
+    "user": "node --enable-source-maps dist/UserCli.js"
   },
   "dependencies": {
     "@synaipse/core": "*",

@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import type {Config} from '@synaipse/core';
 import {checkScope, isAuthConfigured, parseBearer, resolveTokenScope, NO_AUTH_SCOPE} from '../src/Auth.js';
+import {InMemoryUserStore} from './InMemoryUserStore.js';
 
 const baseConfig = (overrides: Partial<Config['server']> = {}): Config => ({
     vaultPath: '/tmp/x',
@@ -51,12 +52,17 @@ describe('isAuthConfigured', () => {
     it('false when granular tokens list is empty', () => {
         expect(isAuthConfigured(baseConfig({tokens: []}))).toBe(false);
     });
+
+    it('true when a user store is wired in, even with no yaml tokens', () => {
+        const store = new InMemoryUserStore();
+        expect(isAuthConfigured(baseConfig(), store)).toBe(true);
+    });
 });
 
 describe('resolveTokenScope', () => {
-    it('returns admin scope for the legacy single-token match', () => {
+    it('returns admin scope for the legacy single-token match', async () => {
         const cfg = baseConfig({token: 's3kr3t'});
-        const scope = resolveTokenScope('Bearer s3kr3t', cfg);
+        const scope = await resolveTokenScope('Bearer s3kr3t', cfg);
         expect(scope).not.toBeNull();
         expect(scope?.read).toBe(true);
         expect(scope?.write).toBe(true);
@@ -64,12 +70,12 @@ describe('resolveTokenScope', () => {
         expect(scope?.tools).toEqual([]);
     });
 
-    it('returns null on legacy single-token mismatch', () => {
+    it('returns null on legacy single-token mismatch', async () => {
         const cfg = baseConfig({token: 's3kr3t'});
-        expect(resolveTokenScope('Bearer wrong', cfg)).toBeNull();
+        expect(await resolveTokenScope('Bearer wrong', cfg)).toBeNull();
     });
 
-    it('matches granular tokens and forwards their scope', () => {
+    it('matches granular tokens and forwards their scope', async () => {
         const cfg = baseConfig({
             tokens: [{
                 token: 'reader-only',
@@ -78,7 +84,7 @@ describe('resolveTokenScope', () => {
                 pathPrefixes: ['Memory/']
             }]
         });
-        const scope = resolveTokenScope('Bearer reader-only', cfg);
+        const scope = await resolveTokenScope('Bearer reader-only', cfg);
         expect(scope).not.toBeNull();
         expect(scope?.label).toBe('reader');
         expect(scope?.read).toBe(true);
@@ -86,31 +92,87 @@ describe('resolveTokenScope', () => {
         expect(scope?.pathPrefixes).toEqual(['Memory/']);
     });
 
-    it('synthesises a token-hint label when none was given', () => {
+    it('synthesises a token-hint label when none was given', async () => {
         const cfg = baseConfig({tokens: [{token: 'longer-than-eight', read: true}]});
-        const scope = resolveTokenScope('Bearer longer-than-eight', cfg);
+        const scope = await resolveTokenScope('Bearer longer-than-eight', cfg);
         expect(scope?.label).toContain('ight');
     });
 
-    it('falls through granular list to legacy token if no granular match', () => {
+    it('falls through granular list to legacy token if no granular match', async () => {
         const cfg = baseConfig({
             token: 'admin-fallback',
             tokens: [{token: 't1', read: true}]
         });
-        const scope = resolveTokenScope('Bearer admin-fallback', cfg);
+        const scope = await resolveTokenScope('Bearer admin-fallback', cfg);
         expect(scope).not.toBeNull();
         expect(scope?.label).toBe('admin (single-token mode)');
         expect(scope?.write).toBe(true);
     });
 
-    it('returns null when no Authorization header was sent at all', () => {
+    it('returns null when no Authorization header was sent at all', async () => {
         const cfg = baseConfig({token: 's3kr3t'});
-        expect(resolveTokenScope(undefined, cfg)).toBeNull();
+        expect(await resolveTokenScope(undefined, cfg)).toBeNull();
     });
 
-    it('timing-safe across mismatched lengths (no crash)', () => {
+    it('timing-safe across mismatched lengths (no crash)', async () => {
         const cfg = baseConfig({token: 'long-secret'});
-        expect(resolveTokenScope('Bearer x', cfg)).toBeNull();
+        expect(await resolveTokenScope('Bearer x', cfg)).toBeNull();
+    });
+
+    describe('with user store (mode=server)', () => {
+        it('matches a token stored in the user store and exposes its scope', async () => {
+            const store = new InMemoryUserStore();
+            const {plainToken} = await store.createUser({
+                label: 'reader',
+                read: true,
+                write: false,
+                pathPrefixes: ['Memory/']
+            });
+
+            const cfg = baseConfig();
+            const scope = await resolveTokenScope(`Bearer ${plainToken}`, cfg, store);
+
+            expect(scope).not.toBeNull();
+            expect(scope?.label).toBe('reader');
+            expect(scope?.read).toBe(true);
+            expect(scope?.write).toBe(false);
+            expect(scope?.pathPrefixes).toEqual(['Memory/']);
+        });
+
+        it('returns null for an unknown token', async () => {
+            const store = new InMemoryUserStore();
+            await store.createUser({label: 'reader', read: true, write: false});
+
+            const cfg = baseConfig();
+            const scope = await resolveTokenScope('Bearer never-issued-12345678', cfg, store);
+
+            expect(scope).toBeNull();
+        });
+
+        it('rejects a revoked token even after the original auth worked', async () => {
+            const store = new InMemoryUserStore();
+            const {plainToken} = await store.createUser({label: 'writer', read: true, write: true});
+            const cfg = baseConfig();
+
+            const before = await resolveTokenScope(`Bearer ${plainToken}`, cfg, store);
+            expect(before).not.toBeNull();
+
+            await store.revokeByLabel('writer');
+
+            const after = await resolveTokenScope(`Bearer ${plainToken}`, cfg, store);
+            expect(after).toBeNull();
+        });
+
+        it('ignores yaml tokens entirely when a user store is present', async () => {
+            const store = new InMemoryUserStore();
+            const cfg = baseConfig({
+                tokens: [{token: 'yaml-only-token', read: true}]
+            });
+
+            // yaml entry exists, but with a store wired in it must not match
+            const scope = await resolveTokenScope('Bearer yaml-only-token', cfg, store);
+            expect(scope).toBeNull();
+        });
     });
 });
 
