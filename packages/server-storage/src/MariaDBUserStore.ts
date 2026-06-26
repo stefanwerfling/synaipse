@@ -23,6 +23,7 @@ interface UserRow {
     last_used_at: Date | null;
     revoked_at: Date | null;
     expires_at: Date | null;
+    account_id: number | null;
 }
 
 const parseJsonArray = (raw: string | object): string[] => {
@@ -55,7 +56,8 @@ const rowToRecord = (row: UserRow): UserRecord => ({
     createdAt: row.created_at.getTime(),
     lastUsedAt: row.last_used_at?.getTime() ?? null,
     revokedAt: row.revoked_at?.getTime() ?? null,
-    expiresAt: row.expires_at?.getTime() ?? null
+    expiresAt: row.expires_at?.getTime() ?? null,
+    accountId: row.account_id
 });
 
 export class MariaDBUserStore implements UserStore {
@@ -71,16 +73,18 @@ export class MariaDBUserStore implements UserStore {
         const expiresAt = input.expiresAt !== undefined && input.expiresAt !== null
             ? new Date(input.expiresAt)
             : null;
+        const accountId = input.accountId ?? null;
 
         const conn = await this.pool.getConnection();
 
         try {
             const result = await conn.query(
                 `INSERT INTO users
-                    (vault_id, label, token_hash, token_salt, token_hint, can_read, can_write, path_prefixes, tools, expires_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (vault_id, account_id, label, token_hash, token_salt, token_hint, can_read, can_write, path_prefixes, tools, expires_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     this.config.vaultId,
+                    accountId,
                     input.label,
                     hashHex,
                     saltHex,
@@ -216,6 +220,82 @@ export class MariaDBUserStore implements UserStore {
                 'UPDATE users SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?',
                 [id]
             );
+        } finally {
+            await conn.release();
+        }
+    }
+
+    public async listByAccount(accountId: number): Promise<UserRecord[]> {
+        const conn = await this.pool.getConnection();
+
+        try {
+            const rows = await conn.query<UserRow[]>(
+                'SELECT * FROM users WHERE vault_id = ? AND account_id = ? ORDER BY id ASC',
+                [this.config.vaultId, accountId]
+            );
+
+            return rows.map(rowToRecord);
+        } finally {
+            await conn.release();
+        }
+    }
+
+    public async revokeByIdForAccount(id: number, accountId: number): Promise<boolean> {
+        const conn = await this.pool.getConnection();
+
+        try {
+            const result = await conn.query(
+                `UPDATE users
+                    SET revoked_at = CURRENT_TIMESTAMP
+                  WHERE vault_id = ?
+                    AND id = ?
+                    AND account_id = ?
+                    AND revoked_at IS NULL`,
+                [this.config.vaultId, id, accountId]
+            );
+
+            return result.affectedRows > 0;
+        } finally {
+            await conn.release();
+        }
+    }
+
+    public async rotateByIdForAccount(
+        id: number,
+        accountId: number,
+        expiresAt?: number | null
+    ): Promise<RotateUserResult | null> {
+        const {plain, hashHex, saltHex, hint} = generateToken();
+        const expires = expiresAt !== undefined && expiresAt !== null
+            ? new Date(expiresAt)
+            : null;
+
+        const conn = await this.pool.getConnection();
+
+        try {
+            const result = await conn.query(
+                `UPDATE users
+                    SET token_hash = ?, token_salt = ?, token_hint = ?,
+                        last_used_at = NULL, revoked_at = NULL, expires_at = ?
+                  WHERE vault_id = ? AND id = ? AND account_id = ?`,
+                [hashHex, saltHex, hint, expires, this.config.vaultId, id, accountId]
+            );
+
+            if (result.affectedRows === 0) {
+                return null;
+            }
+
+            const rows = await conn.query<UserRow[]>(
+                'SELECT * FROM users WHERE vault_id = ? AND id = ?',
+                [this.config.vaultId, id]
+            );
+
+            const row = rows[0];
+            if (row === undefined) {
+                throw new Error('user update succeeded but row not readable');
+            }
+
+            return {user: rowToRecord(row), plainToken: plain};
         } finally {
             await conn.release();
         }

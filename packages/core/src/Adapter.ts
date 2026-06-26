@@ -71,6 +71,8 @@ export interface UserRecord {
     revokedAt: number | null;
     /** Epoch ms; null means "never expires". findByToken filters out rows where expiresAt is in the past. */
     expiresAt: number | null;
+    /** Owner account id (slice 16c); null for legacy / service tokens with no human owner. */
+    accountId: number | null;
 }
 
 export interface CreateUserInput {
@@ -81,6 +83,13 @@ export interface CreateUserInput {
     tools?: readonly string[];
     /** Epoch ms when the token should stop working. Omit for indefinite lifetime. */
     expiresAt?: number | null;
+    /**
+     * Optional owner account. Slice 16c self-service tokens set this
+     * to the logged-in user's id so /api/tokens can scope CRUD per
+     * account. CLI-created tokens leave it null = "service token, no
+     * human owner".
+     */
+    accountId?: number | null;
 }
 
 export interface CreateUserResult {
@@ -116,6 +125,17 @@ export interface UserStore {
     rotateByLabel(label: string, expiresAt?: number | null): Promise<RotateUserResult | null>;
     touchLastUsed(id: number): Promise<void>;
     close(): Promise<void>;
+
+    /**
+     * Account-scoped self-service operations (slice 16c). The Web-UI
+     * /api/tokens routes use these so a logged-in user only sees +
+     * mutates their OWN rows. All operations are no-ops / return
+     * null when the row exists but belongs to a different account
+     * (or has account_id IS NULL — service tokens are admin-only).
+     */
+    listByAccount(accountId: number): Promise<UserRecord[]>;
+    revokeByIdForAccount(id: number, accountId: number): Promise<boolean>;
+    rotateByIdForAccount(id: number, accountId: number, expiresAt?: number | null): Promise<RotateUserResult | null>;
 }
 
 /**

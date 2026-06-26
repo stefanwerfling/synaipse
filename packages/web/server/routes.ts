@@ -5,8 +5,10 @@ import type {Frontmatter} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService, TodoItem} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
+import type {UserStore} from '@synaipse/core';
 import {resolveAssetPath} from './asset-route.js';
 import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-routes.js';
+import {handleTokensRoute} from './tokens-routes.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -201,13 +203,18 @@ const isPublicApiPath = (path: string): boolean => {
 export interface RoutesOptions {
     mode: 'local' | 'server';
     auth: AuthContext | null;
+    /**
+     * Lazy getter for the MCP-token UserStore (used by /api/tokens
+     * self-service). Null in local-mode where there is no users table.
+     */
+    userStore?: UserStore | null;
 }
 
 export const routes = (
     service: SynaipseService,
     broadcaster: EventBroadcaster,
     jobs: JobManager,
-    opts: RoutesOptions = {mode: 'local', auth: null}
+    opts: RoutesOptions = {mode: 'local', auth: null, userStore: null}
 ): Handler => async (req, res, url) => {
     const path = url.pathname;
     const method = req.method ?? 'GET';
@@ -225,6 +232,17 @@ export const routes = (
             json(res, 401, {error: 'authentication required'});
             return;
         }
+    }
+
+    // Self-service token CRUD. Runs after the gate so the resolved
+    // account is guaranteed valid by the time we look it up again.
+    if (path.startsWith('/api/tokens') && opts.userStore !== null && opts.userStore !== undefined) {
+        const userStore = opts.userStore;
+        const tokensResult = await handleTokensRoute(
+            req, res, url, opts.mode, opts.auth,
+            async () => userStore
+        );
+        if (tokensResult.handled) return;
     }
 
     if (path === '/api/events/stream') {

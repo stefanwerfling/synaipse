@@ -183,7 +183,8 @@ const main = async (): Promise<void> => {
     const jobs = new JobManager(service);
     const handle = routes(service, broadcaster, jobs, {
         mode: config.mode === 'server' ? 'server' : 'local',
-        auth
+        auth,
+        userStore
     });
 
     service.onVaultChange((event) => {

@@ -103,6 +103,32 @@ export class CachedUserStore implements UserStore {
         return this.inner.touchLastUsed(id);
     }
 
+    public async listByAccount(accountId: number): Promise<UserRecord[]> {
+        return this.inner.listByAccount(accountId);
+    }
+
+    public async revokeByIdForAccount(id: number, accountId: number): Promise<boolean> {
+        const ok = await this.inner.revokeByIdForAccount(id, accountId);
+        // Same coarse-but-cheap flush as revokeByLabel — once any token
+        // is revoked we cannot let a stale cached entry keep authenticating.
+        if (ok) {
+            this.cache.clear();
+        }
+        return ok;
+    }
+
+    public async rotateByIdForAccount(
+        id: number,
+        accountId: number,
+        expiresAt?: number | null
+    ): Promise<RotateUserResult | null> {
+        const result = await this.inner.rotateByIdForAccount(id, accountId, expiresAt);
+        if (result !== null) {
+            this.cache.clear();
+        }
+        return result;
+    }
+
     public async close(): Promise<void> {
         this.cache.clear();
         return this.inner.close();

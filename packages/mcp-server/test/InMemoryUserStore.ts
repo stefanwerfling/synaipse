@@ -37,6 +37,7 @@ export class InMemoryUserStore implements UserStore {
             lastUsedAt: null,
             revokedAt: null,
             expiresAt: input.expiresAt ?? null,
+            accountId: input.accountId ?? null,
             hashHex,
             saltHex
         };
@@ -100,6 +101,43 @@ export class InMemoryUserStore implements UserStore {
         }
     }
 
+    public async listByAccount(accountId: number): Promise<UserRecord[]> {
+        const out: UserRecord[] = [];
+        for (const row of this.rows.values()) {
+            if (row.accountId === accountId) out.push(this.toRecord(row));
+        }
+        return out;
+    }
+
+    public async revokeByIdForAccount(id: number, accountId: number): Promise<boolean> {
+        const row = this.rows.get(id);
+        if (row === undefined) return false;
+        if (row.accountId !== accountId) return false;
+        if (row.revokedAt !== null) return false;
+        row.revokedAt = Date.now();
+        return true;
+    }
+
+    public async rotateByIdForAccount(
+        id: number,
+        accountId: number,
+        expiresAt?: number | null
+    ): Promise<RotateUserResult | null> {
+        const row = this.rows.get(id);
+        if (row === undefined) return null;
+        if (row.accountId !== accountId) return null;
+
+        const {plain, hashHex, saltHex, hint} = generateToken();
+        row.hashHex = hashHex;
+        row.saltHex = saltHex;
+        row.tokenHint = hint;
+        row.lastUsedAt = null;
+        row.revokedAt = null;
+        row.expiresAt = expiresAt ?? null;
+
+        return {user: this.toRecord(row), plainToken: plain};
+    }
+
     public async close(): Promise<void> {
         // nothing to release
     }
@@ -116,7 +154,8 @@ export class InMemoryUserStore implements UserStore {
             createdAt: row.createdAt,
             lastUsedAt: row.lastUsedAt,
             revokedAt: row.revokedAt,
-            expiresAt: row.expiresAt
+            expiresAt: row.expiresAt,
+            accountId: row.accountId
         };
     }
 }
