@@ -89,6 +89,7 @@ export class Editor {
 
         this.element = el('div', {class: 'editor'});
         this.build();
+        this.preview.setNoteId(this.note.id);
         this.preview.update(this.content);
         this.preview.setTypedLinks(extractTypedLinks(this.note.frontmatter));
 
@@ -114,6 +115,7 @@ export class Editor {
         this.tagsField.value = this.tagsInput;
         this.textarea.value = this.content;
         this.renderError();
+        this.preview.setNoteId(this.note.id);
         this.preview.update(this.content);
         this.preview.setTypedLinks(extractTypedLinks(this.note.frontmatter));
     }

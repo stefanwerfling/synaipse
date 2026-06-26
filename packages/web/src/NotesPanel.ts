@@ -786,6 +786,7 @@ export class NotesPanel {
         }
 
         this.viewer.appendChild(this.viewerPreview.element);
+        this.viewerPreview.setNoteId(this.active.id);
         this.viewerPreview.update(this.active.content);
         this.viewerPreview.setTypedLinks(extractTypedLinks(this.active.frontmatter));
         this.renderLinks();

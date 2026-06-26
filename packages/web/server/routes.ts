@@ -1,8 +1,11 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
+import {createReadStream} from 'node:fs';
+import {stat} from 'node:fs/promises';
 import type {Frontmatter} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService, TodoItem} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
+import {resolveAssetPath} from './asset-route.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -361,6 +364,54 @@ export const routes = (
         }
 
         methodNotAllowed(res);
+        return;
+    }
+
+    if (path === '/api/asset') {
+        if (method !== 'GET' && method !== 'HEAD') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const resolved = resolveAssetPath(service.getVault().root, url.searchParams.get('path'));
+
+        if (!resolved.ok) {
+            const status = resolved.error.kind === 'missing-path' ? 400
+                : resolved.error.kind === 'unsupported-extension' ? 415
+                : 403;
+            const message = resolved.error.kind === 'missing-path' ? 'missing ?path='
+                : resolved.error.kind === 'unsupported-extension' ? `unsupported extension: ${resolved.error.ext}`
+                : `illegal path: ${resolved.error.reason}`;
+            json(res, status, {error: message});
+            return;
+        }
+
+        try {
+            const st = await stat(resolved.value.absolutePath);
+            if (!st.isFile()) {
+                json(res, 404, {error: 'not a file'});
+                return;
+            }
+
+            res.writeHead(200, {
+                'Content-Type': resolved.value.contentType,
+                'Content-Length': String(st.size),
+                // Asset paths are content-hashed (img-<sha>.<ext>), so they
+                // are immutable for as long as the bytes stay. Aggressive
+                // caching is safe and helps notes with many embeds.
+                'Cache-Control': 'public, max-age=31536000, immutable'
+            });
+
+            if (method === 'HEAD') {
+                res.end();
+                return;
+            }
+
+            createReadStream(resolved.value.absolutePath).pipe(res);
+        } catch {
+            json(res, 404, {error: 'asset not found'});
+        }
+
         return;
     }
 

@@ -2,6 +2,7 @@ import {marked} from 'marked';
 import {markedHighlight} from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
 import type {TypedLink, TypedLinkKind} from '@synaipse/core';
+import {resolveAssetUrl} from './AssetUrl.js';
 import {clear, el} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
@@ -58,6 +59,29 @@ export interface MarkdownPreviewOptions {
     fetchSnippet?: (noteId: string) => Promise<NoteSnippet>;
 }
 
+/**
+ * Rewrite every `<img>` inside `host` whose src points at a vault asset
+ * into a `/api/asset?path=...` URL. Pure DOM walk over the rendered
+ * output — done after marked.parse so the rewriting works regardless of
+ * which renderer extensions are active. Sources we don't recognize as
+ * vault assets (absolute URLs, data:, fragments, unknown extensions)
+ * are left untouched.
+ */
+export const rewriteAssetImages = (host: HTMLElement, noteId: string | undefined): void => {
+    const imgs = host.querySelectorAll<HTMLImageElement>('img');
+    for (const img of imgs) {
+        // `getAttribute` returns the literal markdown src; `img.src` would
+        // already resolve against the page URL and lose the relative form
+        // we need for noteId-based rewriting.
+        const raw = img.getAttribute('src');
+        if (raw === null) continue;
+        const rewritten = resolveAssetUrl(raw, noteId);
+        if (rewritten !== null) {
+            img.setAttribute('src', rewritten);
+        }
+    }
+};
+
 const HOVER_OPEN_DELAY = 280;
 const HOVER_CLOSE_DELAY = 140;
 const CARD_WIDTH = 340;
@@ -86,8 +110,9 @@ const renderMarkdown = (content: string): string => {
  * `@antv/infographic` on first use, so chat turns without infographics
  * pay zero cost.
  */
-export const renderMarkdownInto = (host: HTMLElement, content: string): void => {
+export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: string): void => {
     host.innerHTML = renderMarkdown(content);
+    rewriteAssetImages(host, noteId);
     void applyAntvInfographicsTo(host);
 };
 
@@ -154,6 +179,7 @@ const isInsideCode = (node: Node): boolean => {
 export class MarkdownPreview {
     public readonly element: HTMLElement;
     private content = '';
+    private noteId: string | undefined;
     private typedLinks: readonly TypedLink[] = [];
     private hoverCard: HTMLElement | null = null;
     private hoverHandle: HoverHandle | null = null;
@@ -162,6 +188,22 @@ export class MarkdownPreview {
 
     public constructor(private readonly opts: MarkdownPreviewOptions = {}) {
         this.element = el('div', {class: 'md-preview'});
+    }
+
+    /**
+     * Set the vault-relative note id used to resolve relative asset
+     * paths (`![](./_assets/img.png)`) into `/api/asset?path=...` URLs.
+     * Pass undefined for previews where there is no anchoring note —
+     * relative image srcs will then pass through as-is.
+     */
+    public setNoteId(noteId: string | undefined): void {
+        if (this.noteId === noteId) {
+            return;
+        }
+        this.noteId = noteId;
+        if (this.content.length > 0) {
+            this.render();
+        }
     }
 
     public update(content: string): void {
@@ -206,6 +248,7 @@ export class MarkdownPreview {
         this.element.appendChild(body);
 
         this.transformWikilinks();
+        rewriteAssetImages(body, this.noteId);
         void applyAntvInfographicsTo(this.element);
     }
 
