@@ -22,6 +22,10 @@
     "./token-hash": {
       "types": "./dist/TokenHash.d.ts",
       "import": "./dist/TokenHash.js"
+    },
+    "./password-hash": {
+      "types": "./dist/PasswordHash.d.ts",
+      "import": "./dist/PasswordHash.js"
     }
   },
   "scripts": {

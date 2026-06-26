@@ -117,3 +117,61 @@ export interface UserStore {
     touchLastUsed(id: number): Promise<void>;
     close(): Promise<void>;
 }
+
+/**
+ * Web-UI login account. Distinct from `UserRecord` above: an account is
+ * a human who logs into the Web-UI with email + password, whereas
+ * UserRecord is an MCP bearer token. Migration 006 links them via the
+ * (currently unused) `users.account_id` column — Slice 16c will populate
+ * it when tokens are created via the Self-Service-UI.
+ *
+ * Server-mode only. Local-mode has no concept of accounts.
+ */
+export interface AccountRecord {
+    id: number;
+    email: string;
+    isAdmin: boolean;
+    createdAt: number;
+    lastLoginAt: number | null;
+    disabledAt: number | null;
+}
+
+export interface CreateAccountInput {
+    email: string;
+    password: string;
+    isAdmin?: boolean;
+}
+
+/**
+ * Storage port for Web-UI login accounts. Implementations:
+ * - InMemoryAccountStore (test helper, packages/mcp-server/test)
+ * - MariaDBAccountStore (@synaipse/server-storage) — backed by `accounts`
+ *
+ * Only wired in mode=server; the Bootstrap-CLI (`npm run admin bootstrap`)
+ * creates the first admin row directly because the chicken-and-egg
+ * prevents going through the UI for the very first account.
+ */
+export interface AccountStore {
+    create(input: CreateAccountInput): Promise<AccountRecord>;
+    findByEmail(email: string): Promise<AccountRecord | null>;
+    findById(id: number): Promise<AccountRecord | null>;
+    /**
+     * Returns the account if email matches AND password verifies AND the
+     * account is not disabled. Returns null in every other case — the
+     * boundary doesn't distinguish wrong-email from wrong-password from
+     * disabled, by design (no enumeration oracle on the login endpoint).
+     */
+    verifyLogin(email: string, password: string): Promise<AccountRecord | null>;
+    listAccounts(): Promise<AccountRecord[]>;
+    setDisabled(id: number, disabled: boolean): Promise<boolean>;
+    setAdmin(id: number, isAdmin: boolean): Promise<boolean>;
+    /**
+     * Update the stored password for an account. Used by both the
+     * self-service "change my password" flow (Slice 16c) and by admin
+     * "reset user password" (Slice 16d). Returns false if no account
+     * with the given id exists in this vault.
+     */
+    setPassword(id: number, password: string): Promise<boolean>;
+    touchLastLogin(id: number): Promise<void>;
+    close(): Promise<void>;
+}
