@@ -5,9 +5,12 @@ import http from 'node:http';
 import {URL} from 'node:url';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
-import type {UserStore} from '@synaipse/core';
+import type {AccountStore, UserStore} from '@synaipse/core';
 import {NoopAssetStore, type ServiceOverrides} from '@synaipse/service';
 import {CachedUserStore} from '@synaipse/mcp-server';
+import {InMemorySessionStore} from './sessions.js';
+import {LoginRateLimit} from './login-rate-limit.js';
+import type {AuthContext} from './auth-routes.js';
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
@@ -103,12 +106,13 @@ const MCP_BASE_PATH = (process.env.SYNAIPSE_MCP_PATH ?? '/mcp').replace(/\/+$/, 
 interface OverridesResult {
     overrides: ServiceOverrides;
     userStore: UserStore | null;
+    accountStore: AccountStore | null;
     close: () => Promise<void>;
 }
 
 const buildOverrides = async (): Promise<OverridesResult> => {
     if (config.mode !== 'server') {
-        return {overrides: {}, userStore: null, close: () => Promise.resolve()};
+        return {overrides: {}, userStore: null, accountStore: null, close: () => Promise.resolve()};
     }
 
     if (config.mariadb === undefined) {
@@ -132,12 +136,20 @@ const buildOverrides = async (): Promise<OverridesResult> => {
             skipWatcher: true
         },
         userStore,
+        accountStore: bundle.accounts,
         close: () => bundle.close()
     };
 };
 
+const resolveSecureCookie = (): boolean => {
+    const raw = process.env.SYNAIPSE_COOKIE_SECURE;
+    if (raw === undefined) return false;
+    const lower = raw.trim().toLowerCase();
+    return lower === '1' || lower === 'true' || lower === 'yes';
+};
+
 const main = async (): Promise<void> => {
-    const {overrides, userStore, close: closeAdapters} = await buildOverrides();
+    const {overrides, userStore, accountStore, close: closeAdapters} = await buildOverrides();
     if (config.mode === 'server') {
         const cacheTtl = resolveAuthCacheTtlMs();
         const cacheNote = cacheTtl > 0 ? `auth-cache TTL=${cacheTtl}ms` : 'auth-cache OFF';
@@ -150,12 +162,29 @@ const main = async (): Promise<void> => {
         }
     }
 
+    let auth: AuthContext | null = null;
+    if (config.mode === 'server' && accountStore !== null) {
+        auth = {
+            sessions: new InMemorySessionStore(),
+            accounts: accountStore,
+            rateLimit: new LoginRateLimit(),
+            secureCookie: resolveSecureCookie()
+        };
+        process.stdout.write(
+            `[synaipse-web-api] auth: cookie-session gate ON (Secure=${auth.secureCookie}). `
+            + 'Bootstrap admin via `npm run admin bootstrap --email=... --password=...`\n'
+        );
+    }
+
     const service = new SynaipseService(config, overrides);
     await service.start();
 
     const broadcaster = new EventBroadcaster();
     const jobs = new JobManager(service);
-    const handle = routes(service, broadcaster, jobs);
+    const handle = routes(service, broadcaster, jobs, {
+        mode: config.mode === 'server' ? 'server' : 'local',
+        auth
+    });
 
     service.onVaultChange((event) => {
         broadcaster.publish({

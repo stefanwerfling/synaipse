@@ -6,6 +6,7 @@ import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, Pr
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
 import {resolveAssetPath} from './asset-route.js';
+import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-routes.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -183,13 +184,48 @@ const asFrontmatter = (value: unknown): Frontmatter | undefined => {
     return value as Frontmatter;
 };
 
+/**
+ * Endpoints that bypass the requireAuth gate even in server-mode:
+ *   - /api/auth/*          — the auth surface itself (chicken-and-egg)
+ *   - /api/clip            — the browser-extension webclipper has its
+ *                            own bearer auth pattern; locking it behind
+ *                            cookie auth would break the extension
+ *                            until clip-side login lands.
+ */
+const isPublicApiPath = (path: string): boolean => {
+    if (path === '/api/clip') return true;
+    if (path.startsWith('/api/auth/')) return true;
+    return false;
+};
+
+export interface RoutesOptions {
+    mode: 'local' | 'server';
+    auth: AuthContext | null;
+}
+
 export const routes = (
     service: SynaipseService,
     broadcaster: EventBroadcaster,
-    jobs: JobManager
+    jobs: JobManager,
+    opts: RoutesOptions = {mode: 'local', auth: null}
 ): Handler => async (req, res, url) => {
     const path = url.pathname;
     const method = req.method ?? 'GET';
+
+    // Auth surface runs before the gate so login itself isn't gated.
+    const authResult = await handleAuthRoute(req, res, url, opts.mode, opts.auth);
+    if (authResult.handled) return;
+
+    // Gate every other /api/* request in server-mode behind a valid
+    // session. Local-mode is a no-op so dev / single-user / yaml-token
+    // setups stay zero-config.
+    if (opts.mode === 'server' && opts.auth !== null && path.startsWith('/api/') && !isPublicApiPath(path)) {
+        const current = await resolveCurrentAccount(req, opts.auth);
+        if (current === null) {
+            json(res, 401, {error: 'authentication required'});
+            return;
+        }
+    }
 
     if (path === '/api/events/stream') {
         if (method !== 'GET') {

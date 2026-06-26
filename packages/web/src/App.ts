@@ -79,7 +79,7 @@ export class App {
     private heatRaf: number | null = null;
     private reloadTimer: number | null = null;
 
-    public constructor() {
+    public constructor(private readonly account: {email: string; isAdmin: boolean} | null = null) {
         this.selectedTags = new PersistentValue<ReadonlySet<string>>(
             STORAGE_SELECTED_TAGS,
             EMPTY_TAG_SET,
@@ -458,14 +458,32 @@ export class App {
         this.updateThemeToggle(getTheme());
         onThemeChange((theme) => this.updateThemeToggle(theme));
 
+        const trailing: HTMLElement[] = [importBtn, this.themeToggleBtn, this.activityBtn];
+
+        if (this.account !== null) {
+            const accountBtn = el('button', {
+                class: 'topbar-account',
+                attrs: {type: 'button', title: `Signed in as ${this.account.email} — click to sign out`},
+                text: this.account.email,
+                on: {
+                    click: () => {
+                        void (async () => {
+                            const {logout} = await import('./Auth.js');
+                            await logout();
+                            location.reload();
+                        })();
+                    }
+                }
+            });
+            trailing.push(accountBtn);
+        }
+
         return el('header', {class: 'topbar'},
             brand,
             el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
-            importBtn,
-            this.themeToggleBtn,
-            this.activityBtn
+            ...trailing
         );
     }
 

@@ -4741,3 +4741,116 @@ button.typed-link-badge:hover {
     text-decoration: line-through;
     color: var(--text-2);
 }
+/* ============================================================
+   Login screen (server-mode only, pre-app mount)
+   ============================================================ */
+.login-screen {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--bg-0);
+    padding: 24px;
+    z-index: 100;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-1);
+    border-radius: 12px;
+    padding: 28px 24px;
+    box-shadow: var(--shadow-2);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.login-title {
+    margin: 0;
+    font-size: 22px;
+    color: var(--text-0);
+    text-align: center;
+}
+
+.login-subtitle {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--text-2);
+    text-align: center;
+}
+
+.login-input {
+    appearance: none;
+    background: var(--bg-1);
+    color: var(--text-0);
+    border: 1px solid var(--border-1);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.login-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+}
+
+.login-submit {
+    appearance: none;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+.login-submit:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.login-submit:active:not(:disabled) {
+    background: var(--accent-press);
+}
+
+.login-submit:disabled {
+    opacity: 0.65;
+    cursor: progress;
+}
+
+.login-error {
+    min-height: 1em;
+    color: var(--red, #ef4444);
+    font-size: 13px;
+    text-align: center;
+}
+
+.topbar-account {
+    appearance: none;
+    background: var(--bg-1);
+    color: var(--text-1);
+    border: 1px solid var(--border-1);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar-account:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--text-0);
+}
