@@ -63,3 +63,88 @@ export const logout = async (): Promise<void> => {
         credentials: 'same-origin'
     });
 };
+
+export interface TokenDto {
+    id: number;
+    label: string;
+    read: boolean;
+    write: boolean;
+    tokenHint: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+    revokedAt: number | null;
+    expiresAt: number | null;
+}
+
+export interface CreateTokenInput {
+    label: string;
+    read: boolean;
+    write: boolean;
+    expiresInDays?: number | null;
+}
+
+export interface CreateTokenResult {
+    token: TokenDto;
+    /** Plain bearer — returned exactly once, never re-fetchable. */
+    plainToken: string;
+}
+
+const tokensError = async (res: Response, fallback: string): Promise<Error> => {
+    const text = await res.text().catch(() => '');
+    try {
+        const parsed = JSON.parse(text) as {error?: string};
+        if (typeof parsed.error === 'string') return new Error(parsed.error);
+    } catch { /* fall through */ }
+    return new Error(`${fallback} (${res.status})`);
+};
+
+export const listTokens = async (): Promise<TokenDto[]> => {
+    const res = await fetch('/api/tokens', {credentials: 'same-origin'});
+    if (!res.ok) throw await tokensError(res, 'listTokens failed');
+    const body = await res.json() as {tokens: TokenDto[]};
+    return body.tokens;
+};
+
+export const createToken = async (input: CreateTokenInput): Promise<CreateTokenResult> => {
+    const payload: Record<string, unknown> = {
+        label: input.label,
+        read: input.read,
+        write: input.write
+    };
+    if (input.expiresInDays !== undefined && input.expiresInDays !== null) {
+        payload.expiresInDays = input.expiresInDays;
+    }
+
+    const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw await tokensError(res, 'createToken failed');
+    return await res.json() as CreateTokenResult;
+};
+
+export const revokeToken = async (id: number): Promise<void> => {
+    const res = await fetch(`/api/tokens/${id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+    });
+    if (!res.ok) throw await tokensError(res, 'revokeToken failed');
+};
+
+export const rotateToken = async (id: number, expiresInDays?: number | null): Promise<CreateTokenResult> => {
+    const payload: Record<string, unknown> = {};
+    if (expiresInDays !== undefined && expiresInDays !== null) {
+        payload.expiresInDays = expiresInDays;
+    }
+
+    const res = await fetch(`/api/tokens/${id}/rotate`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw await tokensError(res, 'rotateToken failed');
+    return await res.json() as CreateTokenResult;
+};

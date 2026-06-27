@@ -15,6 +15,7 @@ import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {Search} from './Search.js';
+import {Settings} from './Settings.js';
 import {TagBar, TagEntry} from './TagBar.js';
 import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 
@@ -65,6 +66,7 @@ export class App {
     private activityBadge!: HTMLElement;
     private importDialog!: ImportDialog;
     private themeToggleBtn!: HTMLButtonElement;
+    private settings: Settings | null = null;
 
     private selectedTags: PersistentValue<ReadonlySet<string>>;
     private hideIsolated: PersistentValue<boolean>;
@@ -461,19 +463,13 @@ export class App {
         const trailing: HTMLElement[] = [importBtn, this.themeToggleBtn, this.activityBtn];
 
         if (this.account !== null) {
+            const account = this.account;
+            this.settings = new Settings({account});
             const accountBtn = el('button', {
                 class: 'topbar-account',
-                attrs: {type: 'button', title: `Signed in as ${this.account.email} — click to sign out`},
-                text: this.account.email,
-                on: {
-                    click: () => {
-                        void (async () => {
-                            const {logout} = await import('./Auth.js');
-                            await logout();
-                            location.reload();
-                        })();
-                    }
-                }
+                attrs: {type: 'button', title: `Signed in as ${account.email} — open account settings`},
+                text: account.email,
+                on: {click: () => this.settings?.open()}
             });
             trailing.push(accountBtn);
         }

@@ -4854,3 +4854,325 @@ button.typed-link-badge:hover {
     border-color: var(--accent);
     color: var(--text-0);
 }
+
+/* Account settings modal --------------------------------------------------- */
+
+.settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 130;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.settings-dialog {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    width: min(720px, 100%);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+}
+
+.settings-head {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.settings-head-main h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-0);
+}
+
+.settings-head-email {
+    margin-top: 2px;
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.settings-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-4);
+}
+
+.settings-footer {
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.settings-footer-hint {
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+/* Tokens panel ------------------------------------------------------------- */
+
+.tokens-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.tokens-intro {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.tokens-section-title {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tokens-form-host {
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-0);
+}
+
+.tokens-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.tokens-form-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.tokens-label-text {
+    color: var(--text-3);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tokens-input {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: 6px 10px;
+    color: var(--text-0);
+    font: inherit;
+    font-size: 13px;
+}
+
+.tokens-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+}
+
+.tokens-input-small {
+    max-width: 240px;
+}
+
+.tokens-checks {
+    display: flex;
+    gap: var(--space-4);
+}
+
+.tokens-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-1);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.tokens-form-error {
+    min-height: 1em;
+    color: var(--red);
+    font-size: 12px;
+}
+
+.tokens-form-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.tokens-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.tokens-empty {
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--text-3);
+    font-size: 13px;
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-3);
+}
+
+.tokens-empty.error {
+    color: var(--red);
+    border-color: var(--red);
+}
+
+.tokens-row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+}
+
+.tokens-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.tokens-row-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: 4px;
+}
+
+.tokens-row-label {
+    color: var(--text-0);
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tokens-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tokens-status.active {
+    background: rgba(52, 211, 153, 0.14);
+    color: var(--green);
+}
+
+.tokens-status.revoked {
+    background: rgba(248, 113, 113, 0.14);
+    color: var(--red);
+}
+
+.tokens-row-scopes {
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--accent-soft);
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+}
+
+.tokens-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    color: var(--text-3);
+    font-size: 11px;
+}
+
+.tokens-row-hint {
+    font-family: var(--font-mono);
+    color: var(--text-2);
+}
+
+.tokens-row-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: var(--space-2);
+    align-self: center;
+}
+
+/* Plain-bearer reveal modal ------------------------------------------------ */
+
+.tokens-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 140;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.tokens-modal {
+    background: var(--bg-1);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-3);
+    width: min(540px, 100%);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    box-shadow: var(--shadow-lg);
+}
+
+.tokens-modal-title {
+    margin: 0;
+    color: var(--text-0);
+    font-size: 15px;
+}
+
+.tokens-modal-warning {
+    margin: 0;
+    color: var(--text-1);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.tokens-modal-codewrap {
+    display: flex;
+    gap: var(--space-2);
+    align-items: stretch;
+}
+
+.tokens-modal-code {
+    flex: 1 1 auto;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    padding: var(--space-3);
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    word-break: break-all;
+    user-select: all;
+}
+
+.tokens-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
