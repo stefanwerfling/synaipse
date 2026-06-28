@@ -2,13 +2,14 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import type {Frontmatter} from '@synaipse/core';
-import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService, TodoItem} from '@synaipse/service';
+import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
 import type {UserStore} from '@synaipse/core';
 import {resolveAssetPath} from './asset-route.js';
 import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-routes.js';
 import {handleTokensRoute} from './tokens-routes.js';
+import {handleAdminRoute} from './admin-routes.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -243,6 +244,13 @@ export const routes = (
             async () => userStore
         );
         if (tokensResult.handled) return;
+    }
+
+    // Admin user-management. The handler re-resolves the current account
+    // and refuses non-admins with 403 even if the gate let them through.
+    if (path.startsWith('/api/admin/')) {
+        const adminResult = await handleAdminRoute(req, res, url, opts.mode, opts.auth);
+        if (adminResult.handled) return;
     }
 
     if (path === '/api/events/stream') {
