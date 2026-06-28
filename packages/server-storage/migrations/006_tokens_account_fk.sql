@@ -12,8 +12,10 @@
 -- operator decides whether to also revoke them; we don't cascade
 -- destruction of MCP access from a UI action.
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS account_id BIGINT UNSIGNED NULL AFTER vault_id;
-
--- Foreign key in a separate statement so re-runs don't fail when the
--- column already exists but the FK is missing.
-ALTER TABLE users ADD KEY IF NOT EXISTS ix_account_id (account_id);
+-- One ALTER, two clauses — the migration runner sends each file as a
+-- single query (multipleStatements: false), so adjacent statements with
+-- their own semicolons would 1064 on parse. Both IF NOT EXISTS clauses
+-- keep this idempotent on re-runs.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS account_id BIGINT UNSIGNED NULL AFTER vault_id,
+    ADD KEY IF NOT EXISTS ix_account_id (account_id);
