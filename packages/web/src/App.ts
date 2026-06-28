@@ -81,7 +81,7 @@ export class App {
     private heatRaf: number | null = null;
     private reloadTimer: number | null = null;
 
-    public constructor(private readonly account: {email: string; isAdmin: boolean} | null = null) {
+    public constructor(private readonly account: {id: number; email: string; isAdmin: boolean} | null = null) {
         this.selectedTags = new PersistentValue<ReadonlySet<string>>(
             STORAGE_SELECTED_TAGS,
             EMPTY_TAG_SET,

@@ -148,3 +148,55 @@ export const rotateToken = async (id: number, expiresInDays?: number | null): Pr
     if (!res.ok) throw await tokensError(res, 'rotateToken failed');
     return await res.json() as CreateTokenResult;
 };
+
+/**
+ * Admin-side view of an account — adds disabledAt which the self-facing
+ * /api/auth/me deliberately omits (a disabled user can't reach /me at all,
+ * so the field would be dead weight for self-view).
+ */
+export interface AdminAccountDto extends AccountDto {
+    disabledAt: number | null;
+}
+
+export interface CreateUserInput {
+    email: string;
+    password: string;
+    isAdmin: boolean;
+}
+
+export interface PatchUserInput {
+    disabled?: boolean;
+    isAdmin?: boolean;
+    password?: string;
+}
+
+export const listUsers = async (): Promise<AdminAccountDto[]> => {
+    const res = await fetch('/api/admin/users', {credentials: 'same-origin'});
+    if (!res.ok) throw await tokensError(res, 'listUsers failed');
+    const body = await res.json() as {accounts: AdminAccountDto[]};
+    return body.accounts;
+};
+
+export const createUser = async (input: CreateUserInput): Promise<AdminAccountDto> => {
+    const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(input)
+    });
+    if (!res.ok) throw await tokensError(res, 'createUser failed');
+    const body = await res.json() as {account: AdminAccountDto};
+    return body.account;
+};
+
+export const patchUser = async (id: number, patch: PatchUserInput): Promise<AdminAccountDto> => {
+    const res = await fetch(`/api/admin/users/${id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(patch)
+    });
+    if (!res.ok) throw await tokensError(res, 'patchUser failed');
+    const body = await res.json() as {account: AdminAccountDto};
+    return body.account;
+};

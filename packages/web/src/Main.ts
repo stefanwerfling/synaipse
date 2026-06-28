@@ -12,7 +12,7 @@ if (host === null) {
     throw new Error('Root element not found');
 }
 
-const mountApp = (account: {email: string; isAdmin: boolean} | null = null): void => {
+const mountApp = (account: {id: number; email: string; isAdmin: boolean} | null = null): void => {
     const app = new App(account);
     void app.mount(host);
 };
@@ -34,7 +34,7 @@ const bootstrap = async (): Promise<void> => {
                 });
                 return;
             }
-            mountApp({email: mode.account.email, isAdmin: mode.account.isAdmin});
+            mountApp({id: mode.account.id, email: mode.account.email, isAdmin: mode.account.isAdmin});
             return;
         }
     } catch (err) {

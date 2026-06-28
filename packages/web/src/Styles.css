@@ -5176,3 +5176,232 @@ button.typed-link-badge:hover {
     justify-content: flex-end;
     gap: var(--space-2);
 }
+
+/* Settings tab bar -------------------------------------------------------- */
+
+.settings-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-0);
+}
+
+.settings-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 13px;
+    padding: 10px var(--space-3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.settings-tab:hover {
+    color: var(--text-1);
+}
+
+.settings-tab.active {
+    color: var(--text-0);
+    border-bottom-color: var(--accent);
+}
+
+/* Admin panel ------------------------------------------------------------- */
+
+.admin-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.admin-intro {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.admin-section-title {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.admin-form-host {
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-0);
+}
+
+.admin-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.admin-form-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.admin-label-text {
+    color: var(--text-3);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.admin-input {
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: 6px 10px;
+    color: var(--text-0);
+    font: inherit;
+    font-size: 13px;
+}
+
+.admin-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+}
+
+.admin-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-1);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.admin-form-error {
+    min-height: 1em;
+    color: var(--red);
+    font-size: 12px;
+}
+
+.admin-form-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.admin-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.admin-empty {
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--text-3);
+    font-size: 13px;
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-3);
+}
+
+.admin-empty.error {
+    color: var(--red);
+    border-color: var(--red);
+}
+
+.admin-row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-0);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+}
+
+.admin-row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.admin-row-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: 4px;
+}
+
+.admin-row-email {
+    color: var(--text-0);
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.admin-status.active {
+    background: rgba(52, 211, 153, 0.14);
+    color: var(--green);
+}
+
+.admin-status.revoked {
+    background: rgba(248, 113, 113, 0.14);
+    color: var(--red);
+}
+
+.admin-role-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: var(--bg-2);
+    color: var(--text-2);
+}
+
+.admin-role-badge.admin {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.admin-self-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: rgba(250, 204, 21, 0.14);
+    color: #facc15;
+}
+
+.admin-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    color: var(--text-3);
+    font-size: 11px;
+}
+
+.admin-row-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: var(--space-2);
+    align-self: center;
+}
