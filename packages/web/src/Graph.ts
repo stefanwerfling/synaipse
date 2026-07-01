@@ -282,26 +282,34 @@ export class GraphView implements GraphRenderer {
             return;
         }
 
-        if (!this.state.showHeat) {
-            this.cy.nodes().forEach((node) => {
-                node.removeStyle('border-width border-color border-opacity');
-            });
-            return;
-        }
+        const cy = this.cy;
 
-        this.cy.nodes().forEach((node) => {
-            const raw = heatById.get(node.id()) ?? 0;
-            const heat = normalizeHeat(raw);
-
-            if (heat <= 0) {
-                node.removeStyle('border-width border-color border-opacity');
+        // Coalesce all per-node style() / removeStyle() calls into a single
+        // Cytoscape re-render. Without batch(), each mutation triggers its
+        // own style-recalc + paint — on multi-thousand-node vaults that's
+        // seconds of jank per heat update.
+        cy.batch(() => {
+            if (!this.state.showHeat) {
+                cy.nodes().forEach((node) => {
+                    node.removeStyle('border-width border-color border-opacity');
+                });
                 return;
             }
 
-            node.style({
-                'border-width': 2 + heat * 6,
-                'border-color': '#ffd166',
-                'border-opacity': 0.35 + heat * 0.55
+            cy.nodes().forEach((node) => {
+                const raw = heatById.get(node.id()) ?? 0;
+                const heat = normalizeHeat(raw);
+
+                if (heat <= 0) {
+                    node.removeStyle('border-width border-color border-opacity');
+                    return;
+                }
+
+                node.style({
+                    'border-width': 2 + heat * 6,
+                    'border-color': '#ffd166',
+                    'border-opacity': 0.35 + heat * 0.55
+                });
             });
         });
     }

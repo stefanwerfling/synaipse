@@ -56,7 +56,7 @@ const WAVE_SECONDARY_DELAY_MS = 220;
 const FOCUS_DURATION_MS = 650;
 const FOCUS_DISTANCE = 90;
 const ORBIT_SPEED_RAD_PER_FRAME = 0.0018;
-const ORBIT_START_DELAY_MS = 700;
+const ORBIT_START_DELAY_MS = 150;
 const BLOOM_STRENGTH = 0.45;
 const BLOOM_RADIUS = 0.4;
 const BLOOM_THRESHOLD = 0.55;
@@ -115,6 +115,10 @@ export class GraphView3D implements GraphRenderer {
     private stats: HTMLElement;
     private graph: ForceGraph3DInstance | null = null;
     private nodes: NodeRecord[] = [];
+    // Kept in sync with `nodes` inside rebuild(). Hot-path lookups
+    // (click/hover/focus/trail/wave) went through .find() before, which
+    // was O(N) per event — noticeable above a few thousand nodes.
+    private nodeById: Map<string, NodeRecord> = new Map();
     private links: LinkRecord[] = [];
     private animating = false;
     private rafHandle: number | null = null;
@@ -305,8 +309,8 @@ export class GraphView3D implements GraphRenderer {
             return;
         }
 
-        const from = this.nodes.find((n) => n.id === fromId) as NodeRecord | undefined;
-        const to = this.nodes.find((n) => n.id === toId) as NodeRecord | undefined;
+        const from = this.nodeById.get(fromId);
+        const to = this.nodeById.get(toId);
 
         if (from === undefined || to === undefined) {
             return;
@@ -360,8 +364,8 @@ export class GraphView3D implements GraphRenderer {
 
                 trail.line.material.opacity = opacity;
 
-                const from = this.nodes.find((n) => n.id === trail.fromId) as NodeRecord | undefined;
-                const to = this.nodes.find((n) => n.id === trail.toId) as NodeRecord | undefined;
+                const from = this.nodeById.get(trail.fromId);
+                const to = this.nodeById.get(trail.toId);
 
                 if (from !== undefined && to !== undefined && from.x !== undefined && to.x !== undefined) {
                     const positions = trail.line.geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -392,7 +396,7 @@ export class GraphView3D implements GraphRenderer {
         let any = false;
 
         for (const id of noteIds) {
-            const node = this.nodes.find((n) => n.id === id);
+            const node = this.nodeById.get(id);
 
             if (node === undefined || node.sphere === undefined) {
                 continue;
@@ -413,7 +417,7 @@ export class GraphView3D implements GraphRenderer {
             return;
         }
 
-        const node = this.nodes.find((n) => n.id === noteId);
+        const node = this.nodeById.get(noteId);
 
         if (node === undefined) {
             return;
@@ -490,7 +494,7 @@ export class GraphView3D implements GraphRenderer {
                 wave.mesh.scale.setScalar(radius);
                 wave.mesh.material.opacity = opacity * 0.85;
 
-                const node = this.nodes.find((n) => n.id === wave.nodeId);
+                const node = this.nodeById.get(wave.nodeId);
 
                 if (node !== undefined && node.x !== undefined && node.y !== undefined && node.z !== undefined) {
                     wave.mesh.position.set(node.x, node.y, node.z);
@@ -565,6 +569,11 @@ export class GraphView3D implements GraphRenderer {
 
             return record;
         });
+
+        this.nodeById.clear();
+        for (const record of this.nodes) {
+            this.nodeById.set(record.id, record);
+        }
 
         this.links = edges.map((e) => ({source: e.from, target: e.to}));
 
@@ -649,7 +658,7 @@ export class GraphView3D implements GraphRenderer {
             return;
         }
 
-        const node = this.nodes.find((n) => n.id === noteId);
+        const node = this.nodeById.get(noteId);
 
         if (node === undefined) {
             return;
@@ -672,7 +681,7 @@ export class GraphView3D implements GraphRenderer {
             return;
         }
 
-        const node = this.nodes.find((n) => n.id === noteId);
+        const node = this.nodeById.get(noteId);
 
         if (node === undefined || node.x === undefined || node.y === undefined || node.z === undefined) {
             return;
@@ -692,7 +701,7 @@ export class GraphView3D implements GraphRenderer {
                     return;
                 }
 
-                const target = this.nodes.find((n) => n.id === this.orbitTargetId);
+                const target = this.orbitTargetId !== null ? this.nodeById.get(this.orbitTargetId) : undefined;
 
                 if (target === undefined || target.x === undefined || target.y === undefined || target.z === undefined) {
                     this.orbitRaf = null;

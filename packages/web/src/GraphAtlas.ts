@@ -47,6 +47,8 @@ export class GraphAtlasView implements GraphRenderer {
     private hoverId: string | null = null;
     private heatById: ReadonlyMap<string, number> = new Map();
     private pendingFetch: Promise<void> | null = null;
+    private listenerAbort: AbortController | null = null;
+    private resizeObserver: ResizeObserver | null = null;
 
     public constructor(initial: GraphRendererState, private readonly cb: GraphRendererCallbacks) {
         this.state = initial;
@@ -73,7 +75,22 @@ export class GraphAtlasView implements GraphRenderer {
     }
 
     public destroy(): void {
-        if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
+        if (this.rafHandle !== null) {
+            cancelAnimationFrame(this.rafHandle);
+            this.rafHandle = null;
+        }
+        // Without this, the window-level mousemove/mouseup listeners keep
+        // firing after the tab is unmounted — noticeable as jank in the
+        // notes view whenever the pointer moves.
+        this.listenerAbort?.abort();
+        this.listenerAbort = null;
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = null;
+        this.layout = null;
+        this.nodeIndex.clear();
+        this.nodeTree = null;
+        this.communityTree = null;
+        this.edges = [];
     }
 
     public pulse(_noteIds: readonly string[], _kind: EventKind): void {
@@ -172,6 +189,11 @@ export class GraphAtlasView implements GraphRenderer {
 
     private installInteractions(): void {
         const canvas = this.canvas;
+        // AbortController lets us tear down every DOM listener in destroy()
+        // with a single abort() call — including the window-level ones that
+        // would otherwise keep firing on a dead canvas.
+        this.listenerAbort = new AbortController();
+        const signal = this.listenerAbort.signal;
 
         canvas.addEventListener('wheel', (event) => {
             event.preventDefault();
@@ -185,17 +207,17 @@ export class GraphAtlasView implements GraphRenderer {
             this.view.offsetX += (after.x - before.x) * this.view.scale;
             this.view.offsetY += (after.y - before.y) * this.view.scale;
             this.scheduleRender();
-        }, {passive: false});
+        }, {passive: false, signal});
 
         canvas.addEventListener('mousedown', (event) => {
             this.dragging = true;
             this.dragLast = {x: event.clientX, y: event.clientY};
-        });
+        }, {signal});
 
         window.addEventListener('mouseup', () => {
             this.dragging = false;
             this.dragLast = null;
-        });
+        }, {signal});
 
         window.addEventListener('mousemove', (event) => {
             if (this.dragging && this.dragLast !== null) {
@@ -219,7 +241,7 @@ export class GraphAtlasView implements GraphRenderer {
             const my = event.clientY - rect.top;
             this.hoverId = this.hitTest(mx, my);
             this.renderHoverTooltip(mx, my);
-        });
+        }, {signal});
 
         canvas.addEventListener('click', (event) => {
             // At low zoom we hit-test communities → zoom into the tile rather
@@ -232,13 +254,13 @@ export class GraphAtlasView implements GraphRenderer {
             }
 
             if (this.hoverId !== null) this.cb.onSelectNote(this.hoverId);
-        });
+        }, {signal});
 
-        const observer = new ResizeObserver(() => {
+        this.resizeObserver = new ResizeObserver(() => {
             this.resizeCanvas();
             this.scheduleRender();
         });
-        observer.observe(this.element);
+        this.resizeObserver.observe(this.element);
     }
 
     private resizeCanvas(): void {

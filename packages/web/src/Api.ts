@@ -48,6 +48,18 @@ export interface AuditEntry {
     tokenLabel?: string;
 }
 
+// Client-side layout cache. The Louvain layout is stable within a short
+// window (server recomputes on write) and mode-switches 2D→Atlas→3D would
+// otherwise refetch several MB per hop. TTL is short so writes propagate
+// naturally; writeNote/deleteNote also invalidate explicitly.
+const LAYOUT_CACHE_TTL_MS = 60_000;
+let layoutCache: {value: GraphLayout; ts: number} | null = null;
+let layoutInflight: Promise<GraphLayout> | null = null;
+
+const invalidateLayoutCache = (): void => {
+    layoutCache = null;
+};
+
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
         return json(await fetch('/api/notes'));
@@ -61,10 +73,12 @@ export const api = {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(input)
         });
+        invalidateLayoutCache();
         return json(response);
     },
     deleteNote: async (id: string): Promise<void> => {
         await noContent(await fetch(`/api/notes/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+        invalidateLayoutCache();
     },
     search: async (query: string, mode: SearchMode = 'hybrid', limit = 20): Promise<SearchHit[]> => {
         const url = new URL('/api/search', window.location.origin);
@@ -76,9 +90,32 @@ export const api = {
     getGraph: async (): Promise<Graph> => {
         return json(await fetch('/api/graph'));
     },
-    getGraphLayout: async (): Promise<GraphLayout> => {
-        return json(await fetch('/api/graph/layout'));
+    getGraphLayout: async (options: {force?: boolean} = {}): Promise<GraphLayout> => {
+        const now = Date.now();
+
+        if (!options.force && layoutCache !== null && now - layoutCache.ts < LAYOUT_CACHE_TTL_MS) {
+            return layoutCache.value;
+        }
+
+        // De-dupe concurrent callers so a Mode-switch spam doesn't fire
+        // multiple parallel fetches for the same payload.
+        if (layoutInflight !== null) {
+            return layoutInflight;
+        }
+
+        layoutInflight = (async () => {
+            try {
+                const value = await json<GraphLayout>(await fetch('/api/graph/layout'));
+                layoutCache = {value, ts: Date.now()};
+                return value;
+            } finally {
+                layoutInflight = null;
+            }
+        })();
+
+        return layoutInflight;
     },
+    invalidateGraphLayout: invalidateLayoutCache,
     getInfo: async (): Promise<{
         semanticEnabled: boolean;
         notesCount: number;
