@@ -451,6 +451,18 @@ export class MarkdownPreview {
     }
 
     private wikilinkElement(noteId: string | undefined, title: string, label: string): HTMLElement {
+        if (title.startsWith('dsgvo:')) {
+            const kind = title.slice('dsgvo:'.length);
+            return el('span', {
+                class: 'dsgvo-pill',
+                attrs: {title: `DSGVO-Marker (${kind}) — wird bei externem LLM zu [redact:${kind}]`}
+            },
+                el('span', {class: 'dsgvo-pill-icon', text: '🔒'}),
+                el('span', {class: 'dsgvo-pill-kind', text: kind}),
+                el('span', {class: 'dsgvo-pill-text', text: label})
+            );
+        }
+
         if (noteId !== undefined && this.opts.onWikilinkClick !== undefined) {
             const onClick = this.opts.onWikilinkClick;
             const button = el('button', {

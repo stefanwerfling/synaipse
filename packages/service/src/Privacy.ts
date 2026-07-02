@@ -92,6 +92,18 @@ const luhnValid = (digits: string): boolean => {
 };
 
 const DETECTORS: readonly Detector[] = [
+    // Manual DSGVO marker `[[dsgvo:kind|text]]` — placed by the editor
+    // dialog. Must run before any auto-detector so that an email/phone
+    // wrapped by the user gets the user's chosen kind, not the automatic
+    // one. Kind is passed through as-is (`[redact:<kind>]`), which also
+    // means custom-labels (patient-id, vertragsnr, …) show up verbatim
+    // in the audit log.
+    {
+        kind: 'dsgvo_marker',
+        label: 'dsgvo',
+        pattern: /\[\[dsgvo:([a-z][a-z0-9_-]{0,31})\|([^\]\n]+)\]\]/gi
+    },
+
     // High-entropy / specific tokens first — order matters so a JWT doesn't
     // get half-matched by the email or IP pattern downstream.
     {kind: 'jwt', label: 'jwt', pattern: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g},
@@ -144,6 +156,20 @@ export const redactSensitive = (content: string): RedactionResult => {
 
             if (d.validate !== undefined && !d.validate(match)) {
                 return match;
+            }
+
+            // Manual dsgvo marker carries its kind as the first capture
+            // group. Use that as the `[redact:<kind>]` label so custom
+            // categories (patient-id, vertragsnr, …) survive to the audit
+            // log — otherwise every manual marker would collapse to
+            // `[redact:dsgvo]`. The `dsgvo:` prefix on the count key keeps
+            // manual hits distinguishable from auto-detects when the
+            // audit UI groups them.
+            if (d.kind === 'dsgvo_marker') {
+                const kindCapture = (args[1] as string).toLowerCase();
+                const countKey = `dsgvo:${kindCapture}`;
+                counts.set(countKey, (counts.get(countKey) ?? 0) + 1);
+                return `[redact:${kindCapture}]`;
             }
 
             // Marker shape `[redact:<label>]` — lowercase + colon so the

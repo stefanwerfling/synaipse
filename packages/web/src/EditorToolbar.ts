@@ -1,4 +1,5 @@
 import {el} from './Dom.js';
+import {openDsgvoDialog} from './DsgvoDialog.js';
 import {
     buildContainerAttrs,
     insertAt,
@@ -88,6 +89,9 @@ export class EditorToolbar {
                 {label: '{ }', title: 'Code block', action: () => this.insertCodeBlock()},
                 {label: '—', title: 'Horizontal rule', action: () => this.insertAtCursor('\n\n---\n\n')},
                 {label: '⊞', title: 'Table', action: () => this.insertTable()}
+            ],
+            [
+                {label: '🔒', title: 'Mark selection as DSGVO (Ctrl+Shift+D)', action: () => this.openDsgvo()}
             ]
         ];
 
@@ -200,6 +204,10 @@ export class EditorToolbar {
             if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
 
             const key = e.key.toLowerCase();
+            if (e.shiftKey) {
+                if (key === 'd') { e.preventDefault(); this.openDsgvo(); }
+                return;
+            }
             if (key === 'b') { e.preventDefault(); this.wrap('**', '**', 'bold'); }
             else if (key === 'i') { e.preventDefault(); this.wrap('*', '*', 'italic'); }
             else if (key === 'e') { e.preventDefault(); this.wrap('`', '`', 'code'); }
@@ -243,6 +251,40 @@ export class EditorToolbar {
     private insertContainer(type: string, attrs: string): void {
         const {start, end} = this.sel();
         this.apply(buildContainer(this.textarea.value, start, end, type, attrs));
+    }
+
+    /**
+     * Open the DSGVO dialog for the current selection. Multi-line
+     * selections aren't allowed — the `[[dsgvo:kind|text]]` marker must
+     * stay on one line for the preview's wikilink walk to match. Empty
+     * selection is rejected with a subtle prompt via `alert` (dialog UX
+     * doesn't need selection because there's nothing to wrap).
+     */
+    private openDsgvo(): void {
+        const {start, end} = this.sel();
+        if (end <= start) {
+            window.alert('Erst Text markieren, den du als DSGVO-relevant kennzeichnen willst.');
+            this.textarea.focus();
+            return;
+        }
+        const selection = this.textarea.value.slice(start, end);
+        if (selection.includes('\n')) {
+            window.alert('DSGVO-Marker unterstützen nur einzeilige Markierungen.');
+            this.textarea.focus();
+            return;
+        }
+        openDsgvoDialog({
+            selection,
+            onConfirm: (marker) => {
+                const result: InsertionResult = {
+                    value: this.textarea.value.slice(0, start) + marker + this.textarea.value.slice(end),
+                    selStart: start,
+                    selEnd: start + marker.length
+                };
+                this.apply(result);
+            },
+            onCancel: () => this.textarea.focus()
+        });
     }
 
     private apply(result: InsertionResult): void {

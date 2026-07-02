@@ -175,4 +175,39 @@ describe('redactSensitive', () => {
         const sorted = [...kinds].sort((a, b) => a.localeCompare(b));
         expect(kinds).toEqual(sorted);
     });
+
+    describe('manual DSGVO marker [[dsgvo:kind|text]]', () => {
+        it('replaces the whole marker with [redact:<kind>] and preserves the user-chosen kind', () => {
+            const {redacted, hits} = redactSensitive('Patient [[dsgvo:name|Max Mustermann]] gemeldet.');
+            expect(redacted).toBe('Patient [redact:name] gemeldet.');
+            expect(hits).toContainEqual({kind: 'dsgvo:name', count: 1});
+        });
+
+        it('supports custom labels that no auto-detector would catch', () => {
+            const {redacted, hits} = redactSensitive('ID [[dsgvo:patient-id|MG-88421]] siehe Akte.');
+            expect(redacted).toBe('ID [redact:patient-id] siehe Akte.');
+            expect(hits).toContainEqual({kind: 'dsgvo:patient-id', count: 1});
+        });
+
+        it('runs before auto-detectors so wrapped emails keep the user kind, not `email`', () => {
+            const {redacted, hits} = redactSensitive('Reply to [[dsgvo:contact|alice@example.com]] soon.');
+            expect(redacted).toBe('Reply to [redact:contact] soon.');
+            expect(hits.map((h) => h.kind)).toContain('dsgvo:contact');
+            expect(hits.map((h) => h.kind)).not.toContain('email');
+        });
+
+        it('handles multiple manual markers as separate hits per kind', () => {
+            const input = '[[dsgvo:name|Alice]] wohnt in [[dsgvo:address|Berlin]], siehe auch [[dsgvo:name|Bob]].';
+            const {redacted, hits} = redactSensitive(input);
+            expect(redacted).toBe('[redact:name] wohnt in [redact:address], siehe auch [redact:name].');
+            expect(hits).toContainEqual({kind: 'dsgvo:name', count: 2});
+            expect(hits).toContainEqual({kind: 'dsgvo:address', count: 1});
+        });
+
+        it('is idempotent — a second pass does not re-match [redact:…]', () => {
+            const once = redactSensitive('[[dsgvo:name|Hans]] kommt gleich.');
+            const twice = redactSensitive(once.redacted);
+            expect(twice.redacted).toBe(once.redacted);
+        });
+    });
 });

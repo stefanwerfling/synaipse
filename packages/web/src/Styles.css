@@ -4575,6 +4575,210 @@ body {
 }
 
 /* ============================================================
+   DSGVO inline marker — `[[dsgvo:kind|text]]` pill in preview
+   ============================================================ */
+
+.dsgvo-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: var(--r-2);
+    background: rgba(244, 114, 182, 0.15);
+    border: 1px solid rgba(244, 114, 182, 0.45);
+    color: var(--pink);
+    font-size: 0.92em;
+    font-weight: 500;
+    white-space: nowrap;
+    vertical-align: baseline;
+    cursor: help;
+}
+
+.dsgvo-pill-icon {
+    font-size: 0.85em;
+    line-height: 1;
+}
+
+.dsgvo-pill-kind {
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.85;
+    padding: 0 4px;
+    border-right: 1px solid rgba(244, 114, 182, 0.4);
+}
+
+.dsgvo-pill-text {
+    color: var(--text-0);
+    font-weight: 400;
+}
+
+/* ============================================================
+   DSGVO dialog — wraps a text selection in a privacy marker
+   ============================================================ */
+
+.dsgvo-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.dsgvo-modal {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    padding: var(--space-4);
+    width: min(680px, 96vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.dsgvo-modal-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 600;
+    color: var(--text-0);
+    font-size: 15px;
+}
+
+.dsgvo-modal-lock {
+    font-size: 18px;
+}
+
+.dsgvo-modal-selection {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+}
+
+.dsgvo-modal-selection-label {
+    color: var(--text-2);
+    font-size: 12px;
+}
+
+.dsgvo-modal-selection-text {
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: transparent;
+    padding: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.dsgvo-modal-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-3);
+}
+
+.dsgvo-modal-category {
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    padding: var(--space-2) var(--space-3);
+    margin: 0;
+}
+
+.dsgvo-modal-category legend {
+    padding: 0 6px;
+    color: var(--text-2);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.dsgvo-modal-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    cursor: pointer;
+    color: var(--text-1);
+    font-size: 13px;
+}
+
+.dsgvo-modal-option:hover {
+    color: var(--text-0);
+}
+
+.dsgvo-modal-option input[type="radio"] {
+    accent-color: var(--accent);
+}
+
+.dsgvo-modal-option-icon {
+    font-size: 14px;
+}
+
+.dsgvo-modal-custom-field {
+    margin-top: var(--space-2);
+    width: 100%;
+    padding: 6px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.dsgvo-modal-custom-field:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.dsgvo-modal-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-2);
+}
+
+.dsgvo-preview-label {
+    color: var(--text-2);
+    font-size: 12px;
+}
+
+.dsgvo-preview-marker {
+    color: var(--pink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: transparent;
+    padding: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.dsgvo-modal-error {
+    color: var(--red);
+    font-size: 12px;
+}
+
+.dsgvo-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+/* ============================================================
    DSGVO Layer 4 — Audit Panel (persistent log of external LLM calls)
    ============================================================ */
 
