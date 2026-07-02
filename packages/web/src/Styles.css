@@ -4139,6 +4139,31 @@ body {
     color: var(--bg-0);
 }
 
+.mode-switch-btn.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.mode-switch-btn.disabled:hover {
+    color: var(--text-2);
+}
+
+.mode-switch-note {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 8px 0 10px;
+    margin-left: 4px;
+    border-left: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-2);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.mode-switch-note.forced {
+    color: var(--accent);
+}
+
 .clear-btn {
     background: transparent;
     border: 1px solid var(--border);
@@ -4473,12 +4498,80 @@ body {
 
 .md-antv-infographic svg { display: block; max-width: 100%; height: auto; }
 
+.md-antv-infographic-clickable {
+    cursor: zoom-in;
+    transition: border-color 120ms ease;
+}
+
+.md-antv-infographic-clickable:hover {
+    border-color: var(--border);
+}
+
 .md-antv-infographic-error {
     padding: var(--space-3) var(--space-4);
     color: var(--red);
     font-family: var(--font-mono);
     font-size: 12px;
     border-color: var(--red);
+}
+
+.infographic-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.infographic-modal {
+    position: relative;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    padding: var(--space-3);
+    width: min(96vw, 1800px);
+    height: min(94vh, 1200px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.infographic-modal-close {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-1);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: var(--r-2);
+    z-index: 1;
+}
+
+.infographic-modal-close:hover {
+    background: var(--bg-2);
+    color: var(--text-0);
+}
+
+.infographic-modal-stage {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.infographic-modal-stage svg {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
 }
 
 /* ============================================================

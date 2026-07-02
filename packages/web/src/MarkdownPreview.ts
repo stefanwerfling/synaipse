@@ -117,10 +117,109 @@ export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: 
 };
 
 /**
+ * Count top-level items in an `::: infographic` body. Every item starts
+ * with `- id ` (dagre/relation flows) or `- label ` (charts, timelines) —
+ * both under an `items` key. Robust enough for a height heuristic; not a
+ * full parser.
+ */
+const countInfographicItems = (syntax: string): number => {
+    let n = 0;
+    for (const line of syntax.split('\n')) {
+        if (/^\s+-\s+(id|label)\s+/.test(line)) n += 1;
+    }
+    return n;
+};
+
+/**
+ * Inline-height heuristic: each item earns ~34 px, clamped to a readable
+ * band. A 9-item flow lands at ~666 px (up from the old fixed 540); a
+ * 16-item flow at ~904 px. Fullscreen modal handles the extremes.
+ */
+const heightForInfographic = (syntax: string): number => {
+    const items = countInfographicItems(syntax);
+    if (items === 0) return 480;
+    return Math.min(1100, Math.max(420, 360 + items * 34));
+};
+
+let cachedInfographicCtor: typeof import('@antv/infographic').Infographic | null = null;
+
+const loadInfographic = async (): Promise<typeof import('@antv/infographic').Infographic> => {
+    if (cachedInfographicCtor !== null) return cachedInfographicCtor;
+    const mod = await import('@antv/infographic');
+    cachedInfographicCtor = mod.Infographic;
+    return cachedInfographicCtor;
+};
+
+/**
+ * Open a full-viewport modal that re-renders the same infographic syntax
+ * at a much larger size. Backdrop click / Escape / close button dismiss
+ * it. Kept self-contained (no framework, no global state) — every open
+ * builds a fresh subtree and detaches it on close.
+ */
+const openInfographicFullscreen = async (syntax: string): Promise<void> => {
+    let Ctor: typeof import('@antv/infographic').Infographic;
+    try {
+        Ctor = await loadInfographic();
+    } catch {
+        return;
+    }
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'infographic-modal-backdrop';
+
+    const box = document.createElement('div');
+    box.className = 'infographic-modal';
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'infographic-modal-close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+
+    const stage = document.createElement('div');
+    stage.className = 'infographic-modal-stage';
+
+    box.appendChild(close);
+    box.appendChild(stage);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    const dismiss = (): void => {
+        document.removeEventListener('keydown', onKey);
+        backdrop.remove();
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+        if (ev.key === 'Escape') dismiss();
+    };
+    document.addEventListener('keydown', onKey);
+    backdrop.addEventListener('click', (ev) => {
+        if (ev.target === backdrop) dismiss();
+    });
+    close.addEventListener('click', dismiss);
+
+    // Render into the stage using its measured size. Padding accounts for
+    // modal chrome (close button, box padding). Fall back to reasonable
+    // defaults if layout hasn't settled yet.
+    const width = stage.clientWidth > 0 ? stage.clientWidth : Math.floor(window.innerWidth * 0.9);
+    const height = stage.clientHeight > 0 ? stage.clientHeight : Math.floor(window.innerHeight * 0.85);
+
+    try {
+        const infographic = new Ctor({container: stage, width, height, padding: 32});
+        infographic.render(syntax);
+    } catch (e) {
+        stage.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
+        stage.classList.add('md-antv-infographic-error');
+    }
+};
+
+/**
  * Post-render pass for antv-infographic stubs. Exported so the chat /
  * hover / standalone-render call sites can reuse the same SVG hydration
  * pipeline as the editor preview. Stubs are marked `dataset.rendered`
  * after the first render to make this idempotent for re-renders.
+ *
+ * Height scales with item count so long flows stay legible in-place, and
+ * each rendered stub becomes click-to-fullscreen for the extreme cases.
  */
 export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> => {
     const stubs = host.querySelectorAll<HTMLDivElement>('.md-antv-infographic');
@@ -128,7 +227,7 @@ export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> 
 
     let Infographic: typeof import('@antv/infographic').Infographic;
     try {
-        ({Infographic} = await import('@antv/infographic'));
+        Infographic = await loadInfographic();
     } catch (e) {
         for (const stub of stubs) {
             stub.textContent = `Infographic library failed to load: ${e instanceof Error ? e.message : String(e)}`;
@@ -145,14 +244,20 @@ export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> 
         try {
             const syntax = JSON.parse(syntaxJson) as string;
             const width = stub.clientWidth > 0 ? stub.clientWidth : 900;
+            const height = heightForInfographic(syntax);
             const infographic = new Infographic({
                 container: stub,
                 width,
-                height: 540,
+                height,
                 padding: 24
             });
             infographic.render(syntax);
             stub.dataset.rendered = 'true';
+            stub.classList.add('md-antv-infographic-clickable');
+            stub.title = 'Click to view full-screen';
+            stub.addEventListener('click', () => {
+                void openInfographicFullscreen(syntax);
+            });
         } catch (e) {
             stub.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
             stub.classList.add('md-antv-infographic-error');
