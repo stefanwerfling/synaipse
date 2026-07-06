@@ -163,6 +163,7 @@ export class CanvasRenderer {
 
     private doc: CanvasDocument;
     private cardEls = new Map<string, HTMLElement>();
+    private groupEls = new Map<string, HTMLElement>();
     private selectedId: string | null = null;
     private selectedEdgeId: string | null = null;
     private editingId: string | null = null;
@@ -171,7 +172,7 @@ export class CanvasRenderer {
     private edgeHandleDrag: EdgeHandleDragState | null = null;
     private bandSelect: BandSelectState | null = null;
     private bandRectEl: HTMLElement | null = null;
-    private edgeToolbar: HTMLElement | null = null;
+    private bottomBar!: HTMLElement;
 
     private onKeyDown = (event: KeyboardEvent): void => {
         if (!this.editable) return;
@@ -212,7 +213,7 @@ export class CanvasRenderer {
 
     public destroy(): void {
         document.removeEventListener('keydown', this.onKeyDown);
-        this.destroyEdgeToolbar();
+        
     }
 
     /** Current document — CanvasPanel reads this to persist. */
@@ -232,7 +233,10 @@ export class CanvasRenderer {
         this.stage.appendChild(this.edgesSvg);
         this.stage.appendChild(this.cardsHost);
 
+        this.bottomBar = el('div', {class: 'canvas-bottom-bar', attrs: {hidden: 'hidden'}});
+
         this.element.appendChild(this.stage);
+        this.element.appendChild(this.bottomBar);
 
         this.element.addEventListener('wheel', this.onWheel, {passive: false});
         this.element.addEventListener('pointerdown', this.onPointerDown);
@@ -253,13 +257,14 @@ export class CanvasRenderer {
 
     private renderGroups(): void {
         clear(this.groupsHost);
+        this.groupEls.clear();
 
         for (const node of this.doc.nodes) {
             if (node.type !== 'group') continue;
 
             const border = resolveColor(node.color, 'rgba(255,255,255,0.18)');
             const rect = el('div', {
-                class: 'canvas-group',
+                class: node.id === this.selectedId ? 'canvas-group selected' : 'canvas-group',
                 style: {
                     left: `${node.x}px`,
                     top: `${node.y}px`,
@@ -279,6 +284,7 @@ export class CanvasRenderer {
             }
 
             this.groupsHost.appendChild(rect);
+            this.groupEls.set(node.id, rect);
         }
     }
 
@@ -501,7 +507,7 @@ export class CanvasRenderer {
         // geometry produced — a card drag / handle drag / reroute all
         // funnel through renderEdges, so this is the single hook that
         // keeps the floating toolbar aligned.
-        this.updateEdgeToolbarPosition();
+        
 
         // Draft edge — either a brand-new one being drawn from an anchor,
         // or the ghost of a selected edge's endpoint being rerouted.
@@ -573,123 +579,101 @@ export class CanvasRenderer {
 
     private applyTransform(): void {
         this.stage.style.transform = `translate3d(${this.tx}px, ${this.ty}px, 0) scale(${this.scale})`;
-        this.updateEdgeToolbarPosition();
+        
     }
 
     // ─── Selection ───
 
     /**
-     * Cards and edges have mutually exclusive selection state — a keypress
-     * needs a single "delete the currently focused thing" target, and
-     * showing endpoint handles on an edge while a card is also outlined is
-     * confusing. Both helpers no-op when nothing changes.
+     * Nodes (cards + groups) and edges have mutually exclusive selection
+     * state — a keypress needs a single "delete the currently focused
+     * thing" target, and showing endpoint handles on an edge while a card
+     * is also outlined is confusing. Both helpers no-op when nothing
+     * changes and drive a single bottom-bar refresh.
      */
-    private selectCard(id: string | null): void {
+    private selectNode(id: string | null): void {
         if (this.selectedEdgeId !== null) {
             this.selectedEdgeId = null;
             this.renderEdges();
         }
         if (this.selectedId === id) return;
         if (this.selectedId !== null) {
-            this.cardEls.get(this.selectedId)?.classList.remove('selected');
+            this.nodeElement(this.selectedId)?.classList.remove('selected');
         }
         this.selectedId = id;
         if (id !== null) {
-            this.cardEls.get(id)?.classList.add('selected');
+            this.nodeElement(id)?.classList.add('selected');
         }
+        this.refreshBottomBar();
     }
 
     private selectEdge(id: string | null): void {
         if (this.selectedId !== null) {
-            this.cardEls.get(this.selectedId)?.classList.remove('selected');
+            this.nodeElement(this.selectedId)?.classList.remove('selected');
             this.selectedId = null;
         }
         if (this.selectedEdgeId === id) return;
         this.selectedEdgeId = id;
         this.renderEdges();
-        this.refreshEdgeToolbar();
+        this.refreshBottomBar();
+    }
+
+    /** DOM lookup covering both cards and groups. */
+    private nodeElement(id: string): HTMLElement | undefined {
+        return this.cardEls.get(id) ?? this.groupEls.get(id);
     }
 
     /**
-     * Rebuild the floating edge toolbar to reflect the current selection:
-     * when no edge is selected, the toolbar is destroyed; when the same
-     * edge stays selected (e.g. after a color change) the DOM is patched
-     * in place so the active-state highlight tracks the new attrs.
+     * Contextual bottom bar that shows actions for whatever is currently
+     * selected. It stays in a fixed spot at the bottom of the viewport —
+     * OneNote-ish — so users don't chase a floating panel around. Empty
+     * selection hides the bar entirely (no visual clutter).
      */
-    private refreshEdgeToolbar(): void {
-        if (this.selectedEdgeId === null) {
-            this.destroyEdgeToolbar();
-            return;
+    private refreshBottomBar(): void {
+        clear(this.bottomBar);
+
+        if (this.selectedEdgeId !== null) {
+            const edge = this.doc.edges.find((e) => e.id === this.selectedEdgeId);
+            if (edge !== undefined) {
+                this.populateEdgeControls(edge.id);
+                this.bottomBar.removeAttribute('hidden');
+                return;
+            }
         }
-        const edge = this.doc.edges.find((e) => e.id === this.selectedEdgeId);
-        if (edge === undefined) {
-            this.destroyEdgeToolbar();
-            return;
+
+        if (this.selectedId !== null) {
+            const node = this.nodeById(this.selectedId);
+            if (node !== undefined) {
+                this.populateNodeControls(node.id);
+                this.bottomBar.removeAttribute('hidden');
+                return;
+            }
         }
-        if (this.edgeToolbar === null) {
-            this.edgeToolbar = this.buildEdgeToolbar(edge.id);
-            this.element.appendChild(this.edgeToolbar);
-        } else {
-            // Same edge, refresh contents.
-            clear(this.edgeToolbar);
-            this.populateEdgeToolbar(this.edgeToolbar, edge.id);
-        }
-        this.updateEdgeToolbarPosition();
+
+        this.bottomBar.setAttribute('hidden', 'hidden');
     }
 
-    private destroyEdgeToolbar(): void {
-        if (this.edgeToolbar !== null) {
-            this.edgeToolbar.remove();
-            this.edgeToolbar = null;
-        }
-    }
-
-    private buildEdgeToolbar(edgeId: string): HTMLElement {
-        const bar = el('div', {class: 'canvas-edge-toolbar'});
-        this.populateEdgeToolbar(bar, edgeId);
-        return bar;
-    }
-
-    private populateEdgeToolbar(bar: HTMLElement, edgeId: string): void {
+    private populateEdgeControls(edgeId: string): void {
         const edge = this.doc.edges.find((e) => e.id === edgeId);
         if (edge === undefined) return;
 
-        for (const preset of COLOR_PRESET_ORDER) {
-            const swatch = el('button', {
-                class: edge.color === preset
-                    ? 'canvas-edge-swatch active'
-                    : 'canvas-edge-swatch',
-                attrs: {type: 'button', title: `Color ${preset}`, 'aria-label': `Color ${preset}`},
-                style: {background: COLOR_PRESETS[preset] ?? '#888'},
-                on: {click: (ev) => {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    this.setEdgeColor(edgeId, preset);
-                }}
-            });
-            bar.appendChild(swatch);
-        }
-
-        bar.appendChild(el('button', {
-            class: edge.color === undefined
-                ? 'canvas-edge-swatch canvas-edge-swatch-clear active'
-                : 'canvas-edge-swatch canvas-edge-swatch-clear',
-            attrs: {type: 'button', title: 'Clear color', 'aria-label': 'Clear color'},
-            text: '∅',
-            on: {click: (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                this.setEdgeColor(edgeId, undefined);
-            }}
+        this.bottomBar.appendChild(el('span', {
+            class: 'canvas-bottom-bar-kind',
+            text: 'Edge'
         }));
 
-        bar.appendChild(el('div', {class: 'canvas-edge-toolbar-sep'}));
+        this.appendColorSwatches({
+            current: edge.color,
+            onPick: (preset) => this.setEdgeColor(edgeId, preset)
+        });
+
+        this.bottomBar.appendChild(el('div', {class: 'canvas-bottom-bar-sep'}));
 
         const currentStyle = arrowStyleOf(edge);
         const arrowBtn = (style: ArrowStyle, label: string, title: string): HTMLElement => el('button', {
             class: currentStyle === style
-                ? 'canvas-edge-arrow-btn active'
-                : 'canvas-edge-arrow-btn',
+                ? 'canvas-bottom-bar-btn active'
+                : 'canvas-bottom-bar-btn',
             attrs: {type: 'button', title, 'aria-label': title},
             text: label,
             on: {click: (ev) => {
@@ -698,29 +682,97 @@ export class CanvasRenderer {
                 this.setEdgeArrow(edgeId, style);
             }}
         });
-        bar.appendChild(arrowBtn('to', '→', 'Arrow at target only'));
-        bar.appendChild(arrowBtn('both', '↔', 'Arrows at both ends'));
-        bar.appendChild(arrowBtn('none', '—', 'No arrows'));
+        this.bottomBar.appendChild(arrowBtn('to', '→', 'Arrow at target only'));
+        this.bottomBar.appendChild(arrowBtn('both', '↔', 'Arrows at both ends'));
+        this.bottomBar.appendChild(arrowBtn('none', '—', 'No arrows'));
+
+        this.appendDeleteButton(() => this.removeEdge(edgeId));
     }
 
-    private updateEdgeToolbarPosition(): void {
-        if (this.edgeToolbar === null || this.selectedEdgeId === null) return;
-        const edge = this.doc.edges.find((e) => e.id === this.selectedEdgeId);
-        if (edge === undefined) return;
-        const from = this.nodeById(edge.fromNode);
-        const to = this.nodeById(edge.toNode);
-        if (from === undefined || to === undefined) return;
-        if (from.type === 'group' || to.type === 'group') return;
+    private populateNodeControls(nodeId: string): void {
+        const node = this.nodeById(nodeId);
+        if (node === undefined) return;
 
-        const a = anchorFor(from, edge.fromSide, to);
-        const b = anchorFor(to, edge.toSide, from);
-        // World midpoint → screen coords via current pan/zoom.
-        const midWorldX = (a.x + b.x) / 2;
-        const midWorldY = (a.y + b.y) / 2;
-        const screenX = midWorldX * this.scale + this.tx;
-        const screenY = midWorldY * this.scale + this.ty;
-        this.edgeToolbar.style.left = `${screenX}px`;
-        this.edgeToolbar.style.top = `${screenY - 42}px`;
+        const label = node.type === 'group' ? 'Group'
+            : node.type === 'text' ? 'Text card'
+            : node.type === 'file' ? 'Note card'
+            : 'Link card';
+        this.bottomBar.appendChild(el('span', {class: 'canvas-bottom-bar-kind', text: label}));
+
+        this.appendColorSwatches({
+            current: node.color,
+            onPick: (preset) => this.setNodeColor(nodeId, preset)
+        });
+
+        this.appendDeleteButton(() => this.removeNode(nodeId));
+    }
+
+    private appendColorSwatches(opts: {current: string | undefined; onPick: (preset: string | undefined) => void}): void {
+        const wrap = el('div', {class: 'canvas-bottom-bar-swatches'});
+
+        for (const preset of COLOR_PRESET_ORDER) {
+            wrap.appendChild(el('button', {
+                class: opts.current === preset
+                    ? 'canvas-bottom-bar-swatch active'
+                    : 'canvas-bottom-bar-swatch',
+                attrs: {type: 'button', title: `Color ${preset}`, 'aria-label': `Color ${preset}`},
+                style: {background: COLOR_PRESETS[preset] ?? '#888'},
+                on: {click: (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    opts.onPick(preset);
+                }}
+            }));
+        }
+
+        wrap.appendChild(el('button', {
+            class: opts.current === undefined
+                ? 'canvas-bottom-bar-swatch canvas-bottom-bar-swatch-clear active'
+                : 'canvas-bottom-bar-swatch canvas-bottom-bar-swatch-clear',
+            attrs: {type: 'button', title: 'No color', 'aria-label': 'No color'},
+            on: {click: (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                opts.onPick(undefined);
+            }}
+        }));
+
+        this.bottomBar.appendChild(wrap);
+    }
+
+    private appendDeleteButton(onDelete: () => void): void {
+        this.bottomBar.appendChild(el('div', {class: 'canvas-bottom-bar-sep'}));
+        this.bottomBar.appendChild(el('button', {
+            class: 'canvas-bottom-bar-btn canvas-bottom-bar-btn-danger',
+            attrs: {type: 'button', title: 'Delete (Del)', 'aria-label': 'Delete'},
+            text: '🗑',
+            on: {click: (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                onDelete();
+            }}
+        }));
+    }
+
+    private setNodeColor(nodeId: string, preset: string | undefined): void {
+        const idx = this.doc.nodes.findIndex((n) => n.id === nodeId);
+        if (idx === -1) return;
+        const current = this.doc.nodes[idx];
+        if (current === undefined) return;
+        const patched = {...current};
+        if (preset === undefined) {
+            delete patched.color;
+        } else {
+            patched.color = preset;
+        }
+        const nextNodes = this.doc.nodes.slice();
+        nextNodes[idx] = patched;
+        this.doc = {nodes: nextNodes, edges: this.doc.edges};
+        // Cards live in cardsHost, groups in groupsHost — cheapest full
+        // refresh is renderAll (rebuild is a few dozen DOM ops per canvas).
+        this.renderAll();
+        this.refreshBottomBar();
+        this.commit();
     }
 
     private setEdgeColor(edgeId: string, preset: string | undefined): void {
@@ -738,7 +790,7 @@ export class CanvasRenderer {
         nextEdges[idx] = patched;
         this.doc = {nodes: this.doc.nodes, edges: nextEdges};
         this.renderEdges();
-        this.refreshEdgeToolbar();
+        this.refreshBottomBar();
         this.commit();
     }
 
@@ -762,7 +814,7 @@ export class CanvasRenderer {
         nextEdges[idx] = patched;
         this.doc = {nodes: this.doc.nodes, edges: nextEdges};
         this.renderEdges();
-        this.refreshEdgeToolbar();
+        this.refreshBottomBar();
         this.commit();
     }
 
@@ -876,7 +928,7 @@ export class CanvasRenderer {
         };
         this.doc = {nodes: [...this.doc.nodes, node], edges: this.doc.edges};
         this.renderAll();
-        this.selectCard(id);
+        this.selectNode(id);
         this.commit();
         return id;
     }
@@ -1039,7 +1091,7 @@ export class CanvasRenderer {
             const node = this.nodeById(id);
             if (node === undefined) return;
 
-            this.selectCard(id);
+            this.selectNode(id);
 
             // Never drag while inline text edit is active on this card.
             if (this.editingId === id) return;
@@ -1059,9 +1111,21 @@ export class CanvasRenderer {
             return;
         }
 
+        // Group frame click = select. Groups don't drag/resize yet (they
+        // stay pinned to their creation-rect until edited via JSON), but
+        // they need to reach the bottom bar for color/delete actions.
+        const groupEl = targetEl?.closest('.canvas-group') as HTMLElement | null ?? null;
+        if (groupEl !== null && this.editable) {
+            const id = groupEl.dataset.nodeId;
+            if (id !== undefined) {
+                this.selectNode(id);
+                return;
+            }
+        }
+
         // Empty background — deselect + either group-band-select (Shift)
         // or pan (default).
-        this.selectCard(null);
+        this.selectNode(null);
         this.selectEdge(null);
 
         if (this.editable && event.shiftKey) {

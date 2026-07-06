@@ -6518,87 +6518,119 @@ button.typed-link-badge:hover {
     z-index: 5;
 }
 
-/* Floating toolbar shown above the selected edge midpoint. Positioned
-   in screen coords (viewport space) so it doesn't scale with zoom. */
-.canvas-edge-toolbar {
+/* Bottom bar — screen-fixed contextual actions for the current selection.
+   Sits inside .canvas-viewport (not the transformed .canvas-stage) so
+   pan/zoom don't move it. */
+.canvas-bottom-bar {
     position: absolute;
+    left: 50%;
+    bottom: 12px;
+    transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 3px;
-    padding: 4px 6px;
+    gap: 8px;
+    padding: 6px 10px;
     background: var(--bg-1);
     border: 1px solid var(--border);
-    border-radius: var(--r-2);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-    transform: translate(-50%, 0);
+    border-radius: var(--r-3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
     z-index: 40;
+    max-width: calc(100% - 24px);
 }
 
-.canvas-edge-toolbar-sep {
+.canvas-bottom-bar[hidden] {
+    display: none !important;
+}
+
+.canvas-bottom-bar-kind {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-2);
+    padding-right: 4px;
+    font-weight: 600;
+}
+
+.canvas-bottom-bar-sep {
     width: 1px;
-    height: 16px;
+    height: 20px;
     background: var(--border-soft);
-    margin: 0 3px;
 }
 
-.canvas-edge-swatch {
+.canvas-bottom-bar-swatches {
+    display: flex;
+    gap: 4px;
+}
+
+.canvas-bottom-bar-swatch {
     width: 18px;
     height: 18px;
-    border-radius: 50%;
+    border-radius: 4px;
     border: 2px solid transparent;
     cursor: pointer;
     padding: 0;
     transition: transform var(--t-fast), border-color var(--t-fast);
 }
 
-.canvas-edge-swatch:hover {
-    transform: scale(1.15);
+.canvas-bottom-bar-swatch:hover {
+    transform: scale(1.12);
 }
 
-.canvas-edge-swatch.active {
+.canvas-bottom-bar-swatch.active {
     border-color: var(--text-0);
-    transform: scale(1.15);
+    transform: scale(1.12);
 }
 
-.canvas-edge-swatch-clear {
-    background: transparent !important;
-    color: var(--text-2);
-    font-size: 11px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.canvas-bottom-bar-swatch-clear {
+    background:
+        linear-gradient(135deg,
+            transparent calc(50% - 1px),
+            var(--text-3) calc(50% - 1px),
+            var(--text-3) calc(50% + 1px),
+            transparent calc(50% + 1px)) !important;
     border-color: var(--border);
 }
 
-.canvas-edge-swatch-clear.active {
+.canvas-bottom-bar-swatch-clear.active {
     border-color: var(--accent);
-    color: var(--accent);
 }
 
-.canvas-edge-arrow-btn {
+.canvas-bottom-bar-btn {
     background: transparent;
     border: 1px solid transparent;
     color: var(--text-2);
     font-size: 14px;
     line-height: 1;
-    width: 24px;
-    height: 22px;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 6px;
     border-radius: var(--r-1);
     cursor: pointer;
-    padding: 0;
     transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
 
-.canvas-edge-arrow-btn:hover {
+.canvas-bottom-bar-btn:hover {
     background: var(--bg-2);
     color: var(--text-0);
 }
 
-.canvas-edge-arrow-btn.active {
+.canvas-bottom-bar-btn.active {
     background: var(--accent-soft);
     color: var(--accent);
     border-color: var(--accent);
+}
+
+.canvas-bottom-bar-btn-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef6868;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Group selected outline — mirrors .canvas-card.selected. */
+.canvas-group.selected {
+    border-style: solid;
+    box-shadow: 0 0 0 2px var(--accent);
+    z-index: 5;
 }
 
 .canvas-viewport.edge-drafting {
