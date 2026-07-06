@@ -23,3 +23,24 @@ export async function* walkMarkdown(root: string): AsyncIterableIterator<string>
         }
     }
 }
+
+export async function* walkCanvas(root: string): AsyncIterableIterator<string> {
+    const entries = await readdir(root, {withFileTypes: true});
+
+    for (const entry of entries) {
+        const full = path.join(root, entry.name);
+
+        if (entry.isDirectory()) {
+            if (IGNORED_DIRS.has(entry.name)) {
+                continue;
+            }
+
+            yield* walkCanvas(full);
+            continue;
+        }
+
+        if (entry.isFile() && entry.name.endsWith('.canvas')) {
+            yield full;
+        }
+    }
+}

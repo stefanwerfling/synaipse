@@ -65,6 +65,13 @@ interface ContainerToken extends Tokens.Generic {
      */
     antvLayout?: string;
     antvSyntax?: string;
+    /**
+     * When `containerType === 'floorplan'` we stash the raw body (mdfloor
+     * DSL) and skip block-lexing — a post-pass in `MarkdownPreview` runs
+     * `parse` + `render` from the `mdfloor` package to hydrate the stub
+     * into an inline SVG.
+     */
+    floorplanSyntax?: string;
     tokens: Tokens.Generic[];
 }
 
@@ -190,6 +197,7 @@ export const setupContainerExtension = (marked: typeof MarkedNamespace): void =>
                 // renders that type.
                 const isAttrs = secondToken !== undefined && secondToken.startsWith('{');
                 const isAntv = secondToken !== undefined && !isAttrs && containerType === 'infographic';
+                const isFloorplan = containerType === 'floorplan';
 
                 const token: ContainerToken = {
                     type: 'container',
@@ -203,6 +211,11 @@ export const setupContainerExtension = (marked: typeof MarkedNamespace): void =>
                 if (isAntv) {
                     token.antvLayout = secondToken;
                     token.antvSyntax = body;
+                } else if (isFloorplan) {
+                    // Preserve the DSL body verbatim — every character (leading
+                    // spaces on indented `door`/`window` lines, blank lines
+                    // between rooms) is significant to the mdfloor parser.
+                    token.floorplanSyntax = body;
                 } else {
                     this.lexer.blockTokens(body, token.tokens);
                 }
@@ -218,6 +231,15 @@ export const setupContainerExtension = (marked: typeof MarkedNamespace): void =>
                     // them and instantiates `new Infographic({container: this})`.
                     const syntaxAttr = escapeHtml(JSON.stringify(`infographic ${token.antvLayout}\n${token.antvSyntax}`));
                     return `<div class="md-antv-infographic" data-infographic-layout="${escapeHtml(token.antvLayout)}" data-infographic-syntax="${syntaxAttr}"></div>\n`;
+                }
+
+                if (token.floorplanSyntax !== undefined) {
+                    // Same deferral pattern as antv: marked is sync and
+                    // mdfloor's `render()` returns a live `SVGSVGElement`.
+                    // Stash the DSL body as a JSON-encoded data-attr; the
+                    // post-pass calls `parse` + `render` and appends the SVG.
+                    const syntaxAttr = escapeHtml(JSON.stringify(token.floorplanSyntax));
+                    return `<div class="md-floorplan" data-floorplan-syntax="${syntaxAttr}"></div>\n`;
                 }
 
                 const inner = this.parser.parse(token.tokens);

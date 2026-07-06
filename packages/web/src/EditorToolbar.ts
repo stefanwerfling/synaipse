@@ -1,5 +1,6 @@
 import {el} from './Dom.js';
 import {openDsgvoDialog} from './DsgvoDialog.js';
+import {openFloorplanDialog} from './FloorplanDialog.js';
 import {
     buildContainerAttrs,
     insertAt,
@@ -40,6 +41,37 @@ interface SimpleButton {
     title: string;
     action: () => void;
 }
+
+interface FloorplanBlockRange {
+    /** Position of `:` in `::: floorplan` at line start. */
+    start: number;
+    /** Position just after the closing `:::`. */
+    end: number;
+    /** DSL body between the fences, without surrounding newlines. */
+    body: string;
+}
+
+/**
+ * Locate the `::: floorplan\n…\n:::` block that contains `cursor`, if any.
+ * Uses the same fence shape as the marked extension in
+ * `MarkdownContainer.ts`, so the detection stays aligned with the parser.
+ * Returns null when the caret is outside every floorplan block.
+ */
+const findFloorplanBlockAt = (text: string, cursor: number): FloorplanBlockRange | null => {
+    const RE = /^:::[ \t]*floorplan[ \t]*\n([\s\S]*?)\n:::[ \t]*(?:\n|$)/gm;
+    let m: RegExpExecArray | null;
+    while ((m = RE.exec(text)) !== null) {
+        const start = m.index;
+        // Trailing newline (if any) belongs to the block for replacement
+        // purposes, but exclude it from the "cursor is inside" range so a
+        // caret one line below still counts as outside.
+        const end = start + m[0].length - (m[0].endsWith('\n') ? 1 : 0);
+        if (cursor >= start && cursor <= end) {
+            return {start, end: start + m[0].length - (m[0].endsWith('\n') ? 1 : 0), body: m[1] ?? ''};
+        }
+    }
+    return null;
+};
 
 const CONTAINER_TYPES: readonly {type: string; label: string; icon: string; color?: string}[] = [
     {type: 'infographic', label: 'Infographic step', icon: '🚀', color: 'blue'},
@@ -91,6 +123,7 @@ export class EditorToolbar {
                 {label: '⊞', title: 'Table', action: () => this.insertTable()}
             ],
             [
+                {label: '🏠', title: 'Grundriss einfügen / bearbeiten (mdfloor)', action: () => this.openFloorplan()},
                 {label: '🔒', title: 'Mark selection as DSGVO (Ctrl+Shift+D)', action: () => this.openDsgvo()}
             ]
         ];
@@ -251,6 +284,60 @@ export class EditorToolbar {
     private insertContainer(type: string, attrs: string): void {
         const {start, end} = this.sel();
         this.apply(buildContainer(this.textarea.value, start, end, type, attrs));
+    }
+
+    /**
+     * Open the mdfloor floorplan editor as a modal. If the caret sits
+     * inside an existing `::: floorplan\n…\n:::` block, prefill it and
+     * replace the range on confirm. Otherwise insert a fresh block at
+     * the caret, separated from surrounding content by blank lines so
+     * marked's tokenizer sees a clean block boundary.
+     */
+    private openFloorplan(): void {
+        const {start} = this.sel();
+        const block = findFloorplanBlockAt(this.textarea.value, start);
+
+        openFloorplanDialog({
+            initial: block?.body ?? '',
+            onConfirm: (dsl) => {
+                const body = dsl.replace(/\s+$/, '');
+                const fenced = `::: floorplan\n${body}\n:::`;
+
+                if (block !== null) {
+                    const before = this.textarea.value.slice(0, block.start);
+                    const after = this.textarea.value.slice(block.end);
+                    const newValue = before + fenced + after;
+                    this.apply({
+                        value: newValue,
+                        selStart: block.start,
+                        selEnd: block.start + fenced.length
+                    });
+                    return;
+                }
+
+                // Fresh insert: ensure a blank line before and after the
+                // fence so an inline caret (mid-paragraph) doesn't fuse the
+                // block into surrounding text.
+                const val = this.textarea.value;
+                const before = val.slice(0, start);
+                const after = val.slice(start);
+                const prefix = before.length === 0 || before.endsWith('\n\n') ? ''
+                    : before.endsWith('\n') ? '\n'
+                    : '\n\n';
+                const suffix = after.length === 0 || after.startsWith('\n\n') ? ''
+                    : after.startsWith('\n') ? '\n'
+                    : '\n\n';
+                const inserted = prefix + fenced + suffix;
+                const insertAt = start;
+                const newValue = val.slice(0, insertAt) + inserted + val.slice(insertAt);
+                this.apply({
+                    value: newValue,
+                    selStart: insertAt + prefix.length,
+                    selEnd: insertAt + prefix.length + fenced.length
+                });
+            },
+            onCancel: () => this.textarea.focus()
+        });
     }
 
     /**

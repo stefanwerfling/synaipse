@@ -114,6 +114,7 @@ export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: 
     host.innerHTML = renderMarkdown(content);
     rewriteAssetImages(host, noteId);
     void applyAntvInfographicsTo(host);
+    void applyMdFloorTo(host);
 };
 
 /**
@@ -209,6 +210,65 @@ const openInfographicFullscreen = async (syntax: string): Promise<void> => {
     } catch (e) {
         stage.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
         stage.classList.add('md-antv-infographic-error');
+    }
+};
+
+let cachedMdfloor: typeof import('mdfloor') | null = null;
+
+const loadMdfloor = async (): Promise<typeof import('mdfloor')> => {
+    if (cachedMdfloor !== null) return cachedMdfloor;
+    const mod = await import('mdfloor');
+    cachedMdfloor = mod;
+    return cachedMdfloor;
+};
+
+/**
+ * Post-render pass for `::: floorplan` stubs. Same shape as the antv pass:
+ * lazy-load `mdfloor`, `parse` + `render` each stub's DSL into an inline
+ * SVG element. `dataset.rendered` keeps this idempotent when the preview
+ * re-renders on cursor / TOC updates.
+ *
+ * Errors surface inline (text + `md-floorplan-error` class) so parse
+ * problems in the DSL don't silently blank the note. mdfloor's `parse`
+ * never throws; the error path here catches library-load failures and
+ * unexpected render errors.
+ */
+export const applyMdFloorTo = async (host: HTMLElement): Promise<void> => {
+    const stubs = host.querySelectorAll<HTMLDivElement>('.md-floorplan');
+    if (stubs.length === 0) return;
+
+    let mdfloor: typeof import('mdfloor');
+    try {
+        mdfloor = await loadMdfloor();
+    } catch (e) {
+        for (const stub of stubs) {
+            stub.textContent = `mdfloor failed to load: ${e instanceof Error ? e.message : String(e)}`;
+            stub.classList.add('md-floorplan-error');
+        }
+        return;
+    }
+
+    for (const stub of stubs) {
+        if (stub.dataset.rendered === 'true') continue;
+        const syntaxJson = stub.dataset.floorplanSyntax;
+        if (syntaxJson === undefined) continue;
+
+        try {
+            const syntax = JSON.parse(syntaxJson) as string;
+            const plan = mdfloor.parse(syntax);
+            const svg = mdfloor.render(plan);
+            // Let SVG scale to its container width; mdfloor emits explicit
+            // width/height attrs, but a floorplan in a note reads better if
+            // it fits the column.
+            svg.setAttribute('width', '100%');
+            svg.style.maxWidth = '100%';
+            svg.style.height = 'auto';
+            stub.replaceChildren(svg);
+            stub.dataset.rendered = 'true';
+        } catch (e) {
+            stub.textContent = `Floorplan render error: ${e instanceof Error ? e.message : String(e)}`;
+            stub.classList.add('md-floorplan-error');
+        }
     }
 };
 
@@ -355,6 +415,7 @@ export class MarkdownPreview {
         this.transformWikilinks();
         rewriteAssetImages(body, this.noteId);
         void applyAntvInfographicsTo(this.element);
+        void applyMdFloorTo(this.element);
     }
 
     private renderTypedLinks(): HTMLElement {

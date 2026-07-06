@@ -6,5 +6,5 @@ export type {History} from './History.js';
 export {HashCache} from './Cache.js';
 export type {CacheEntry, TouchSeed} from './Cache.js';
 export {parseNote, extractWikilinks, extractTags} from './Parser.js';
-export {walkMarkdown} from './Walker.js';
+export {walkMarkdown, walkCanvas} from './Walker.js';
 export {VaultWatcher} from './Watcher.js';

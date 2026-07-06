@@ -154,4 +154,41 @@ describe('container extension', () => {
             expect(html).not.toContain('md-antv-infographic');
         });
     });
+
+    describe('floorplan branch', () => {
+        const floorSrc = [
+            '::: floorplan',
+            '@title Kleine Wohnung',
+            '@scale 55',
+            'room Küche 0,0 4x3',
+            '  door N 1 1',
+            '  power 0.5,2.5 label=Kühlschrank',
+            ':::'
+        ].join('\n');
+
+        it('emits an md-floorplan stub for ::: floorplan blocks', () => {
+            const html = render(floorSrc);
+            expect(html).toContain('class="md-floorplan"');
+            expect(html).toContain('data-floorplan-syntax=');
+            // The card body of the plain-container branch must be skipped.
+            expect(html).not.toContain('md-container-body');
+        });
+
+        it('preserves the DSL body verbatim in data-floorplan-syntax', () => {
+            const html = render(floorSrc);
+            // data-floorplan-syntax is JSON-encoded and then HTML-escaped.
+            // JSON.stringify leaves non-ASCII UTF-8 alone; only `"`, `\`,
+            // control chars and newlines are escaped. Newlines become `\n`.
+            expect(html).toContain('@title Kleine Wohnung');
+            expect(html).toContain('room Küche 0,0 4x3');
+            expect(html).toContain('  door N 1 1');
+            expect(html).toContain('label=Kühlschrank');
+        });
+
+        it('does not disturb unrelated container types', () => {
+            const html = render('::: warning\nbe careful\n:::');
+            expect(html).toContain('md-container-warning');
+            expect(html).not.toContain('md-floorplan');
+        });
+    });
 });

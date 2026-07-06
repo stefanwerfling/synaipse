@@ -14,7 +14,20 @@ export interface TagBarState {
     showRoomGrid: boolean;
     showCluster: boolean;
     showCommunities: boolean;
+    /** The user's persisted preference — what the buttons show as "pressed". */
     viewMode: '2d' | '3d' | 'atlas';
+    /**
+     * What the App actually renders. Diverges from `viewMode` when the
+     * graph is too large for the requested renderer. Defaults to viewMode
+     * if omitted so older callers keep working.
+     */
+    effectiveViewMode?: '2d' | '3d' | 'atlas';
+    /**
+     * Set when the graph is big enough that the App overrode the user's
+     * chosen renderer (`forced`) or is close to that limit (`warned`).
+     * Used to disable/annotate the mode buttons.
+     */
+    modeOverride?: {kind: 'forced' | 'warned'; nodeCount: number} | null;
     project: string | null;
 }
 
@@ -78,17 +91,50 @@ export class TagBar {
             this.segmentToggle('isolated', this.state.hideIsolated, () => this.cb.onToggleIsolated())
         );
 
+        const override = this.state.modeOverride ?? null;
+        const forced = override !== null && override.kind === 'forced';
+        // Interactive renderers (2D/3D) are locked out only when we're past
+        // the hard cap; the softer 'warned' state keeps them clickable but
+        // adds a tooltip so users know why the page might chug.
+        const interactiveDisabled = forced;
+        const interactiveTitle = forced
+            ? `Graph has ${override!.nodeCount.toLocaleString()} nodes — Atlas is the only renderer that scales here.`
+            : override !== null
+                ? `Graph has ${override.nodeCount.toLocaleString()} nodes — 2D/3D will be slow. Atlas recommended.`
+                : undefined;
+
+        // "Active" reflects what's actually being rendered, which differs
+        // from the user's preference when we've forced Atlas. That way the
+        // glowing button matches the picture on screen instead of teasing
+        // an unavailable renderer.
+        const activeMode = this.state.effectiveViewMode ?? this.state.viewMode;
+
         const modeToggle = el('div', {class: 'mode-switch', attrs: {role: 'group', 'aria-label': 'view mode'}},
-            this.modeButton('2D', this.state.viewMode === '2d', () => {
+            this.modeButton('2D', activeMode === '2d', interactiveDisabled, interactiveTitle, () => {
                 if (this.state.viewMode !== '2d') this.cb.onSetViewMode('2d');
             }),
-            this.modeButton('3D', this.state.viewMode === '3d', () => {
+            this.modeButton('3D', activeMode === '3d', interactiveDisabled, interactiveTitle, () => {
                 if (this.state.viewMode !== '3d') this.cb.onSetViewMode('3d');
             }),
-            this.modeButton('Atlas', this.state.viewMode === 'atlas', () => {
+            this.modeButton('Atlas', activeMode === 'atlas', false, undefined, () => {
                 if (this.state.viewMode !== 'atlas') this.cb.onSetViewMode('atlas');
             })
         );
+
+        // Visible note next to the mode switch when we've overridden the
+        // user's choice. Without this the picture just silently changes
+        // to Atlas and it's not obvious why 2D/3D suddenly aren't options.
+        if (override !== null) {
+            const noteText = forced
+                ? `Atlas · ${override.nodeCount.toLocaleString()} nodes`
+                : `${override.nodeCount.toLocaleString()} nodes · Atlas recommended`;
+            const note = el('span', {
+                class: forced ? 'mode-switch-note forced' : 'mode-switch-note warned',
+                attrs: {title: interactiveTitle ?? ''},
+                text: noteText
+            });
+            modeToggle.appendChild(note);
+        }
 
         const actions = el('div', {class: 'tagbar-actions'}, viewGroup, filterGroup, modeToggle);
 
@@ -205,11 +251,32 @@ export class TagBar {
         });
     }
 
-    private modeButton(label: string, active: boolean, onClick: () => void): HTMLElement {
+    private modeButton(
+        label: string,
+        active: boolean,
+        disabled: boolean,
+        title: string | undefined,
+        onClick: () => void
+    ): HTMLElement {
+        const classes = ['mode-switch-btn'];
+        if (active) classes.push('active');
+        if (disabled) classes.push('disabled');
+
+        const attrs: Record<string, string> = {
+            type: 'button',
+            'aria-pressed': active ? 'true' : 'false'
+        };
+
+        if (disabled) attrs.disabled = 'true';
+        if (title !== undefined) attrs.title = title;
+
         return el('button', {
-            class: active ? 'mode-switch-btn active' : 'mode-switch-btn',
-            attrs: {type: 'button', 'aria-pressed': active ? 'true' : 'false'},
-            on: {click: () => onClick()},
+            class: classes.join(' '),
+            attrs,
+            on: {click: () => {
+                if (disabled) return;
+                onClick();
+            }},
             text: label
         });
     }

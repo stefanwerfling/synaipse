@@ -189,8 +189,14 @@ export const computeLayout = (input: GraphInput): GraphLayout => {
         };
     });
 
-    const maxX = Math.max(0, ...layoutNodes.map((n) => n.x));
-    const maxY = Math.max(0, ...layoutNodes.map((n) => n.y));
+    // Plain loop — `Math.max(0, ...arr)` blows the argument stack at ~150k
+    // entries, so we can't spread here even though the shape is tempting.
+    let maxX = 0;
+    let maxY = 0;
+    for (const n of layoutNodes) {
+        if (n.x > maxX) maxX = n.x;
+        if (n.y > maxY) maxY = n.y;
+    }
 
     // Aggregate edges between communities so the client can show a thin
     // skeleton at zoomed-out level (50 super-nodes + their links) instead

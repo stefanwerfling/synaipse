@@ -2,6 +2,7 @@ import type {Frontmatter, Note} from '@synaipse/core';
 import {extractTypedLinks} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
+import {clearDraft, formatDraftAge, readDraft, writeDraft} from './Drafts.js';
 import {EditorToolbar} from './EditorToolbar.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
@@ -21,7 +22,15 @@ export interface EditorCallbacks {
      * If omitted, autocomplete is silently disabled.
      */
     searchTitles?: (query: string) => readonly WikilinkMatch[];
+    /**
+     * Fired whenever the dirty flag changes (title/tags/content edited or
+     * reset). Also fired whenever a draft is written or cleared so the
+     * host can refresh sidebar draft-markers without polling storage.
+     */
+    onDirtyChange?: (dirty: boolean) => void;
 }
+
+const DRAFT_DEBOUNCE_MS = 500;
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -69,6 +78,9 @@ export class Editor {
     private viewMode: 'split' | 'tab';
     private activeTab: 'write' | 'preview' = 'write';
     private onMqChange: (e: MediaQueryListEvent) => void;
+    private lastDirty = false;
+    private draftTimer: number | null = null;
+    private dirtyBadge: HTMLElement | null = null;
 
     public constructor(note: Note, private readonly cb: EditorCallbacks) {
         this.note = note;
@@ -103,6 +115,8 @@ export class Editor {
             this.applyLayout();
         };
         this.mqMobile.addEventListener('change', this.onMqChange);
+
+        this.maybeOfferDraftRestore();
     }
 
     public update(note: Note): void {
@@ -121,11 +135,100 @@ export class Editor {
     }
 
     public destroy(): void {
+        if (this.draftTimer !== null) {
+            window.clearTimeout(this.draftTimer);
+            this.draftTimer = null;
+        }
         this.previewUnsubscribe();
         this.mqMobile.removeEventListener('change', this.onMqChange);
         this.preview.destroy();
         this.toolbar.destroy();
         this.autocomplete?.destroy();
+    }
+
+    /**
+     * Compare draft snapshot against the note as it arrived from the server.
+     * A draft that matches the server has nothing to restore.
+     */
+    private maybeOfferDraftRestore(): void {
+        const draft = readDraft(this.note.id);
+        if (draft === null) return;
+
+        const same = draft.title === this.initialTitle()
+            && draft.tags === this.initialTags()
+            && draft.content === this.note.content;
+
+        if (same) {
+            clearDraft(this.note.id);
+            this.cb.onDirtyChange?.(false);
+            return;
+        }
+
+        const ok = window.confirm(
+            `Restore your unsaved draft of "${this.note.title}" from ${formatDraftAge(draft.savedAt)}?`
+        );
+
+        if (!ok) {
+            clearDraft(this.note.id);
+            this.cb.onDirtyChange?.(false);
+            return;
+        }
+
+        this.title = draft.title;
+        this.tagsInput = draft.tags;
+        this.content = draft.content;
+        this.titleInput.value = draft.title;
+        this.tagsField.value = draft.tags;
+        this.textarea.value = draft.content;
+        this.preview.update(draft.content);
+        this.notifyDirty();
+    }
+
+    private notifyDirty(): void {
+        const dirty = this.isDirty;
+        const flipped = dirty !== this.lastDirty;
+
+        if (flipped) this.lastDirty = dirty;
+        this.updateDirtyBadge(dirty);
+
+        // Storage side-effects BEFORE the callback so a refreshDrafts()
+        // triggered by the host sees the current state, not a phantom key
+        // that we're about to remove.
+        if (dirty) {
+            this.scheduleDraftSave();
+        } else {
+            if (this.draftTimer !== null) {
+                window.clearTimeout(this.draftTimer);
+                this.draftTimer = null;
+            }
+            clearDraft(this.note.id);
+        }
+
+        if (flipped) this.cb.onDirtyChange?.(dirty);
+    }
+
+    private scheduleDraftSave(): void {
+        if (this.draftTimer !== null) {
+            window.clearTimeout(this.draftTimer);
+        }
+
+        this.draftTimer = window.setTimeout(() => {
+            this.draftTimer = null;
+            writeDraft(this.note.id, {
+                title: this.title,
+                tags: this.tagsInput,
+                content: this.content,
+                savedAt: Date.now()
+            });
+            // Fire again so the sidebar's draft-set gets the newly-written
+            // key even if the dirty flag hasn't flipped in this window.
+            this.cb.onDirtyChange?.(true);
+        }, DRAFT_DEBOUNCE_MS);
+    }
+
+    private updateDirtyBadge(dirty: boolean): void {
+        if (this.dirtyBadge === null) return;
+        this.dirtyBadge.style.visibility = dirty ? 'visible' : 'hidden';
     }
 
     private initialTitle(): string {
@@ -175,12 +278,18 @@ export class Editor {
     private build(): void {
         this.titleInput = el('input', {
             attrs: {type: 'text', value: this.title},
-            on: {input: (e) => { this.title = (e.target as HTMLInputElement).value; }}
+            on: {input: (e) => {
+                this.title = (e.target as HTMLInputElement).value;
+                this.notifyDirty();
+            }}
         }) as HTMLInputElement;
 
         this.tagsField = el('input', {
             attrs: {type: 'text', value: this.tagsInput},
-            on: {input: (e) => { this.tagsInput = (e.target as HTMLInputElement).value; }}
+            on: {input: (e) => {
+                this.tagsInput = (e.target as HTMLInputElement).value;
+                this.notifyDirty();
+            }}
         }) as HTMLInputElement;
 
         const fields = el('div', {class: 'editor-fields'},
@@ -201,6 +310,7 @@ export class Editor {
                 input: (e) => {
                     this.content = (e.target as HTMLTextAreaElement).value;
                     this.preview.update(this.content);
+                    this.notifyDirty();
                 },
                 dragover: (e) => this.onDragOver(e as DragEvent),
                 dragleave: () => this.textarea.classList.remove('drop-target'),
@@ -215,6 +325,7 @@ export class Editor {
             onChange: (value) => {
                 this.content = value;
                 this.preview.update(value);
+                this.notifyDirty();
             }
         });
 
@@ -286,7 +397,14 @@ export class Editor {
             'preview'
         );
 
-        this.actionsHost = el('div', {class: 'editor-actions'}, saveBtn, cancelBtn, previewToggle);
+        this.dirtyBadge = el('span', {
+            class: 'editor-dirty-badge',
+            attrs: {title: 'Unsaved changes — auto-saved as draft in this browser', 'aria-label': 'Unsaved changes'},
+            style: {visibility: 'hidden'},
+            text: '● unsaved'
+        });
+
+        this.actionsHost = el('div', {class: 'editor-actions'}, this.dirtyBadge, saveBtn, cancelBtn, previewToggle);
 
         this.element.appendChild(fields);
         this.element.appendChild(this.tabBar);
@@ -389,6 +507,10 @@ export class Editor {
             await this.cb.onSave({content: this.content, frontmatter});
             this.setSaving(false, btn);
             this.flashSaved(btn);
+            clearDraft(this.note.id);
+            this.lastDirty = false;
+            this.updateDirtyBadge(false);
+            this.cb.onDirtyChange?.(false);
             return;
         } catch (e) {
             this.error = e instanceof Error ? e.message : String(e);
@@ -464,6 +586,7 @@ export class Editor {
         this.content = this.textarea.value;
         this.preview.update(this.content);
 
+        this.notifyDirty();
         const cursor = start + insertion.length;
         this.textarea.selectionStart = cursor;
         this.textarea.selectionEnd = cursor;

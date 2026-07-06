@@ -1,6 +1,7 @@
-import type {Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
+import type {CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
+import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource, type SummarizeEvent} from './Chat.js';
 import {type WriteAssetResult} from './Assets.js';
@@ -48,6 +49,7 @@ export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, ChatPrivacyStats, 
 export type {RedactionHit, RedactionResult} from './Privacy.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
 export type {WriteAssetResult} from './Assets.js';
+export type {CanvasSummary} from './Canvas.js';
 export type {ActivityReport, ActivityCommit, ActivityBucket, ActivityCount} from './Activity.js';
 export type {GraphLayout, LayoutNode, LayoutCommunity} from './Layout.js';
 export type {CompileEvent, CompileResult} from './Compile.js';
@@ -1430,6 +1432,27 @@ export class SynaipseService {
         return note;
     }
 
+    /**
+     * Unscoped variant of {@link writeNote}. The web UI operates as a
+     * single-user vault editor: it needs to save to any path the user
+     * types (e.g. `Memory/scratch/foo.md`), without the MCP-style project
+     * prefix mangling or the auto-injected `project/<name>` tag. Skips
+     * `requireProject`, `normaliseWritePath` and `applyProjectToFrontmatter`;
+     * still runs indexing so the fresh note shows up in search + graph.
+     *
+     * MCP writers must NOT call this — they need project-scope enforcement
+     * so per-token ACLs and folder isolation stay intact.
+     */
+    public async writeNoteUnscoped(input: NoteWriteInput, commitTool = 'write_note'): Promise<Note> {
+        const note = await this.notes.write(input, {
+            message: buildCommitMessage(commitTool, input.path, null)
+        });
+
+        await this.maybeIndexNote(note);
+        this.fulltextIndex.addNote(note);
+        return note;
+    }
+
     /** Map of ChatGPT conversation UUID → existing vault note id, scanning frontmatter.chatgpt_id. */
     public listChatgptImports(): Map<string, NoteId> {
         const out = new Map<string, NoteId>();
@@ -1771,6 +1794,23 @@ export class SynaipseService {
         this.invalidateTopologyCaches();
     }
 
+    /**
+     * Unscoped counterpart to {@link deleteNote}. See {@link writeNoteUnscoped}
+     * for the rationale — same MCP-vs-web split.
+     */
+    public async deleteNoteUnscoped(id: NoteId): Promise<void> {
+        await this.notes.delete(id, {
+            message: buildCommitMessage('delete_note', id, null)
+        });
+
+        if (this.index !== null) {
+            await this.index.deleteNote(id);
+        }
+
+        this.fulltextIndex.removeNote(id);
+        this.invalidateTopologyCaches();
+    }
+
     // -- chat sessions ------------------------------------------------------
     //
     // Chats are deliberately NOT vault notes. They live in their own on-disk
@@ -1992,6 +2032,22 @@ export class SynaipseService {
 
     public listNotes(): Note[] {
         return this.notes.list();
+    }
+
+    public async listCanvases(): Promise<CanvasSummary[]> {
+        return listCanvasesInVault(this.vault.root);
+    }
+
+    public async readCanvas(id: string): Promise<CanvasDocument> {
+        return readCanvasFromVault(this.vault.root, id);
+    }
+
+    public async writeCanvas(id: string, doc: CanvasDocument): Promise<void> {
+        await writeCanvasToVault(this.vault.root, id, doc);
+    }
+
+    public async deleteCanvas(id: string): Promise<void> {
+        await deleteCanvasFromVault(this.vault.root, id);
     }
 
     public tags(): Map<string, NoteId[]> {

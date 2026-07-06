@@ -90,7 +90,7 @@ export const el = <K extends keyof HTMLElementTagNameMap>(
     return node;
 };
 
-export const clear = (node: HTMLElement): void => {
+export const clear = (node: Element): void => {
     while (node.firstChild) {
         node.removeChild(node.firstChild);
     }

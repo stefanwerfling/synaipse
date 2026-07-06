@@ -1,6 +1,7 @@
 import type {Graph} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
+import {CanvasPanel} from './CanvasPanel.js';
 import {ChatPanel} from './ChatPanel.js';
 import {CommandPalette} from './CommandPalette.js';
 import {clear, el} from './Dom.js';
@@ -31,7 +32,16 @@ const STORAGE_VIEW_MODE = 'synaipse.graph.viewMode';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
-type Tab = 'notes' | 'graph' | 'chat' | 'jobs' | 'activity' | 'audit';
+// Node-count thresholds that gate which renderer the UI is allowed to
+// choose. Cytoscape (2D) and three.js (3D) run frame-by-frame simulations
+// and OOM the browser tab well before we hit the Atlas's static-canvas
+// upper bound. Force-atlas kicks in at 20k because that's where both fall
+// over in practice; the softer warning at 5k gives users a heads-up that
+// they're in expensive territory but doesn't take the choice away.
+const HUGE_GRAPH_FORCE_ATLAS = 20_000;
+const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
+
+type Tab = 'notes' | 'graph' | 'canvas' | 'chat' | 'jobs' | 'activity' | 'audit';
 
 export class App {
     public readonly element: HTMLElement;
@@ -53,10 +63,12 @@ export class App {
     private graphWrap: HTMLElement;
     private notesTabBtn!: HTMLButtonElement;
     private graphTabBtn!: HTMLButtonElement;
+    private canvasTabBtn!: HTMLButtonElement;
     private chatTabBtn!: HTMLButtonElement;
     private jobsTabBtn!: HTMLButtonElement;
     private activityTabBtn!: HTMLButtonElement;
     private auditTabBtn!: HTMLButtonElement;
+    private canvasPanel!: CanvasPanel;
     private chatPanel!: ChatPanel;
     private jobsPanel!: JobsPanel;
     private activityPanel!: ActivityPanel;
@@ -104,6 +116,13 @@ export class App {
             onAskAboutSelection: (noteId, selection) => {
                 this.chatPanel.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
                 void this.switchTab('chat');
+            }
+        });
+
+        this.canvasPanel = new CanvasPanel({
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
             }
         });
 
@@ -391,6 +410,13 @@ export class App {
             on: {click: () => void this.switchTab('graph')}
         }) as HTMLButtonElement;
 
+        this.canvasTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button'},
+            text: 'Canvas',
+            on: {click: () => void this.switchTab('canvas')}
+        }) as HTMLButtonElement;
+
         this.chatTabBtn = el('button', {
             class: 'tab',
             attrs: {type: 'button'},
@@ -476,7 +502,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             ...trailing
@@ -516,6 +542,7 @@ export class App {
         this.tab = tab;
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
+        this.canvasTabBtn.className = tab === 'canvas' ? 'tab active' : 'tab';
         this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
         this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
         this.activityTabBtn.className = tab === 'activity' ? 'tab active' : 'tab';
@@ -523,6 +550,11 @@ export class App {
 
         if (tab === 'notes') {
             this.showNotes();
+            return;
+        }
+
+        if (tab === 'canvas') {
+            void this.showCanvas();
             return;
         }
 
@@ -547,6 +579,12 @@ export class App {
         }
 
         await this.showGraph();
+    }
+
+    private async showCanvas(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.canvasPanel.element);
+        await this.canvasPanel.onShow();
     }
 
     private async showActivity(): Promise<void> {
@@ -621,7 +659,7 @@ export class App {
 
         this.renderTagBar();
 
-        const wantMode = this.viewMode.get();
+        const effectiveMode = this.effectiveViewMode();
 
         if (this.graphView !== null) {
             this.graphView.destroy();
@@ -646,10 +684,10 @@ export class App {
             }
         };
 
-        if (wantMode === '3d') {
+        if (effectiveMode === '3d') {
             const {GraphView3D} = await import('./Graph3D.js');
             this.graphView = new GraphView3D(state, callbacks);
-        } else if (wantMode === 'atlas') {
+        } else if (effectiveMode === 'atlas') {
             const {GraphAtlasView} = await import('./GraphAtlas.js');
             this.graphView = new GraphAtlasView(state, callbacks);
         } else {
@@ -657,7 +695,7 @@ export class App {
             this.graphView = new GraphView(state, callbacks);
         }
 
-        this.graphViewMode = wantMode;
+        this.graphViewMode = effectiveMode;
         this.graphWrap.appendChild(this.graphView.element);
         this.graphView.mount();
         this.scheduleHeatApply();
@@ -704,6 +742,8 @@ export class App {
             showCluster: this.showCluster.get(),
             showCommunities: this.showCommunities.get(),
             viewMode: this.viewMode.get(),
+            effectiveViewMode: this.effectiveViewMode(),
+            modeOverride: this.viewModeOverrideReason(),
             project: this.project
         };
 
@@ -718,6 +758,36 @@ export class App {
         if (!this.tagBar.element.isConnected) {
             this.graphWrap.prepend(this.tagBar.element);
         }
+    }
+
+    /**
+     * Effective render mode = user preference clamped to what the current
+     * graph size can actually support. Anything past 20k nodes is forced
+     * to Atlas because Cytoscape/three.js hit the wall well before that.
+     */
+    private effectiveViewMode(): '2d' | '3d' | 'atlas' {
+        const requested = this.viewMode.get();
+        const nodeCount = this.graph?.nodes.length ?? 0;
+
+        if (nodeCount >= HUGE_GRAPH_FORCE_ATLAS && requested !== 'atlas') {
+            return 'atlas';
+        }
+
+        return requested;
+    }
+
+    private viewModeOverrideReason(): {kind: 'forced' | 'warned'; nodeCount: number} | null {
+        const nodeCount = this.graph?.nodes.length ?? 0;
+
+        if (nodeCount >= HUGE_GRAPH_FORCE_ATLAS) {
+            return {kind: 'forced', nodeCount};
+        }
+
+        if (nodeCount >= HUGE_GRAPH_WARN_INTERACTIVE && this.viewMode.get() !== 'atlas') {
+            return {kind: 'warned', nodeCount};
+        }
+
+        return null;
     }
 
     private applyGraphFilter(): void {

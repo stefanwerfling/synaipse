@@ -1,4 +1,4 @@
-import type {Frontmatter, Graph, Note, SearchHit, SearchMode} from '@synaipse/core';
+import type {CanvasDocument, Frontmatter, Graph, Note, SearchHit, SearchMode} from '@synaipse/core';
 
 const json = async <T>(response: Response): Promise<T> => {
     if (!response.ok) {
@@ -60,9 +60,39 @@ const invalidateLayoutCache = (): void => {
     layoutCache = null;
 };
 
+export interface CanvasSummary {
+    id: string;
+    mtime: number;
+    size: number;
+}
+
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
         return json(await fetch('/api/notes'));
+    },
+    listCanvases: async (): Promise<CanvasSummary[]> => {
+        const {canvases} = await json<{canvases: CanvasSummary[]}>(await fetch('/api/canvases'));
+        return canvases;
+    },
+    getCanvas: async (id: string): Promise<CanvasDocument> => {
+        const url = new URL('/api/canvas', window.location.origin);
+        url.searchParams.set('path', id);
+        return json(await fetch(url));
+    },
+    putCanvas: async (id: string, doc: CanvasDocument): Promise<void> => {
+        const url = new URL('/api/canvas', window.location.origin);
+        url.searchParams.set('path', id);
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(doc)
+        });
+        await noContent(response);
+    },
+    deleteCanvas: async (id: string): Promise<void> => {
+        const url = new URL('/api/canvas', window.location.origin);
+        url.searchParams.set('path', id);
+        await noContent(await fetch(url, {method: 'DELETE'}));
     },
     getNote: async (id: string): Promise<Note> => {
         return json(await fetch(`/api/notes/${encodeURIComponent(id)}`));

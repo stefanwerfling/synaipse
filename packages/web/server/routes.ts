@@ -1,7 +1,10 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
+import {gzip} from 'node:zlib';
+import {promisify} from 'node:util';
 import type {Frontmatter} from '@synaipse/core';
+import {parseCanvas} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
@@ -16,6 +19,43 @@ type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<
 const json = (res: ServerResponse, status: number, body: unknown): void => {
     res.writeHead(status, {'Content-Type': 'application/json'});
     res.end(JSON.stringify(body));
+};
+
+const gzipAsync = promisify(gzip);
+
+// Threshold above which gzip pays for itself. Small payloads waste CPU +
+// add latency compressing bytes that already fit in a single TCP segment.
+const GZIP_MIN_BYTES = 4096;
+
+const clientAcceptsGzip = (req: IncomingMessage): boolean => {
+    const header = req.headers['accept-encoding'];
+    if (typeof header !== 'string') return false;
+    return header.split(',').some((token) => token.trim().toLowerCase().startsWith('gzip'));
+};
+
+/**
+ * Same shape as `json()` but negotiates gzip when the client advertises
+ * support and the payload is large enough to benefit. The graph layout at
+ * 50k notes is 5.3 MiB uncompressed — gzip cuts it to ~700 KiB. Used only
+ * for read endpoints that return whole-graph blobs.
+ */
+const jsonLarge = async (req: IncomingMessage, res: ServerResponse, status: number, body: unknown): Promise<void> => {
+    const raw = Buffer.from(JSON.stringify(body), 'utf8');
+
+    if (raw.length < GZIP_MIN_BYTES || !clientAcceptsGzip(req)) {
+        res.writeHead(status, {'Content-Type': 'application/json', 'Content-Length': String(raw.length)});
+        res.end(raw);
+        return;
+    }
+
+    const compressed = await gzipAsync(raw);
+    res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
+        'Content-Length': String(compressed.length),
+        'Vary': 'Accept-Encoding'
+    });
+    res.end(compressed);
 };
 
 const notFound = (res: ServerResponse): void => json(res, 404, {error: 'not found'});
@@ -275,13 +315,76 @@ export const routes = (
         return;
     }
 
+    if (path === '/api/canvases') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const canvases = await service.listCanvases();
+        json(res, 200, {canvases});
+        return;
+    }
+
+    if (path === '/api/canvas') {
+        const id = url.searchParams.get('path');
+        if (id === null || id.length === 0) {
+            json(res, 400, {error: 'path query param required'});
+            return;
+        }
+
+        if (method === 'GET') {
+            try {
+                const doc = await service.readCanvas(id);
+                await jsonLarge(req, res, 200, doc);
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                const status = message.includes('escape') ? 400 : 404;
+                json(res, status, {error: message});
+            }
+            return;
+        }
+
+        if (method === 'PUT') {
+            try {
+                const body = await readJson<unknown>(req);
+                // Re-parse via the same defensive path as reads: malformed
+                // nodes/edges get dropped instead of persisted, so a
+                // buggy client can't poison a `.canvas` file.
+                const doc = parseCanvas(JSON.stringify(body));
+                await service.writeCanvas(id, doc);
+                json(res, 200, {ok: true});
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                const status = message.includes('escape') ? 400 : 500;
+                json(res, status, {error: message});
+            }
+            return;
+        }
+
+        if (method === 'DELETE') {
+            try {
+                await service.deleteCanvas(id);
+                res.writeHead(204).end();
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                const status = message.includes('escape') ? 400 : 404;
+                json(res, status, {error: message});
+            }
+            return;
+        }
+
+        methodNotAllowed(res);
+        return;
+    }
+
     if (path === '/api/notes') {
         if (method !== 'GET') {
             methodNotAllowed(res);
             return;
         }
 
-        json(res, 200, service.listNotes().map((n) => {
+        await jsonLarge(req, res, 200, service.listNotes().map((n) => {
             const flags = service.noteFlags(n);
             return {
                 id: n.id,
@@ -409,7 +512,7 @@ export const routes = (
             const content = asString(body.content, 'content');
             const frontmatter = asFrontmatter(body.frontmatter);
 
-            const note = await service.writeNote({
+            const note = await service.writeNoteUnscoped({
                 path: id,
                 content,
                 ...(frontmatter ? {frontmatter} : {})
@@ -420,7 +523,7 @@ export const routes = (
         }
 
         if (method === 'DELETE') {
-            await service.deleteNote(id);
+            await service.deleteNoteUnscoped(id);
             json(res, 200, {deleted: true});
             return;
         }
@@ -1155,7 +1258,7 @@ export const routes = (
             return;
         }
 
-        json(res, 200, service.graph());
+        await jsonLarge(req, res, 200, service.graph());
         return;
     }
 
@@ -1165,7 +1268,7 @@ export const routes = (
             return;
         }
 
-        json(res, 200, service.graphLayout());
+        await jsonLarge(req, res, 200, service.graphLayout());
         return;
     }
 

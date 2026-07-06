@@ -431,14 +431,29 @@ body {
 
 .app {
     display: grid;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: var(--sidebar-w, 320px) 1fr;
     flex: 1 1 auto;
     min-height: 0;
+}
+
+.app.has-toc {
+    grid-template-columns: var(--sidebar-w, 320px) 220px 1fr;
+}
+
+@media (max-width: 1200px) {
+    .app.has-toc {
+        grid-template-columns: var(--sidebar-w, 320px) 1fr;
+    }
+
+    .app.has-toc .viewer-toc {
+        display: none;
+    }
 }
 
 /* === SIDEBAR === */
 
 .sidebar {
+    position: relative;
     border-right: 1px solid var(--border-soft);
     background: var(--bg-1);
     padding: var(--space-4);
@@ -446,6 +461,41 @@ body {
     flex-direction: column;
     gap: var(--space-3);
     min-height: 0;
+}
+
+/* Sits over the sidebar's right border. 6px hit area for easy grabbing,
+   but visually only the border itself changes color on hover / drag. */
+.sidebar-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 5;
+    user-select: none;
+    touch-action: none;
+}
+
+.sidebar-resizer::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background: transparent;
+    transition: background var(--t-fast);
+}
+
+.sidebar-resizer:hover::before,
+.sidebar-resizer.dragging::before {
+    background: var(--accent);
+}
+
+body.sidebar-resizing {
+    cursor: col-resize;
+    user-select: none;
 }
 
 .sidebar-head {
@@ -617,6 +667,78 @@ body {
     font-weight: 600;
 }
 
+.create-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--space-2) var(--space-2);
+    margin-top: var(--space-2);
+    background: var(--bg-2);
+    border: 1px solid var(--accent-soft);
+    border-radius: var(--r-2);
+}
+
+.create-row[hidden] {
+    display: none !important;
+}
+
+.create-row-hint {
+    font-size: 10px;
+    color: var(--text-3);
+    text-transform: none;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.create-row-hint-error {
+    color: var(--danger, #d9534f);
+}
+
+.create-row-input {
+    background: var(--bg-0, var(--bg-1));
+    border: 1px solid var(--border-soft);
+    color: var(--text-0);
+    padding: 5px 8px;
+    font: inherit;
+    font-size: 13px;
+    border-radius: var(--r-2);
+    outline: none;
+}
+
+.create-row-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.note-group-add {
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    font-size: 15px;
+    line-height: 1;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    margin-left: 2px;
+    border-radius: var(--r-1);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--t-fast), color var(--t-fast), background var(--t-fast);
+}
+
+.note-group-header:hover .note-group-add,
+.note-group-add:focus {
+    opacity: 1;
+}
+
+.note-group-add:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
 .note-list-title {
     font-weight: 500;
     color: var(--text-0);
@@ -630,6 +752,16 @@ body {
     font-size: 11px;
     margin-right: 4px;
     opacity: 0.75;
+    cursor: help;
+}
+
+.note-list-draft {
+    display: inline-block;
+    color: var(--accent);
+    font-size: 10px;
+    line-height: 1;
+    margin-right: 5px;
+    vertical-align: middle;
     cursor: help;
 }
 
@@ -700,6 +832,102 @@ body {
     line-height: 1.5;
 }
 
+/* === TOC (note outline) === */
+
+.viewer-toc {
+    border-right: 1px solid var(--border-soft);
+    background: var(--bg-1);
+    padding: var(--space-4) var(--space-2);
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.viewer-toc-head {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    padding: 0 var(--space-2);
+}
+
+.viewer-toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.viewer-toc-item {
+    margin: 0;
+}
+
+.viewer-toc-link {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 4px var(--space-2);
+    border-radius: var(--r-2);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background var(--t-fast), color var(--t-fast);
+}
+
+.viewer-toc-link:hover {
+    background: var(--bg-2);
+    color: var(--text-0);
+}
+
+.viewer-toc-link.active {
+    background: var(--bg-2);
+    color: var(--text-0);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.viewer-toc-item.lvl-1 .viewer-toc-link,
+.viewer-toc-item.lvl-2 .viewer-toc-link {
+    color: var(--text-1);
+    font-weight: 500;
+}
+
+/* Flash the target heading in the note when a TOC entry is clicked. */
+.md-preview h1.toc-flash,
+.md-preview h2.toc-flash,
+.md-preview h3.toc-flash,
+.md-preview h4.toc-flash,
+.md-preview h5.toc-flash,
+.md-preview h6.toc-flash {
+    animation: toc-flash 1.5s ease-out;
+    border-radius: var(--r-2);
+}
+
+@keyframes toc-flash {
+    0% {
+        background: var(--accent-soft);
+        box-shadow: -6px 0 0 var(--accent-soft), 6px 0 0 var(--accent-soft), inset 3px 0 0 var(--accent);
+    }
+    30% {
+        background: var(--accent-soft);
+        box-shadow: -6px 0 0 var(--accent-soft), 6px 0 0 var(--accent-soft), inset 3px 0 0 var(--accent);
+    }
+    100% {
+        background: transparent;
+        box-shadow: -6px 0 0 transparent, 6px 0 0 transparent, inset 3px 0 0 transparent;
+    }
+}
+
 /* === VIEWER === */
 
 .viewer {
@@ -716,6 +944,14 @@ body {
     margin-bottom: var(--space-3);
 }
 
+.viewer-head-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
 .viewer-head h1 {
     margin: 0;
     color: var(--text-0);
@@ -723,12 +959,100 @@ body {
     font-weight: 700;
     line-height: 1.25;
     letter-spacing: -0.01em;
+    word-break: break-word;
+}
+
+.viewer-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-3);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+}
+
+.viewer-breadcrumb.empty {
+    display: none;
+}
+
+.viewer-breadcrumb-sep {
+    color: var(--text-3);
+    opacity: 0.6;
+}
+
+.viewer-breadcrumb-part {
+    color: var(--text-2);
+}
+
+.viewer-breadcrumb-part.last {
+    color: var(--text-1);
 }
 
 .viewer-actions {
     display: flex;
     gap: var(--space-2);
     flex: 0 0 auto;
+    align-items: center;
+}
+
+.viewer-overflow {
+    position: relative;
+    display: inline-flex;
+}
+
+.btn-overflow {
+    padding: 6px 10px;
+    font-size: 16px;
+    line-height: 1;
+    letter-spacing: 2px;
+}
+
+.viewer-overflow-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 160px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    display: none;
+    flex-direction: column;
+    z-index: 40;
+}
+
+.viewer-overflow.open .viewer-overflow-menu {
+    display: flex;
+}
+
+.viewer-overflow-item {
+    background: transparent;
+    border: none;
+    color: var(--text-1);
+    text-align: left;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 13px;
+    border-radius: var(--r-1);
+    cursor: pointer;
+    transition: background var(--t-fast), color var(--t-fast);
+}
+
+.viewer-overflow-item:hover {
+    background: var(--bg-2);
+    color: var(--text-0);
+}
+
+.viewer-overflow-item.danger {
+    color: var(--red);
+}
+
+.viewer-overflow-item.danger:hover {
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--red);
 }
 
 .viewer-tags {
@@ -3711,6 +4035,18 @@ body {
     display: flex;
     gap: var(--space-2);
     flex: 0 0 auto;
+    align-items: center;
+}
+
+.editor-dirty-badge {
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--bg-1);
+    cursor: help;
 }
 
 .editor-error {
@@ -4513,6 +4849,108 @@ body {
     font-family: var(--font-mono);
     font-size: 12px;
     border-color: var(--red);
+}
+
+.md-floorplan {
+    margin: var(--space-4) 0;
+    padding: var(--space-3);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-3);
+    overflow: auto;
+}
+
+.md-floorplan svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+.md-floorplan-error {
+    padding: var(--space-3) var(--space-4);
+    color: var(--red);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border-color: var(--red);
+    white-space: pre-wrap;
+}
+
+.floorplan-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+}
+
+.floorplan-modal {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    padding: var(--space-4);
+    width: min(1280px, 96vw);
+    height: min(860px, 92vh);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.floorplan-modal-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 600;
+    color: var(--text-0);
+    font-size: 15px;
+}
+
+.floorplan-modal-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.floorplan-modal-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+    background: var(--bg-2);
+    overflow: hidden;
+    display: flex;
+}
+
+/* mdfloor's mountEditor puts its root element inline; stretch it to fill
+   the stage so both the textarea column and the SVG canvas get real
+   height. */
+.floorplan-modal-stage > * {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.floorplan-modal-loading {
+    margin: auto;
+    color: var(--text-3);
+    font-size: 13px;
+}
+
+.floorplan-modal-error {
+    margin: auto;
+    color: var(--red);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: var(--space-3) var(--space-4);
+    white-space: pre-wrap;
+}
+
+.floorplan-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
 }
 
 .infographic-modal-backdrop {
@@ -5702,3 +6140,307 @@ button.typed-link-badge:hover {
     gap: var(--space-2);
     align-self: center;
 }
+
+/* === CANVAS === */
+
+.canvas-panel {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--bg-0);
+}
+
+.canvas-sidebar {
+    border-right: 1px solid var(--border-soft);
+    background: var(--bg-1);
+    padding: var(--space-4) var(--space-2);
+    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.canvas-sidebar-head {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    padding: 0 var(--space-2);
+}
+
+.canvas-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.canvas-list-item {
+    padding: 6px 10px;
+    color: var(--text-2);
+    font-size: 12px;
+    border-radius: var(--r-2);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background var(--t-fast), color var(--t-fast);
+}
+
+.canvas-list-item:hover {
+    background: var(--bg-2);
+    color: var(--text-0);
+}
+
+.canvas-list-item.active {
+    background: var(--bg-2);
+    color: var(--text-0);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.canvas-list-empty {
+    padding: var(--space-3);
+    color: var(--text-3);
+    font-size: 12px;
+    text-align: center;
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-2);
+}
+
+.canvas-main {
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 1px 1px, var(--border-soft) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--bg-0);
+}
+
+.canvas-empty {
+    padding: var(--space-8);
+    text-align: center;
+    color: var(--text-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.canvas-empty-title {
+    color: var(--text-1);
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.canvas-empty-hint {
+    color: var(--text-3);
+    font-size: 13px;
+}
+
+.canvas-viewport {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+}
+
+.canvas-viewport.panning {
+    cursor: grabbing;
+}
+
+.canvas-stage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.canvas-groups,
+.canvas-cards,
+.canvas-edges {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.canvas-groups > *,
+.canvas-cards > *,
+.canvas-edges {
+    pointer-events: auto;
+}
+
+.canvas-edges {
+    pointer-events: none;
+    overflow: visible;
+}
+
+.canvas-group {
+    position: absolute;
+    border: 2px dashed rgba(255, 255, 255, 0.25);
+    border-radius: var(--r-3);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.canvas-group-label {
+    position: absolute;
+    top: -22px;
+    left: 8px;
+    padding: 2px 8px;
+    background: var(--bg-1);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-1);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+.canvas-card {
+    position: absolute;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.canvas-card-clickable {
+    cursor: pointer;
+    transition: transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+.canvas-card-clickable:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.canvas-card-body {
+    padding: var(--space-3) var(--space-4);
+    overflow: auto;
+    flex: 1 1 auto;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.canvas-card-file-title {
+    padding: var(--space-2) var(--space-3);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.canvas-card-file-preview {
+    padding: var(--space-2) var(--space-3);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow: hidden;
+    flex: 1 1 auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.canvas-card-file-missing {
+    color: var(--text-3);
+    font-style: italic;
+}
+
+.canvas-card-link {
+    padding: var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+}
+
+.canvas-card-link a {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+    font-size: 12px;
+}
+
+.canvas-card-link a:hover {
+    text-decoration: underline;
+}
+
+.canvas-card.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    z-index: 10;
+}
+
+.canvas-card-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    background:
+        linear-gradient(135deg, transparent 40%, var(--border) 40%, var(--border) 55%, transparent 55%, transparent 70%, var(--border) 70%, var(--border) 85%, transparent 85%);
+    opacity: 0.6;
+    transition: opacity var(--t-fast);
+}
+
+.canvas-card:hover .canvas-card-resize,
+.canvas-card.selected .canvas-card-resize {
+    opacity: 1;
+}
+
+.canvas-card-edit {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-0);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-2);
+    color: var(--text-0);
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+}
+
+.canvas-toolbar {
+    display: flex;
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+}
+
+.canvas-toolbar .btn {
+    flex: 1 1 auto;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+.canvas-save-indicator {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    padding: 4px var(--space-2);
+    min-height: 16px;
+}
+
+.canvas-save-indicator.saving { color: var(--accent); }
+.canvas-save-indicator.saved  { color: var(--green, #5dbb63); }
+.canvas-save-indicator.error  { color: var(--red); }
+

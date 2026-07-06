@@ -3,11 +3,13 @@ import {extractTypedLinks} from '@synaipse/core';
 import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
+import {listDraftIds} from './Drafts.js';
 import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
 import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue, setCodec} from './Persistence.js';
+import {extractToc, TocPanel} from './Toc.js';
 import {buildWikilinkResolver, slugify, WikilinkResolver} from './Wikilinks.js';
 import {fuzzyMatch} from './Fuzzy.js';
 import type {WikilinkMatch} from './WikilinkAutocomplete.js';
@@ -32,6 +34,13 @@ interface NoteGroup {
     notes: NoteSummary[];
 }
 
+interface OverflowItem {
+    label: string;
+    title: string;
+    danger?: boolean;
+    onSelect: () => void;
+}
+
 const GROUP_ROW_H = 32;
 // Two heights so the row box is large enough for whatever it actually paints.
 // With tags, the meta column adds gap + a ~17px chip row that previously
@@ -43,8 +52,8 @@ const noteRowHeight = (note: NoteSummary): number =>
 const VIRT_BUFFER = 8;
 
 type VirtualRow =
-    | {kind: 'group'; group: NoteGroup; key: string; isCollapsed: boolean}
-    | {kind: 'note'; note: NoteSummary};
+    | {kind: 'group'; group: NoteGroup; key: string; isCollapsed: boolean; depth: number; totalCount: number}
+    | {kind: 'note'; note: NoteSummary; depth: number};
 
 const startOfDay = (ts: number): number => {
     const d = new Date(ts);
@@ -63,33 +72,85 @@ const recencyBucket = (mtime: number, now: number): typeof RECENT_BUCKETS[number
     return 'Earlier';
 };
 
-const MAX_FOLDER_DEPTH = 2;
-
 // Top-level folders whose immediate subdirs are usually opaque IDs (UUIDs,
-// hashes, dates) that are useless as group keys — flatten them to one entry.
+// hashes, dates) that would explode the tree with noise. We collapse the
+// entire subtree of such folders into a single flat bucket at the top
+// folder's node.
 const FLAT_TOP_LEVEL_FOLDERS = new Set(['chatgpt-import', 'Clipped']);
 
-const folderOf = (id: string): {key: string; label: string} => {
-    const slash = id.lastIndexOf('/');
+interface FolderNode {
+    path: string;    // full vault-relative path, e.g. "Memory/decisions"
+    label: string;   // leaf segment, e.g. "decisions"
+    notes: NoteSummary[];
+    children: FolderNode[];
+}
 
-    if (slash === -1) {
-        return {key: ROOT_FOLDER_LABEL, label: ROOT_FOLDER_LABEL};
+/**
+ * Build a nested folder tree from note IDs. Each `/`-separated segment
+ * becomes a node; notes attach to their exact leaf folder. Notes in the
+ * vault root land on the returned root node's `notes` array (its `path`
+ * and `label` are empty).
+ *
+ * `FLAT_TOP_LEVEL_FOLDERS` are collapsed: everything under `chatgpt-import/`
+ * lands directly on that top-level node's `notes`, with no descendants.
+ * This keeps the tree navigable when a folder holds hundreds of opaque
+ * UUID subdirectories.
+ */
+const buildFolderTree = (notes: NoteSummary[]): FolderNode => {
+    const root: FolderNode = {path: '', label: '', notes: [], children: []};
+    const byPath = new Map<string, FolderNode>([['', root]]);
+
+    for (const note of notes) {
+        const slash = note.id.lastIndexOf('/');
+        if (slash === -1) {
+            root.notes.push(note);
+            continue;
+        }
+
+        const folder = note.id.slice(0, slash);
+        const parts = folder.split('/');
+        const top = parts[0] ?? '';
+
+        if (FLAT_TOP_LEVEL_FOLDERS.has(top)) {
+            let node = byPath.get(top);
+            if (node === undefined) {
+                node = {path: top, label: top, notes: [], children: []};
+                byPath.set(top, node);
+                root.children.push(node);
+            }
+            node.notes.push(note);
+            continue;
+        }
+
+        let acc = '';
+        let parent = root;
+        for (const part of parts) {
+            acc = acc.length > 0 ? `${acc}/${part}` : part;
+            let node = byPath.get(acc);
+            if (node === undefined) {
+                node = {path: acc, label: part, notes: [], children: []};
+                byPath.set(acc, node);
+                parent.children.push(node);
+            }
+            parent = node;
+        }
+        parent.notes.push(note);
     }
 
-    const folder = id.slice(0, slash);
-    const parts = folder.split('/');
-    const top = parts[0];
+    const sortRec = (node: FolderNode): void => {
+        node.children.sort((a, b) => a.label.localeCompare(b.label));
+        node.notes.sort((a, b) => a.title.localeCompare(b.title));
+        for (const c of node.children) sortRec(c);
+    };
+    sortRec(root);
 
-    if (top !== undefined && FLAT_TOP_LEVEL_FOLDERS.has(top)) {
-        return {key: top, label: top};
-    }
+    return root;
+};
 
-    if (parts.length <= MAX_FOLDER_DEPTH) {
-        return {key: folder, label: folder};
-    }
-
-    const collapsed = parts.slice(0, MAX_FOLDER_DEPTH).join('/');
-    return {key: collapsed, label: `${collapsed}/…`};
+const countRec = (node: FolderNode): number => {
+    let total = node.notes.length;
+    for (const c of node.children) total += countRec(c);
+    return total;
 };
 
 const buildGroups = (notes: NoteSummary[], mode: GroupMode, now: number): NoteGroup[] => {
@@ -105,19 +166,6 @@ const buildGroups = (notes: NoteSummary[], mode: GroupMode, now: number): NoteGr
 
         return group;
     };
-
-    if (mode === 'folder') {
-        for (const note of notes) {
-            const {key, label} = folderOf(note.id);
-            ensure(key, label).notes.push(note);
-        }
-
-        return [...map.values()].sort((a, b) => {
-            if (a.label === ROOT_FOLDER_LABEL) return 1;
-            if (b.label === ROOT_FOLDER_LABEL) return -1;
-            return a.label.localeCompare(b.label);
-        });
-    }
 
     if (mode === 'tag') {
         for (const note of notes) {
@@ -148,21 +196,17 @@ const buildGroups = (notes: NoteSummary[], mode: GroupMode, now: number): NoteGr
         .sort((a, b) => (order.get(a.label as typeof RECENT_BUCKETS[number]) ?? 0) - (order.get(b.label as typeof RECENT_BUCKETS[number]) ?? 0));
 };
 
-const promptForPath = (): string | null => {
-    const raw = window.prompt('Note path (relative to vault, e.g. Memory/decisions/2026-06-11-foo.md)');
+const DEFAULT_CREATE_FOLDER = 'Memory/scratch';
 
-    if (raw === null) {
-        return null;
-    }
-
-    const trimmed = raw.trim();
-
-    if (trimmed.length === 0) {
-        return null;
-    }
-
-    return trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+const folderOfNoteId = (id: string): string | null => {
+    const slash = id.lastIndexOf('/');
+    return slash === -1 ? null : id.slice(0, slash);
 };
+
+const STORAGE_SIDEBAR_W = 'synaipse.notes.sidebarWidth';
+const SIDEBAR_W_DEFAULT = 320;
+const SIDEBAR_W_MIN = 220;
+const SIDEBAR_W_MAX = 640;
 
 export class NotesPanel {
     public readonly element: HTMLElement;
@@ -176,15 +220,32 @@ export class NotesPanel {
 
     private sidebar!: HTMLElement;
     private viewer!: HTMLElement;
+    private tocPanel!: TocPanel;
+    private tocObserver: IntersectionObserver | null = null;
+    private tocVisible = new Set<string>();
+    private tocOrder = new Map<string, number>();
+    private tocClickPinTimer: number | null = null;
+    private tocFlashTimer: number | null = null;
+    private tocFlashTarget: HTMLElement | null = null;
+    private overflowCloser: (() => void) | null = null;
+    private draftIds = new Set<string>();
     private filterInput!: HTMLInputElement;
     private noteList!: HTMLUListElement;
     private noteCounter!: HTMLElement;
     private modeSwitcher!: HTMLElement;
+    private createRow!: HTMLElement;
+    private createInput!: HTMLInputElement;
+    private createHint!: HTMLElement;
+    private createContext: {folder: string; title?: string} | null = null;
 
     private readonly groupMode = new PersistentValue<GroupMode>(STORAGE_GROUP_MODE, 'folder');
     private readonly collapsedGroups = new PersistentValue<ReadonlySet<string>>(STORAGE_COLLAPSED, new Set(), setCodec);
+    // 250ms debounce is short enough to feel instant on the next reload but
+    // slow enough that a drag doesn't hammer localStorage on every mousemove.
+    private readonly sidebarWidth = new PersistentValue<number>(STORAGE_SIDEBAR_W, SIDEBAR_W_DEFAULT, undefined, 250);
     private unsubscribeGroupMode: () => void = () => {};
     private unsubscribeCollapsed: () => void = () => {};
+    private detachSidebarResize: () => void = () => {};
 
     private viewerPreview: MarkdownPreview | null = null;
     private currentEditor: Editor | null = null;
@@ -234,6 +295,7 @@ export class NotesPanel {
 
     public constructor(private readonly opts: NotesPanelOptions) {
         this.element = el('div', {class: 'app'});
+        this.draftIds = listDraftIds();
         this.build();
 
         this.unsubscribeGroupMode = this.groupMode.subscribe(() => {
@@ -277,8 +339,12 @@ export class NotesPanel {
     public destroy(): void {
         this.disposeViewer();
         this.disposeEditor();
+        this.disposeTocObserver();
+        this.closeOverflowMenu();
         this.unsubscribeGroupMode();
         this.unsubscribeCollapsed();
+        this.detachSidebarResize();
+        this.sidebarWidth.destroy();
 
         if (this.selectionBtn !== null) {
             this.selectionBtn.remove();
@@ -307,6 +373,17 @@ export class NotesPanel {
         this.modeSwitcher = el('div', {class: 'group-mode-switcher', attrs: {role: 'group', 'aria-label': 'Group notes by'}});
         this.renderModeSwitcher();
 
+        this.createInput = el('input', {
+            class: 'create-row-input',
+            attrs: {type: 'text', placeholder: 'Name…', 'aria-label': 'Note name'},
+            on: {keydown: (e) => this.onCreateInputKey(e as KeyboardEvent)}
+        }) as HTMLInputElement;
+        this.createHint = el('div', {class: 'create-row-hint'});
+        this.createRow = el('div', {class: 'create-row', attrs: {hidden: 'hidden'}},
+            this.createHint,
+            this.createInput
+        );
+
         this.noteCounter = el('div', {class: 'sidebar-counter', text: '0 notes'});
 
         this.noteList = el('ul', {
@@ -314,13 +391,306 @@ export class NotesPanel {
             on: {scroll: () => this.scheduleVirtualRender()}
         }) as HTMLUListElement;
 
-        this.sidebar = el('aside', {class: 'sidebar'}, head, this.modeSwitcher, this.noteCounter, this.noteList);
+        this.sidebar = el('aside', {class: 'sidebar'}, head, this.modeSwitcher, this.createRow, this.noteCounter, this.noteList);
+        this.installSidebarResizer();
+
+        this.tocPanel = new TocPanel({
+            onNavigate: (id) => this.scrollToHeading(id)
+        });
 
         this.viewer = el('main', {class: 'viewer'});
         this.renderEmpty();
 
         this.element.appendChild(this.sidebar);
         this.element.appendChild(this.viewer);
+    }
+
+    /**
+     * Draggable resizer at the sidebar's right border. Width is driven by
+     * `--sidebar-w` on `.app`, which the grid template consumes; a debounced
+     * PersistentValue writes to localStorage so a live drag doesn't hammer
+     * disk. Clamped between MIN and MAX to avoid unusable extremes.
+     * Double-click resets to the default width.
+     */
+    private installSidebarResizer(): void {
+        const clamp = (w: number): number => Math.max(SIDEBAR_W_MIN, Math.min(SIDEBAR_W_MAX, w));
+
+        const applyWidth = (w: number): void => {
+            this.element.style.setProperty('--sidebar-w', `${w}px`);
+        };
+
+        applyWidth(clamp(this.sidebarWidth.get()));
+
+        const handle = el('div', {
+            class: 'sidebar-resizer',
+            attrs: {
+                role: 'separator',
+                'aria-orientation': 'vertical',
+                'aria-label': 'Resize sidebar',
+                title: 'Drag to resize, double-click to reset'
+            }
+        });
+
+        let dragging = false;
+        let startX = 0;
+        let startW = 0;
+        let lastW = this.sidebarWidth.get();
+
+        const onMove = (ev: MouseEvent): void => {
+            if (!dragging) return;
+            const w = clamp(startW + (ev.clientX - startX));
+            lastW = w;
+            applyWidth(w);
+        };
+
+        const onUp = (): void => {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove('dragging');
+            document.body.classList.remove('sidebar-resizing');
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            this.sidebarWidth.set(lastW);
+            // A width change reshapes the virtualised note list's viewport;
+            // re-run the visible window pass so scrollbar heuristics stay
+            // consistent with the new column width.
+            this.scheduleVirtualRender();
+        };
+
+        const onDown = (ev: MouseEvent): void => {
+            // Left button only; ignore right/middle so context-menu still works.
+            if (ev.button !== 0) return;
+            ev.preventDefault();
+            dragging = true;
+            startX = ev.clientX;
+            startW = clamp(this.sidebarWidth.get());
+            lastW = startW;
+            handle.classList.add('dragging');
+            document.body.classList.add('sidebar-resizing');
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        };
+
+        const onDblClick = (): void => {
+            applyWidth(SIDEBAR_W_DEFAULT);
+            this.sidebarWidth.set(SIDEBAR_W_DEFAULT);
+            this.scheduleVirtualRender();
+        };
+
+        handle.addEventListener('mousedown', onDown);
+        handle.addEventListener('dblclick', onDblClick);
+
+        this.sidebar.appendChild(handle);
+
+        this.detachSidebarResize = (): void => {
+            handle.removeEventListener('mousedown', onDown);
+            handle.removeEventListener('dblclick', onDblClick);
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
+    }
+
+    /**
+     * Scroll the note viewport so the clicked heading sits at the top,
+     * and pin the TOC's active state to the clicked entry until the
+     * smooth scroll settles. Without the pin, the scroll-spy observer
+     * would immediately re-highlight whichever heading falls inside its
+     * 20–30% band — usually the NEXT heading below the clicked one,
+     * which is exactly the "target entry doesn't get focus" bug.
+     *
+     * Explicit `viewer.scrollTo` (not `scrollIntoView`) because both
+     * `.viewer` and `.md-preview` carry `overflow-y: auto`, and browsers
+     * disagree about which one `scrollIntoView` should touch.
+     */
+    private scrollToHeading(id: string): void {
+        if (this.viewerPreview === null) return;
+        const target = this.viewerPreview.element.querySelector<HTMLElement>(`[id="${id}"]`);
+        if (target === null) return;
+
+        const viewerRect = this.viewer.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const offset = targetRect.top - viewerRect.top + this.viewer.scrollTop;
+
+        this.tocPanel.setActive(id);
+        this.pinTocActive();
+        this.flashHeading(target);
+
+        this.viewer.scrollTo({
+            top: Math.max(0, offset - 8),
+            behavior: 'smooth'
+        });
+    }
+
+    /**
+     * Briefly highlight the target heading so the user sees where the
+     * click landed. Re-triggering (same heading clicked twice, or a new
+     * entry mid-animation) restarts the effect cleanly.
+     */
+    private flashHeading(target: HTMLElement): void {
+        if (this.tocFlashTimer !== null) {
+            window.clearTimeout(this.tocFlashTimer);
+            this.tocFlashTimer = null;
+        }
+        if (this.tocFlashTarget !== null) {
+            this.tocFlashTarget.classList.remove('toc-flash');
+        }
+        // Force reflow so re-adding the class restarts the CSS animation.
+        void target.offsetWidth;
+        target.classList.add('toc-flash');
+        this.tocFlashTarget = target;
+        this.tocFlashTimer = window.setTimeout(() => {
+            target.classList.remove('toc-flash');
+            if (this.tocFlashTarget === target) this.tocFlashTarget = null;
+            this.tocFlashTimer = null;
+        }, 1600);
+    }
+
+    /**
+     * Suppress scroll-spy driven `setActive` calls for ~800ms so a
+     * user-initiated navigation isn't clobbered by the observer picking
+     * a nearby heading as the scroll passes through.
+     */
+    private pinTocActive(): void {
+        if (this.tocClickPinTimer !== null) {
+            window.clearTimeout(this.tocClickPinTimer);
+        }
+        this.tocClickPinTimer = window.setTimeout(() => {
+            this.tocClickPinTimer = null;
+            // After the pin lifts, resync from the current scroll pos so
+            // the highlight matches what the user is actually looking at.
+            this.refreshTocActive();
+        }, 800);
+    }
+
+    private updateToc(): void {
+        this.disposeTocObserver();
+
+        if (this.viewerPreview === null) {
+            this.tocPanel.setEntries([]);
+            this.tocPanel.element.remove();
+            this.element.classList.remove('has-toc');
+            return;
+        }
+
+        const entries = extractToc(this.viewerPreview.element);
+        this.tocPanel.setEntries(entries);
+
+        if (entries.length === 0) {
+            this.tocPanel.element.remove();
+            this.element.classList.remove('has-toc');
+            return;
+        }
+
+        if (!this.tocPanel.element.isConnected) {
+            this.element.insertBefore(this.tocPanel.element, this.viewer);
+        }
+        this.element.classList.add('has-toc');
+
+        this.installTocObserver(entries.map((e) => e.id));
+    }
+
+    /**
+     * Scroll-spy: track which headings intersect the top band of the
+     * viewer viewport and mark the topmost visible one as active. The
+     * band starts at viewport top and ends at 30% down (rootMargin
+     * `0 0 -70% 0`) so a heading scrolled to the very top by a TOC
+     * click stays inside the band and remains highlighted — the earlier
+     * 20% start was excluding exactly the intended target.
+     */
+    private installTocObserver(ids: readonly string[]): void {
+        this.tocVisible.clear();
+        this.tocOrder = new Map(ids.map((id, i) => [id, i]));
+
+        const headings: HTMLElement[] = [];
+        for (const id of ids) {
+            const h = this.viewerPreview?.element.querySelector(`[id="${id}"]`);
+            if (h instanceof HTMLElement) headings.push(h);
+        }
+
+        if (headings.length === 0) return;
+
+        this.tocObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                const id = (entry.target as HTMLElement).id;
+                if (entry.isIntersecting) {
+                    this.tocVisible.add(id);
+                } else {
+                    this.tocVisible.delete(id);
+                }
+            }
+
+            this.refreshTocActive();
+        }, {
+            root: this.viewer,
+            rootMargin: '0px 0px -70% 0px',
+            threshold: 0
+        });
+
+        for (const h of headings) {
+            this.tocObserver.observe(h);
+        }
+    }
+
+    private refreshTocActive(): void {
+        // User just clicked a TOC entry — don't let the observer override
+        // the deliberate selection while the smooth scroll runs. Once the
+        // pin lifts, this method is called explicitly to resync.
+        if (this.tocClickPinTimer !== null) {
+            return;
+        }
+
+        if (this.tocVisible.size === 0) {
+            // Nothing in the band — pick whichever heading is furthest above
+            // the top edge of the viewport instead of blanking the outline.
+            const closest = this.closestHeadingAboveViewport();
+            this.tocPanel.setActive(closest);
+            return;
+        }
+
+        let best: string | null = null;
+        let bestOrder = Infinity;
+        for (const id of this.tocVisible) {
+            const order = this.tocOrder.get(id) ?? Infinity;
+            if (order < bestOrder) {
+                bestOrder = order;
+                best = id;
+            }
+        }
+
+        this.tocPanel.setActive(best);
+    }
+
+    private closestHeadingAboveViewport(): string | null {
+        if (this.viewerPreview === null) return null;
+
+        const viewerTop = this.viewer.getBoundingClientRect().top;
+        let best: string | null = null;
+        let bestTop = -Infinity;
+
+        for (const id of this.tocOrder.keys()) {
+            const h = this.viewerPreview.element.querySelector(`[id="${id}"]`);
+            if (!(h instanceof HTMLElement)) continue;
+            const top = h.getBoundingClientRect().top - viewerTop;
+            if (top <= 0 && top > bestTop) {
+                bestTop = top;
+                best = id;
+            }
+        }
+
+        return best;
+    }
+
+    private disposeTocObserver(): void {
+        if (this.tocObserver !== null) {
+            this.tocObserver.disconnect();
+            this.tocObserver = null;
+        }
+        if (this.tocClickPinTimer !== null) {
+            window.clearTimeout(this.tocClickPinTimer);
+            this.tocClickPinTimer = null;
+        }
+        this.tocVisible.clear();
+        this.tocOrder.clear();
     }
 
     private renderModeSwitcher(): void {
@@ -387,25 +757,69 @@ export class NotesPanel {
 
         const mode = this.groupMode.get();
         const collapsed = this.collapsedGroups.get();
-        const groups = buildGroups(visible, mode, Date.now());
 
         this.flatRows = [];
         this.rowOffsets = [];
 
         let offset = 0;
-        for (const group of groups) {
-            const groupKey = `${mode}:${group.key}`;
-            const isCollapsed = collapsed.has(groupKey);
 
-            this.flatRows.push({kind: 'group', group, key: groupKey, isCollapsed});
-            this.rowOffsets.push(offset);
-            offset += GROUP_ROW_H;
+        if (mode === 'folder') {
+            const root = buildFolderTree(visible);
 
-            if (!isCollapsed) {
-                for (const n of group.notes) {
-                    this.flatRows.push({kind: 'note', note: n});
+            // Root-level notes (no folder) render at depth 0 with no header
+            // — a "/" bucket only added a click-target for nothing.
+            for (const n of root.notes) {
+                this.flatRows.push({kind: 'note', note: n, depth: 0});
+                this.rowOffsets.push(offset);
+                offset += noteRowHeight(n);
+            }
+
+            const walk = (node: FolderNode, depth: number): void => {
+                const groupKey = `folder:${node.path}`;
+                const isCollapsed = collapsed.has(groupKey);
+                const group: NoteGroup = {key: node.path, label: node.label, notes: node.notes};
+                const totalCount = countRec(node);
+
+                this.flatRows.push({kind: 'group', group, key: groupKey, isCollapsed, depth, totalCount});
+                this.rowOffsets.push(offset);
+                offset += GROUP_ROW_H;
+
+                if (isCollapsed) return;
+
+                // Subfolders first, then direct notes at this level — matches
+                // conventional file-explorer ordering.
+                for (const child of node.children) {
+                    walk(child, depth + 1);
+                }
+                for (const n of node.notes) {
+                    this.flatRows.push({kind: 'note', note: n, depth: depth + 1});
                     this.rowOffsets.push(offset);
                     offset += noteRowHeight(n);
+                }
+            };
+
+            for (const child of root.children) {
+                walk(child, 0);
+            }
+        } else {
+            const groups = buildGroups(visible, mode, Date.now());
+            for (const group of groups) {
+                const groupKey = `${mode}:${group.key}`;
+                const isCollapsed = collapsed.has(groupKey);
+
+                this.flatRows.push({
+                    kind: 'group', group, key: groupKey, isCollapsed,
+                    depth: 0, totalCount: group.notes.length
+                });
+                this.rowOffsets.push(offset);
+                offset += GROUP_ROW_H;
+
+                if (!isCollapsed) {
+                    for (const n of group.notes) {
+                        this.flatRows.push({kind: 'note', note: n, depth: 0});
+                        this.rowOffsets.push(offset);
+                        offset += noteRowHeight(n);
+                    }
                 }
             }
         }
@@ -468,16 +882,45 @@ export class NotesPanel {
 
     private renderVirtualRow(row: VirtualRow, top: number): HTMLElement {
         if (row.kind === 'group') {
+            // Show the + affordance only in folder mode. In tag/recent modes
+            // the key is a tag name / bucket label, not a vault-relative
+            // parent path, so a "new here" button would misroute.
+            const showAdd = this.groupMode.get() === 'folder' && row.group.key.length > 0;
+
+            const children: HTMLElement[] = [
+                el('span', {class: 'note-group-caret', text: '▾'}),
+                el('span', {class: 'note-group-label', text: row.group.label}),
+                el('span', {class: 'note-group-count', text: String(row.totalCount)})
+            ];
+
+            if (showAdd) {
+                const folderKey = row.group.key;
+                children.push(el('button', {
+                    class: 'note-group-add',
+                    attrs: {
+                        type: 'button',
+                        title: `New note in ${folderKey}/`,
+                        'aria-label': `New note in ${folderKey}`
+                    },
+                    text: '+',
+                    on: {click: (ev) => {
+                        // Prevent the header click from collapsing the group.
+                        ev.stopPropagation();
+                        this.handleNewInFolder(folderKey);
+                    }}
+                }));
+            }
+
             const header = el('li', {
                 class: row.isCollapsed ? 'note-group-header collapsed' : 'note-group-header',
                 attrs: {role: 'button', tabindex: '0'},
-                style: {top: `${top}px`, height: `${GROUP_ROW_H}px`},
+                style: {
+                    top: `${top}px`,
+                    height: `${GROUP_ROW_H}px`,
+                    paddingLeft: `${8 + row.depth * 14}px`
+                },
                 on: {click: () => this.toggleGroup(row.key)}
-            },
-                el('span', {class: 'note-group-caret', text: '▾'}),
-                el('span', {class: 'note-group-label', text: row.group.label}),
-                el('span', {class: 'note-group-count', text: String(row.group.notes.length)})
-            );
+            }, ...children);
             return header;
         }
 
@@ -513,12 +956,24 @@ export class NotesPanel {
             })
             : null;
 
+        const draftDot = this.draftIds.has(n.id)
+            ? el('span', {
+                class: 'note-list-draft',
+                text: '●',
+                attrs: {title: 'Unsaved draft'}
+            })
+            : null;
+
         return el('li', {
             class: n.id === this.activeId ? 'note-list-item active' : 'note-list-item',
-            style: {top: `${top}px`, height: `${noteRowHeight(n)}px`},
+            style: {
+                top: `${top}px`,
+                height: `${noteRowHeight(n)}px`,
+                paddingLeft: `${12 + row.depth * 14}px`
+            },
             on: {click: () => this.handleSelect(n.id)}
         },
-            el('div', {class: 'note-list-title'}, lockIcon, n.title),
+            el('div', {class: 'note-list-title'}, draftDot, lockIcon, n.title),
             meta
         );
     }
@@ -575,22 +1030,86 @@ export class NotesPanel {
         if (!this.confirmDiscardIfDirty('You have unsaved changes. Discard and create a new note?')) {
             return;
         }
+        this.openCreateRow();
+    }
 
-        const path = promptForPath();
-
-        if (path === null) {
+    private handleNewInFolder = (folder: string): void => {
+        if (!this.confirmDiscardIfDirty('You have unsaved changes. Discard and create a new note?')) {
             return;
         }
+        this.openCreateRow({folder});
+    };
+
+    /**
+     * Default folder for a new note: the currently-active note's folder when
+     * one exists, else the fixed fallback. Keeps "+ New" context-aware — when
+     * you're deep in `Memory/decisions/`, the new note lands there without
+     * you re-typing the path.
+     */
+    private defaultCreateFolder(): string {
+        if (this.active !== null) {
+            const folder = folderOfNoteId(this.active.id);
+            if (folder !== null && folder.length > 0) return folder;
+        }
+        return DEFAULT_CREATE_FOLDER;
+    }
+
+    private openCreateRow(context: {folder?: string; title?: string} = {}): void {
+        const folder = (context.folder ?? this.defaultCreateFolder()).replace(/\/+$/, '');
+        this.createContext = context.title !== undefined
+            ? {folder, title: context.title}
+            : {folder};
+        this.createHint.classList.remove('create-row-hint-error');
+        this.createHint.textContent = `in ${folder.length > 0 ? folder + '/' : '/'}`;
+        this.createInput.value = context.title !== undefined ? slugify(context.title) : '';
+        this.createRow.removeAttribute('hidden');
+        // Focus + select once the row is in the layout (post-layout tick).
+        window.requestAnimationFrame(() => {
+            this.createInput.focus();
+            this.createInput.select();
+        });
+    }
+
+    private closeCreateRow(): void {
+        this.createRow.setAttribute('hidden', 'hidden');
+        this.createContext = null;
+        this.createInput.value = '';
+        this.createHint.classList.remove('create-row-hint-error');
+    }
+
+    private onCreateInputKey(ev: KeyboardEvent): void {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            void this.commitCreateRow();
+        } else if (ev.key === 'Escape') {
+            ev.preventDefault();
+            this.closeCreateRow();
+        }
+    }
+
+    private async commitCreateRow(): Promise<void> {
+        if (this.createContext === null) return;
+
+        const raw = this.createInput.value.trim();
+        if (raw.length === 0) return;
+
+        const nameOnly = raw.replace(/\.md$/i, '');
+        const slug = slugify(nameOnly) || 'untitled';
+        const folder = this.createContext.folder;
+        const path = folder.length > 0 ? `${folder}/${slug}.md` : `${slug}.md`;
+        const title = this.createContext.title ?? nameOnly;
 
         try {
-            const note = await api.writeNote({path, content: '', frontmatter: {title: path}});
+            const note = await api.writeNote({path, content: '', frontmatter: {title}});
+            this.closeCreateRow();
             this.opts.onNotesChanged();
             this.activeId = note.id;
             this.active = note;
             this.editing = true;
             this.renderEditor();
         } catch (e) {
-            window.alert(`Could not create note: ${e instanceof Error ? e.message : String(e)}`);
+            this.createHint.textContent = `Error: ${e instanceof Error ? e.message : String(e)}`;
+            this.createHint.classList.add('create-row-hint-error');
         }
     }
 
@@ -637,33 +1156,16 @@ export class NotesPanel {
         await this.handleSelect(noteId, {skipDirtyCheck: true});
     };
 
-    private createFromWikilink = async (title: string): Promise<void> => {
-        const slug = slugify(title);
-        const suggestion = `Memory/research/${slug || 'untitled'}.md`;
-        const raw = window.prompt(`Create note "${title}" at:`, suggestion);
-
-        if (raw === null) {
-            return;
-        }
-
-        const trimmed = raw.trim();
-
-        if (trimmed.length === 0) {
-            return;
-        }
-
-        const path = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
-
-        try {
-            const note = await api.writeNote({path, content: '', frontmatter: {title}});
-            this.opts.onNotesChanged();
-            this.activeId = note.id;
-            this.active = note;
-            this.editing = true;
-            this.renderEditor();
-        } catch (e) {
-            window.alert(`Could not create note: ${e instanceof Error ? e.message : String(e)}`);
-        }
+    private createFromWikilink = (title: string): void => {
+        // Wikilink `[[X]]` for a missing note: seed the inline row with X as
+        // both the derived slug and the frontmatter title, and default the
+        // folder to the current note's folder (falling back to
+        // Memory/research so wikilink-created stubs still land somewhere
+        // reasonable when there's no active note).
+        const folder = this.active !== null
+            ? folderOfNoteId(this.active.id) ?? 'Memory/research'
+            : 'Memory/research';
+        this.openCreateRow({folder, title});
     };
 
     private fetchSnippet = async (noteId: string): Promise<NoteSnippet> => {
@@ -683,10 +1185,126 @@ export class NotesPanel {
         return snippet;
     };
 
+    /**
+     * Folder path as breadcrumb (`Memory ▸ decisions ▸ 2026-06-11-foo.md`).
+     * Returns an empty container for root-level notes so the h1 sits
+     * flush against the top of the head. Terminal segment is the file
+     * name (still useful — the title displayed below is often different).
+     */
+    private buildBreadcrumb(noteId: string): HTMLElement {
+        const parts = noteId.split('/').filter((p) => p.length > 0);
+
+        if (parts.length <= 1) {
+            return el('div', {class: 'viewer-breadcrumb empty'});
+        }
+
+        const host = el('div', {class: 'viewer-breadcrumb', attrs: {title: noteId}});
+
+        parts.forEach((part, i) => {
+            if (i > 0) {
+                host.appendChild(el('span', {class: 'viewer-breadcrumb-sep', text: '›'}));
+            }
+            const isLast = i === parts.length - 1;
+            host.appendChild(el('span', {
+                class: isLast ? 'viewer-breadcrumb-part last' : 'viewer-breadcrumb-part',
+                text: part
+            }));
+        });
+
+        return host;
+    }
+
+    /**
+     * Overflow menu ("⋯") for secondary actions. The dropdown is anchored
+     * to the trigger via a `position: relative` wrapper. Outside-click
+     * and Escape close it; we install those listeners on open and tear
+     * them down on close, tracked via `overflowCloser` so a re-render
+     * can dismiss a stale open menu.
+     */
+    private buildOverflowMenu(items: readonly OverflowItem[]): HTMLElement {
+        const menu = el('div', {class: 'viewer-overflow-menu', attrs: {role: 'menu'}});
+
+        const wrap = el('div', {class: 'viewer-overflow'});
+
+        const trigger = el('button', {
+            class: 'btn btn-overflow',
+            attrs: {type: 'button', 'aria-label': 'More actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false'},
+            text: '⋯'
+        }) as HTMLButtonElement;
+
+        const close = (): void => {
+            wrap.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('mousedown', onDocDown, true);
+            document.removeEventListener('keydown', onKey, true);
+            this.overflowCloser = null;
+        };
+
+        const onDocDown = (ev: MouseEvent): void => {
+            if (!wrap.contains(ev.target as Node)) close();
+        };
+        const onKey = (ev: KeyboardEvent): void => {
+            if (ev.key === 'Escape') close();
+        };
+
+        const open = (): void => {
+            this.overflowCloser?.();
+            wrap.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+            document.addEventListener('mousedown', onDocDown, true);
+            document.addEventListener('keydown', onKey, true);
+            this.overflowCloser = close;
+        };
+
+        trigger.addEventListener('click', () => {
+            if (wrap.classList.contains('open')) close();
+            else open();
+        });
+
+        for (const item of items) {
+            menu.appendChild(el('button', {
+                class: item.danger === true ? 'viewer-overflow-item danger' : 'viewer-overflow-item',
+                attrs: {type: 'button', role: 'menuitem', title: item.title},
+                text: item.label,
+                on: {click: () => {
+                    close();
+                    item.onSelect();
+                }}
+            }));
+        }
+
+        wrap.appendChild(trigger);
+        wrap.appendChild(menu);
+        return wrap;
+    }
+
+    private closeOverflowMenu(): void {
+        this.overflowCloser?.();
+    }
+
+    /**
+     * Re-scan localStorage for draft keys. Called from the Editor's
+     * dirty-change callback (fires on every edit and on save/discard),
+     * cheap enough that we don't need to diff, and keeps the sidebar
+     * ● markers accurate without a global bus.
+     */
+    private refreshDrafts(): void {
+        const next = listDraftIds();
+        const changed = next.size !== this.draftIds.size
+            || [...next].some((id) => !this.draftIds.has(id));
+
+        if (!changed) return;
+
+        this.draftIds = next;
+        this.renderNoteList();
+    }
+
     private renderEmpty(): void {
         this.disposeViewer();
         this.disposeEditor();
+        this.closeOverflowMenu();
         clear(this.viewer);
+        this.updateToc();
 
         const empty = el('div', {class: 'viewer-empty'},
             el('div', {class: 'viewer-empty-icon', text: '◌'}),
@@ -698,12 +1316,16 @@ export class NotesPanel {
     }
 
     private renderLoading(): void {
+        this.closeOverflowMenu();
         clear(this.viewer);
+        this.updateToc();
         this.viewer.appendChild(el('p', {class: 'loading', text: 'loading…'}));
     }
 
     private renderError(error: unknown): void {
+        this.closeOverflowMenu();
         clear(this.viewer);
+        this.updateToc();
         const message = error instanceof Error ? error.message : String(error);
         this.viewer.appendChild(el('p', {class: 'editor-error', text: message}));
     }
@@ -717,43 +1339,47 @@ export class NotesPanel {
         this.disposeEditor();
         clear(this.viewer);
 
-        const actions: HTMLElement[] = [];
+        const overflowItems: OverflowItem[] = [];
 
         if (this.chatEnabled) {
-            actions.push(el('button', {
-                class: 'btn',
-                attrs: {type: 'button', title: 'Generate an LLM summary of this note'},
-                text: 'Summarize',
-                on: {click: () => void this.openSummarizeModal()}
-            }));
+            overflowItems.push({
+                label: 'Summarize',
+                title: 'Generate an LLM summary of this note',
+                onSelect: () => void this.openSummarizeModal()
+            });
         }
 
         if (this.historyEnabled) {
-            actions.push(el('button', {
-                class: 'btn',
-                attrs: {type: 'button', title: 'Show change history'},
-                text: 'History',
-                on: {click: () => void this.toggleHistory()}
-            }));
+            overflowItems.push({
+                label: 'History',
+                title: 'Show change history',
+                onSelect: () => void this.toggleHistory()
+            });
         }
 
-        actions.push(
-            el('button', {
-                class: 'btn',
-                attrs: {type: 'button'},
-                text: 'Edit',
-                on: {click: () => this.startEditing()}
-            }),
-            el('button', {
-                class: 'btn btn-danger',
-                attrs: {type: 'button'},
-                text: 'Delete',
-                on: {click: () => void this.handleDelete()}
-            })
+        overflowItems.push({
+            label: 'Delete',
+            title: 'Delete this note',
+            danger: true,
+            onSelect: () => void this.handleDelete()
+        });
+
+        const editBtn = el('button', {
+            class: 'btn',
+            attrs: {type: 'button'},
+            text: 'Edit',
+            on: {click: () => this.startEditing()}
+        });
+
+        const actions: HTMLElement[] = [editBtn, this.buildOverflowMenu(overflowItems)];
+
+        const info = el('div', {class: 'viewer-head-info'},
+            this.buildBreadcrumb(this.active.id),
+            el('h1', {text: this.active.title})
         );
 
         const head = el('div', {class: 'viewer-head'},
-            el('h1', {text: this.active.title}),
+            info,
             el('div', {class: 'viewer-actions'}, ...actions)
         );
 
@@ -791,6 +1417,7 @@ export class NotesPanel {
         this.viewerPreview.setTypedLinks(extractTypedLinks(this.active.frontmatter));
         this.renderLinks();
         this.attachSelectionListener();
+        this.updateToc();
     }
 
     private attachSelectionListener(): void {
@@ -1107,10 +1734,12 @@ export class NotesPanel {
             onWikilinkClick: (noteId) => void this.openNoteFromWikilink(noteId),
             onUnresolvedClick: (title) => void this.createFromWikilink(title),
             fetchSnippet: this.fetchSnippet,
-            searchTitles: (query) => this.searchTitles(query)
+            searchTitles: (query) => this.searchTitles(query),
+            onDirtyChange: () => this.refreshDrafts()
         });
 
         this.viewer.appendChild(this.currentEditor.element);
+        this.updateToc();
     }
 
     private startEditing(): void {
