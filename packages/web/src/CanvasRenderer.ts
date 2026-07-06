@@ -22,6 +22,23 @@ const COLOR_PRESETS: Readonly<Record<string, string>> = {
     '6': '#a06fc1'
 };
 
+/**
+ * Obsidian's own color palette order — matches the swatches in Obsidian's
+ * canvas UI so users transferring back and forth see the same visual
+ * shorthand. Presets 1..6, followed by the "clear" pseudo-option.
+ */
+const COLOR_PRESET_ORDER: readonly string[] = ['1', '2', '3', '4', '5', '6'];
+
+type ArrowStyle = 'to' | 'both' | 'none';
+
+const arrowStyleOf = (edge: {fromEnd?: 'none' | 'arrow'; toEnd?: 'none' | 'arrow'}): ArrowStyle => {
+    const from = edge.fromEnd === 'arrow';
+    const to = edge.toEnd !== 'none';
+    if (from && to) return 'both';
+    if (!to) return 'none';
+    return 'to';
+};
+
 const resolveColor = (raw: string | undefined, fallback: string): string => {
     if (raw === undefined) return fallback;
     return COLOR_PRESETS[raw] ?? raw;
@@ -115,6 +132,19 @@ interface EdgeHandleDragState {
     currentWorldY: number;
 }
 
+/**
+ * "User is Shift-dragging on empty stage to define a new group node."
+ * The rubber-band rect lives inside `stage` (so it inherits pan/zoom)
+ * and normalises min/max on release so drags in any direction produce
+ * a positive-area rectangle.
+ */
+interface BandSelectState {
+    startWorldX: number;
+    startWorldY: number;
+    currentWorldX: number;
+    currentWorldY: number;
+}
+
 export class CanvasRenderer {
     public readonly element: HTMLElement;
     private stage!: HTMLElement;
@@ -139,6 +169,9 @@ export class CanvasRenderer {
     private dragState: DragState | null = null;
     private edgeDraft: EdgeDraftState | null = null;
     private edgeHandleDrag: EdgeHandleDragState | null = null;
+    private bandSelect: BandSelectState | null = null;
+    private bandRectEl: HTMLElement | null = null;
+    private edgeToolbar: HTMLElement | null = null;
 
     private onKeyDown = (event: KeyboardEvent): void => {
         if (!this.editable) return;
@@ -179,6 +212,7 @@ export class CanvasRenderer {
 
     public destroy(): void {
         document.removeEventListener('keydown', this.onKeyDown);
+        this.destroyEdgeToolbar();
     }
 
     /** Current document — CanvasPanel reads this to persist. */
@@ -423,6 +457,9 @@ export class CanvasRenderer {
             if (edge.toEnd !== 'none') {
                 line.setAttribute('marker-end', 'url(#canvas-arrow)');
             }
+            if (edge.fromEnd === 'arrow') {
+                line.setAttribute('marker-start', 'url(#canvas-arrow)');
+            }
             line.classList.add('canvas-edge');
             group.appendChild(line);
 
@@ -459,6 +496,12 @@ export class CanvasRenderer {
                 }
             }
         }
+
+        // Toolbar position tracks whatever midpoint the just-rendered
+        // geometry produced — a card drag / handle drag / reroute all
+        // funnel through renderEdges, so this is the single hook that
+        // keeps the floating toolbar aligned.
+        this.updateEdgeToolbarPosition();
 
         // Draft edge — either a brand-new one being drawn from an anchor,
         // or the ghost of a selected edge's endpoint being rerouted.
@@ -530,6 +573,7 @@ export class CanvasRenderer {
 
     private applyTransform(): void {
         this.stage.style.transform = `translate3d(${this.tx}px, ${this.ty}px, 0) scale(${this.scale})`;
+        this.updateEdgeToolbarPosition();
     }
 
     // ─── Selection ───
@@ -563,6 +607,163 @@ export class CanvasRenderer {
         if (this.selectedEdgeId === id) return;
         this.selectedEdgeId = id;
         this.renderEdges();
+        this.refreshEdgeToolbar();
+    }
+
+    /**
+     * Rebuild the floating edge toolbar to reflect the current selection:
+     * when no edge is selected, the toolbar is destroyed; when the same
+     * edge stays selected (e.g. after a color change) the DOM is patched
+     * in place so the active-state highlight tracks the new attrs.
+     */
+    private refreshEdgeToolbar(): void {
+        if (this.selectedEdgeId === null) {
+            this.destroyEdgeToolbar();
+            return;
+        }
+        const edge = this.doc.edges.find((e) => e.id === this.selectedEdgeId);
+        if (edge === undefined) {
+            this.destroyEdgeToolbar();
+            return;
+        }
+        if (this.edgeToolbar === null) {
+            this.edgeToolbar = this.buildEdgeToolbar(edge.id);
+            this.element.appendChild(this.edgeToolbar);
+        } else {
+            // Same edge, refresh contents.
+            clear(this.edgeToolbar);
+            this.populateEdgeToolbar(this.edgeToolbar, edge.id);
+        }
+        this.updateEdgeToolbarPosition();
+    }
+
+    private destroyEdgeToolbar(): void {
+        if (this.edgeToolbar !== null) {
+            this.edgeToolbar.remove();
+            this.edgeToolbar = null;
+        }
+    }
+
+    private buildEdgeToolbar(edgeId: string): HTMLElement {
+        const bar = el('div', {class: 'canvas-edge-toolbar'});
+        this.populateEdgeToolbar(bar, edgeId);
+        return bar;
+    }
+
+    private populateEdgeToolbar(bar: HTMLElement, edgeId: string): void {
+        const edge = this.doc.edges.find((e) => e.id === edgeId);
+        if (edge === undefined) return;
+
+        for (const preset of COLOR_PRESET_ORDER) {
+            const swatch = el('button', {
+                class: edge.color === preset
+                    ? 'canvas-edge-swatch active'
+                    : 'canvas-edge-swatch',
+                attrs: {type: 'button', title: `Color ${preset}`, 'aria-label': `Color ${preset}`},
+                style: {background: COLOR_PRESETS[preset] ?? '#888'},
+                on: {click: (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    this.setEdgeColor(edgeId, preset);
+                }}
+            });
+            bar.appendChild(swatch);
+        }
+
+        bar.appendChild(el('button', {
+            class: edge.color === undefined
+                ? 'canvas-edge-swatch canvas-edge-swatch-clear active'
+                : 'canvas-edge-swatch canvas-edge-swatch-clear',
+            attrs: {type: 'button', title: 'Clear color', 'aria-label': 'Clear color'},
+            text: '∅',
+            on: {click: (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                this.setEdgeColor(edgeId, undefined);
+            }}
+        }));
+
+        bar.appendChild(el('div', {class: 'canvas-edge-toolbar-sep'}));
+
+        const currentStyle = arrowStyleOf(edge);
+        const arrowBtn = (style: ArrowStyle, label: string, title: string): HTMLElement => el('button', {
+            class: currentStyle === style
+                ? 'canvas-edge-arrow-btn active'
+                : 'canvas-edge-arrow-btn',
+            attrs: {type: 'button', title, 'aria-label': title},
+            text: label,
+            on: {click: (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                this.setEdgeArrow(edgeId, style);
+            }}
+        });
+        bar.appendChild(arrowBtn('to', '→', 'Arrow at target only'));
+        bar.appendChild(arrowBtn('both', '↔', 'Arrows at both ends'));
+        bar.appendChild(arrowBtn('none', '—', 'No arrows'));
+    }
+
+    private updateEdgeToolbarPosition(): void {
+        if (this.edgeToolbar === null || this.selectedEdgeId === null) return;
+        const edge = this.doc.edges.find((e) => e.id === this.selectedEdgeId);
+        if (edge === undefined) return;
+        const from = this.nodeById(edge.fromNode);
+        const to = this.nodeById(edge.toNode);
+        if (from === undefined || to === undefined) return;
+        if (from.type === 'group' || to.type === 'group') return;
+
+        const a = anchorFor(from, edge.fromSide, to);
+        const b = anchorFor(to, edge.toSide, from);
+        // World midpoint → screen coords via current pan/zoom.
+        const midWorldX = (a.x + b.x) / 2;
+        const midWorldY = (a.y + b.y) / 2;
+        const screenX = midWorldX * this.scale + this.tx;
+        const screenY = midWorldY * this.scale + this.ty;
+        this.edgeToolbar.style.left = `${screenX}px`;
+        this.edgeToolbar.style.top = `${screenY - 42}px`;
+    }
+
+    private setEdgeColor(edgeId: string, preset: string | undefined): void {
+        const idx = this.doc.edges.findIndex((e) => e.id === edgeId);
+        if (idx === -1) return;
+        const current = this.doc.edges[idx];
+        if (current === undefined) return;
+        const patched = {...current};
+        if (preset === undefined) {
+            delete patched.color;
+        } else {
+            patched.color = preset;
+        }
+        const nextEdges = this.doc.edges.slice();
+        nextEdges[idx] = patched;
+        this.doc = {nodes: this.doc.nodes, edges: nextEdges};
+        this.renderEdges();
+        this.refreshEdgeToolbar();
+        this.commit();
+    }
+
+    private setEdgeArrow(edgeId: string, style: ArrowStyle): void {
+        const idx = this.doc.edges.findIndex((e) => e.id === edgeId);
+        if (idx === -1) return;
+        const current = this.doc.edges[idx];
+        if (current === undefined) return;
+        const patched = {...current};
+        if (style === 'to') {
+            patched.toEnd = 'arrow';
+            delete patched.fromEnd;
+        } else if (style === 'both') {
+            patched.toEnd = 'arrow';
+            patched.fromEnd = 'arrow';
+        } else {
+            patched.toEnd = 'none';
+            delete patched.fromEnd;
+        }
+        const nextEdges = this.doc.edges.slice();
+        nextEdges[idx] = patched;
+        this.doc = {nodes: this.doc.nodes, edges: nextEdges};
+        this.renderEdges();
+        this.refreshEdgeToolbar();
+        this.commit();
     }
 
     // ─── Mutations ───
@@ -630,6 +831,36 @@ export class CanvasRenderer {
         const nextEdges = this.doc.edges.slice();
         nextEdges[idx] = next;
         this.doc = {nodes: this.doc.nodes, edges: nextEdges};
+    }
+
+    private updateBandRect(): void {
+        if (this.bandSelect === null || this.bandRectEl === null) return;
+        const {startWorldX, startWorldY, currentWorldX, currentWorldY} = this.bandSelect;
+        const minX = Math.min(startWorldX, currentWorldX);
+        const minY = Math.min(startWorldY, currentWorldY);
+        const width = Math.abs(currentWorldX - startWorldX);
+        const height = Math.abs(currentWorldY - startWorldY);
+        this.bandRectEl.style.left = `${minX}px`;
+        this.bandRectEl.style.top = `${minY}px`;
+        this.bandRectEl.style.width = `${width}px`;
+        this.bandRectEl.style.height = `${height}px`;
+    }
+
+    private addGroup(x: number, y: number, width: number, height: number): string {
+        const id = genId();
+        const node = {
+            id,
+            type: 'group' as const,
+            x,
+            y,
+            width,
+            height,
+            label: ''
+        };
+        this.doc = {nodes: [...this.doc.nodes, node], edges: this.doc.edges};
+        this.renderAll();
+        this.commit();
+        return id;
     }
 
     public addTextCard(worldX: number, worldY: number, text = ''): string {
@@ -828,9 +1059,26 @@ export class CanvasRenderer {
             return;
         }
 
-        // Empty background — deselect + start panning.
+        // Empty background — deselect + either group-band-select (Shift)
+        // or pan (default).
         this.selectCard(null);
         this.selectEdge(null);
+
+        if (this.editable && event.shiftKey) {
+            const {x, y} = this.toWorld(event.clientX, event.clientY);
+            this.bandSelect = {
+                startWorldX: x,
+                startWorldY: y,
+                currentWorldX: x,
+                currentWorldY: y
+            };
+            this.bandRectEl = el('div', {class: 'canvas-band-rect'});
+            this.stage.appendChild(this.bandRectEl);
+            this.updateBandRect();
+            this.element.setPointerCapture(event.pointerId);
+            return;
+        }
+
         this.panning = true;
         this.panStartX = event.clientX;
         this.panStartY = event.clientY;
@@ -841,6 +1089,14 @@ export class CanvasRenderer {
     };
 
     private onPointerMove = (event: PointerEvent): void => {
+        if (this.bandSelect !== null) {
+            const {x, y} = this.toWorld(event.clientX, event.clientY);
+            this.bandSelect.currentWorldX = x;
+            this.bandSelect.currentWorldY = y;
+            this.updateBandRect();
+            return;
+        }
+
         if (this.edgeDraft !== null) {
             const {x, y} = this.toWorld(event.clientX, event.clientY);
             this.edgeDraft.currentWorldX = x;
@@ -895,6 +1151,31 @@ export class CanvasRenderer {
     };
 
     private onPointerUp = (event: PointerEvent): void => {
+        if (this.bandSelect !== null) {
+            const band = this.bandSelect;
+            this.bandSelect = null;
+            if (this.bandRectEl !== null) {
+                this.bandRectEl.remove();
+                this.bandRectEl = null;
+            }
+            if (this.element.hasPointerCapture(event.pointerId)) {
+                this.element.releasePointerCapture(event.pointerId);
+            }
+
+            const minX = Math.min(band.startWorldX, band.currentWorldX);
+            const minY = Math.min(band.startWorldY, band.currentWorldY);
+            const width = Math.abs(band.currentWorldX - band.startWorldX);
+            const height = Math.abs(band.currentWorldY - band.startWorldY);
+
+            // Rubber-bands smaller than this are usually accidental Shift-clicks;
+            // dropping them avoids spawning zero-size group nodes.
+            const MIN_GROUP_SIZE = 40;
+            if (width >= MIN_GROUP_SIZE && height >= MIN_GROUP_SIZE) {
+                this.addGroup(Math.round(minX), Math.round(minY), Math.round(width), Math.round(height));
+            }
+            return;
+        }
+
         if (this.edgeDraft !== null) {
             const draft = this.edgeDraft;
             this.edgeDraft = null;
@@ -997,6 +1278,14 @@ export class CanvasRenderer {
             return;
         }
 
+        // Dbl-click on a group = edit label.
+        const groupEl = targetEl?.closest('.canvas-group') as HTMLElement | null ?? null;
+        if (groupEl !== null) {
+            const id = groupEl.dataset.nodeId;
+            if (id !== undefined) this.startGroupLabelEdit(id);
+            return;
+        }
+
         // Dbl-click on empty stage = create a text card at the cursor.
         const {x, y} = this.toWorld(event.clientX, event.clientY);
         const newId = this.addTextCard(x, y);
@@ -1006,6 +1295,71 @@ export class CanvasRenderer {
             this.startTextEdit(newId, body);
         }
     };
+
+    /**
+     * Inline label editor for a group node. Positions a small text input
+     * at the group's top-left in world space so it lines up with the
+     * existing `.canvas-group-label` chrome. Enter/blur commit; Escape
+     * cancels; empty string clears the label.
+     */
+    private startGroupLabelEdit(groupId: string): void {
+        const idx = this.doc.nodes.findIndex((n) => n.id === groupId);
+        if (idx === -1) return;
+        const current = this.doc.nodes[idx];
+        if (current === undefined || current.type !== 'group') return;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'canvas-group-label-edit';
+        input.value = current.label ?? '';
+        input.placeholder = 'group label';
+        input.style.left = `${current.x + 8}px`;
+        input.style.top = `${current.y - 22}px`;
+
+        this.stage.appendChild(input);
+        input.focus();
+        input.select();
+
+        let committed = false;
+        const commit = (): void => {
+            if (committed) return;
+            committed = true;
+            const next = input.value.trim();
+            input.remove();
+
+            const idx2 = this.doc.nodes.findIndex((n) => n.id === groupId);
+            if (idx2 === -1) return;
+            const now = this.doc.nodes[idx2];
+            if (now === undefined || now.type !== 'group') return;
+
+            const previous = now.label ?? '';
+            if (previous === next) return;
+
+            const patched = {...now};
+            if (next.length === 0) {
+                delete patched.label;
+            } else {
+                patched.label = next;
+            }
+            const nextNodes = this.doc.nodes.slice();
+            nextNodes[idx2] = patched;
+            this.doc = {nodes: nextNodes, edges: this.doc.edges};
+            this.renderGroups();
+            this.commit();
+        };
+
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                committed = true;
+                input.remove();
+            }
+        });
+    }
 
     /**
      * Inline label editor for an edge. Positions a small text input at the
