@@ -6278,7 +6278,12 @@ button.typed-link-badge:hover {
 }
 
 .canvas-edges {
-    pointer-events: none;
+    /* SVG root itself catches nothing (empty regions have no geometry to
+       hit, so clicks pass through to cards behind). Individual child
+       elements opt in via pointer-events="stroke" (edge hitboxes) or
+       default (endpoint handles). Visible edge lines / arrow / label /
+       draft line stay pointer-events="none" so they don't hijack the
+       hitbox click area. */
     overflow: visible;
 }
 
@@ -6400,6 +6405,95 @@ button.typed-link-badge:hover {
 .canvas-card:hover .canvas-card-resize,
 .canvas-card.selected .canvas-card-resize {
     opacity: 1;
+}
+
+.canvas-card-anchor {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border: 2px solid var(--bg-0);
+    border-radius: 50%;
+    opacity: 0;
+    cursor: crosshair;
+    transition: opacity var(--t-fast), transform var(--t-fast);
+    z-index: 20;
+    /* Bigger hit target than the visible dot so grabbing is easy. */
+    box-shadow: 0 0 0 6px transparent;
+}
+
+.canvas-card:hover .canvas-card-anchor,
+.canvas-viewport.edge-drafting .canvas-card-anchor {
+    opacity: 1;
+}
+
+.canvas-card-anchor:hover {
+    transform: scale(1.4);
+}
+
+.canvas-card-anchor-top {
+    top: -6px;
+    left: calc(50% - 5px);
+}
+.canvas-card-anchor-bottom {
+    bottom: -6px;
+    left: calc(50% - 5px);
+}
+.canvas-card-anchor-left {
+    left: -6px;
+    top: calc(50% - 5px);
+}
+.canvas-card-anchor-right {
+    right: -6px;
+    top: calc(50% - 5px);
+}
+
+/* SVG edge visuals */
+
+.canvas-edge-group .canvas-edge-hitbox {
+    cursor: pointer;
+}
+
+.canvas-edge-group.selected .canvas-edge {
+    filter: drop-shadow(0 0 4px var(--accent));
+}
+
+.canvas-edge-handle {
+    fill: var(--accent);
+    stroke: var(--bg-0);
+    stroke-width: 2;
+    cursor: grab;
+}
+
+.canvas-edge-handle:active {
+    cursor: grabbing;
+}
+
+.canvas-edge-draft {
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    opacity: 0.7;
+}
+
+.canvas-edge-label-edit {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 3px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-2);
+    color: var(--text-0);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    min-width: 80px;
+    z-index: 30;
+}
+
+.canvas-viewport.edge-drafting {
+    cursor: crosshair;
 }
 
 .canvas-card-edit {

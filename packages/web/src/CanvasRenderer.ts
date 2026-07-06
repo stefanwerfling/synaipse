@@ -1,7 +1,9 @@
-import type {CanvasDocument, CanvasNode, CanvasSide, CanvasTextNode} from '@synaipse/core';
+import type {CanvasDocument, CanvasEdge, CanvasNode, CanvasSide, CanvasTextNode} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
+
+const SIDES: readonly CanvasSide[] = ['top', 'right', 'bottom', 'left'];
 
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
@@ -89,6 +91,30 @@ interface DragState {
     moved: boolean;
 }
 
+/**
+ * "User is drawing a new edge from a source anchor." The draft has no
+ * commitment to the vault doc yet — only when the pointer is released
+ * over another card does an edge with a fresh id get pushed and saved.
+ */
+interface EdgeDraftState {
+    fromNode: string;
+    fromSide: CanvasSide;
+    currentWorldX: number;
+    currentWorldY: number;
+}
+
+/**
+ * "User is dragging one endpoint of an existing selected edge." Same
+ * resolve-target-card-on-release semantics as EdgeDraftState, but on
+ * commit we rewrite the endpoint rather than push a new edge.
+ */
+interface EdgeHandleDragState {
+    edgeId: string;
+    endpoint: 'from' | 'to';
+    currentWorldX: number;
+    currentWorldY: number;
+}
+
 export class CanvasRenderer {
     public readonly element: HTMLElement;
     private stage!: HTMLElement;
@@ -108,23 +134,33 @@ export class CanvasRenderer {
     private doc: CanvasDocument;
     private cardEls = new Map<string, HTMLElement>();
     private selectedId: string | null = null;
+    private selectedEdgeId: string | null = null;
     private editingId: string | null = null;
     private dragState: DragState | null = null;
+    private edgeDraft: EdgeDraftState | null = null;
+    private edgeHandleDrag: EdgeHandleDragState | null = null;
 
     private onKeyDown = (event: KeyboardEvent): void => {
         if (!this.editable) return;
         if (!this.element.isConnected) return;
         if (this.editingId !== null) return; // typing in textarea
         if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-        if (this.selectedId === null) return;
 
         // Guard against removing while the user was typing in an
         // unrelated input elsewhere on the page.
         const active = document.activeElement;
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
 
-        event.preventDefault();
-        this.removeNode(this.selectedId);
+        if (this.selectedEdgeId !== null) {
+            event.preventDefault();
+            this.removeEdge(this.selectedEdgeId);
+            return;
+        }
+
+        if (this.selectedId !== null) {
+            event.preventDefault();
+            this.removeNode(this.selectedId);
+        }
     };
 
     public constructor(doc: CanvasDocument, private readonly opts: CanvasRendererOptions) {
@@ -268,6 +304,20 @@ export class CanvasRenderer {
             const handle = el('div', {class: 'canvas-card-resize', attrs: {title: 'Resize'}});
             handle.dataset.role = 'resize';
             card.appendChild(handle);
+
+            // One anchor dot per card side. Purely visual (positioned via
+            // CSS); the pointer handler routes based on data-role='anchor'
+            // + data-side. Group nodes stay anchor-less — edges only
+            // connect real cards, matching Obsidian's rules.
+            for (const side of SIDES) {
+                const anchor = el('div', {
+                    class: `canvas-card-anchor canvas-card-anchor-${side}`,
+                    attrs: {title: `Drag to create edge (${side})`}
+                });
+                anchor.dataset.role = 'anchor';
+                anchor.dataset.side = side;
+                card.appendChild(anchor);
+            }
         }
 
         return card;
@@ -327,9 +377,39 @@ export class CanvasRenderer {
             if (from === undefined || to === undefined) continue;
             if (from.type === 'group' || to.type === 'group') continue;
 
-            const a = anchorFor(from, edge.fromSide, to);
-            const b = anchorFor(to, edge.toSide, from);
+            // If this edge's endpoint is being dragged, use the live cursor
+            // position instead of the stored anchor so the line follows
+            // the pointer during the reroute drag.
+            const dragging = this.edgeHandleDrag !== null && this.edgeHandleDrag.edgeId === edge.id
+                ? this.edgeHandleDrag
+                : null;
+
+            const a = dragging?.endpoint === 'from'
+                ? {x: dragging.currentWorldX, y: dragging.currentWorldY}
+                : anchorFor(from, edge.fromSide, to);
+            const b = dragging?.endpoint === 'to'
+                ? {x: dragging.currentWorldX, y: dragging.currentWorldY}
+                : anchorFor(to, edge.toSide, from);
             const color = resolveColor(edge.color, 'var(--accent)');
+            const isSelected = edge.id === this.selectedEdgeId;
+
+            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            group.classList.add('canvas-edge-group');
+            if (isSelected) group.classList.add('selected');
+            group.dataset.edgeId = edge.id;
+
+            // Invisible thick line sits under the visible one so the click
+            // hitbox is easy to hit even at ~2px stroke widths.
+            const hitbox = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            hitbox.setAttribute('x1', String(a.x));
+            hitbox.setAttribute('y1', String(a.y));
+            hitbox.setAttribute('x2', String(b.x));
+            hitbox.setAttribute('y2', String(b.y));
+            hitbox.setAttribute('stroke', 'transparent');
+            hitbox.setAttribute('stroke-width', '16');
+            hitbox.setAttribute('pointer-events', 'stroke');
+            hitbox.classList.add('canvas-edge-hitbox');
+            group.appendChild(hitbox);
 
             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
             line.setAttribute('x1', String(a.x));
@@ -337,12 +417,14 @@ export class CanvasRenderer {
             line.setAttribute('x2', String(b.x));
             line.setAttribute('y2', String(b.y));
             line.setAttribute('stroke', color);
-            line.setAttribute('stroke-width', '2');
+            line.setAttribute('stroke-width', isSelected ? '3' : '2');
+            line.setAttribute('pointer-events', 'none');
             line.style.color = color;
             if (edge.toEnd !== 'none') {
                 line.setAttribute('marker-end', 'url(#canvas-arrow)');
             }
-            this.edgesSvg.appendChild(line);
+            line.classList.add('canvas-edge');
+            group.appendChild(line);
 
             if (edge.label !== undefined && edge.label.length > 0) {
                 const midX = (a.x + b.x) / 2;
@@ -353,8 +435,53 @@ export class CanvasRenderer {
                 text.setAttribute('text-anchor', 'middle');
                 text.setAttribute('fill', color);
                 text.setAttribute('font-size', '12');
+                text.setAttribute('pointer-events', 'none');
                 text.textContent = edge.label;
-                this.edgesSvg.appendChild(text);
+                group.appendChild(text);
+            }
+
+            this.edgesSvg.appendChild(group);
+
+            // Endpoint handles appear ONLY on the selected edge. They stack
+            // on top of the arrow marker so the user can grab either end
+            // even when it terminates near a card.
+            if (isSelected && this.editable) {
+                for (const endpoint of ['from', 'to'] as const) {
+                    const p = endpoint === 'from' ? a : b;
+                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    dot.setAttribute('cx', String(p.x));
+                    dot.setAttribute('cy', String(p.y));
+                    dot.setAttribute('r', '6');
+                    dot.classList.add('canvas-edge-handle');
+                    dot.dataset.edgeId = edge.id;
+                    dot.dataset.endpoint = endpoint;
+                    this.edgesSvg.appendChild(dot);
+                }
+            }
+        }
+
+        // Draft edge — either a brand-new one being drawn from an anchor,
+        // or the ghost of a selected edge's endpoint being rerouted.
+        if (this.edgeDraft !== null) {
+            const from = nodesById.get(this.edgeDraft.fromNode);
+            if (from !== undefined && from.type !== 'group') {
+                const start = anchorFor(from, this.edgeDraft.fromSide, {
+                    x: this.edgeDraft.currentWorldX,
+                    y: this.edgeDraft.currentWorldY,
+                    width: 0,
+                    height: 0,
+                    id: '__cursor__',
+                    type: 'text',
+                    text: ''
+                });
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', String(start.x));
+                line.setAttribute('y1', String(start.y));
+                line.setAttribute('x2', String(this.edgeDraft.currentWorldX));
+                line.setAttribute('y2', String(this.edgeDraft.currentWorldY));
+                line.classList.add('canvas-edge-draft');
+                line.setAttribute('pointer-events', 'none');
+                this.edgesSvg.appendChild(line);
             }
         }
     }
@@ -407,7 +534,17 @@ export class CanvasRenderer {
 
     // ─── Selection ───
 
-    private select(id: string | null): void {
+    /**
+     * Cards and edges have mutually exclusive selection state — a keypress
+     * needs a single "delete the currently focused thing" target, and
+     * showing endpoint handles on an edge while a card is also outlined is
+     * confusing. Both helpers no-op when nothing changes.
+     */
+    private selectCard(id: string | null): void {
+        if (this.selectedEdgeId !== null) {
+            this.selectedEdgeId = null;
+            this.renderEdges();
+        }
         if (this.selectedId === id) return;
         if (this.selectedId !== null) {
             this.cardEls.get(this.selectedId)?.classList.remove('selected');
@@ -416,6 +553,16 @@ export class CanvasRenderer {
         if (id !== null) {
             this.cardEls.get(id)?.classList.add('selected');
         }
+    }
+
+    private selectEdge(id: string | null): void {
+        if (this.selectedId !== null) {
+            this.cardEls.get(this.selectedId)?.classList.remove('selected');
+            this.selectedId = null;
+        }
+        if (this.selectedEdgeId === id) return;
+        this.selectedEdgeId = id;
+        this.renderEdges();
     }
 
     // ─── Mutations ───
@@ -438,6 +585,53 @@ export class CanvasRenderer {
         this.commit();
     }
 
+    private removeEdge(id: string): void {
+        this.doc = {
+            nodes: this.doc.nodes,
+            edges: this.doc.edges.filter((e) => e.id !== id)
+        };
+        if (this.selectedEdgeId === id) this.selectedEdgeId = null;
+        this.renderEdges();
+        this.commit();
+    }
+
+    private addEdge(fromNode: string, fromSide: CanvasSide, toNode: string): CanvasEdge {
+        // No self-loops. Silently drop rather than error — the user just
+        // dragged onto the same card, no need to interrupt with a modal.
+        // Also drop if an edge with the same endpoints already exists so
+        // repeated drags don't stack duplicates.
+        const edge: CanvasEdge = {
+            id: genId(),
+            fromNode,
+            toNode,
+            fromSide,
+            toEnd: 'arrow'
+        };
+        this.doc = {
+            nodes: this.doc.nodes,
+            edges: [...this.doc.edges, edge]
+        };
+        return edge;
+    }
+
+    private rerouteEdge(edgeId: string, endpoint: 'from' | 'to', newNode: string): void {
+        const idx = this.doc.edges.findIndex((e) => e.id === edgeId);
+        if (idx === -1) return;
+        const current = this.doc.edges[idx];
+        if (current === undefined) return;
+        // Self-loops silently rejected (same reason as addEdge).
+        if (endpoint === 'from' && newNode === current.toNode) return;
+        if (endpoint === 'to' && newNode === current.fromNode) return;
+
+        const next: CanvasEdge = endpoint === 'from'
+            ? {...current, fromNode: newNode}
+            : {...current, toNode: newNode};
+
+        const nextEdges = this.doc.edges.slice();
+        nextEdges[idx] = next;
+        this.doc = {nodes: this.doc.nodes, edges: nextEdges};
+    }
+
     public addTextCard(worldX: number, worldY: number, text = ''): string {
         const id = genId();
         const node: CanvasTextNode = {
@@ -451,7 +645,7 @@ export class CanvasRenderer {
         };
         this.doc = {nodes: [...this.doc.nodes, node], edges: this.doc.edges};
         this.renderAll();
-        this.select(id);
+        this.selectCard(id);
         this.commit();
         return id;
     }
@@ -463,6 +657,24 @@ export class CanvasRenderer {
             x: (clientX - rect.left - this.tx) / this.scale,
             y: (clientY - rect.top - this.ty) / this.scale
         };
+    }
+
+    /**
+     * elementFromPoint the pointer position, walk up to a `.canvas-card`,
+     * return its node id — unless it equals `skipNodeId` (used to reject
+     * self-loops in both edge-create and edge-reroute). Group nodes are
+     * intentionally skipped because edges only connect real cards.
+     */
+    private resolveTargetNodeId(clientX: number, clientY: number, skipNodeId: string): string | null {
+        const el = document.elementFromPoint(clientX, clientY);
+        if (el === null) return null;
+        const cardEl = (el as HTMLElement).closest('.canvas-card') as HTMLElement | null;
+        if (cardEl === null) return null;
+        const id = cardEl.dataset.nodeId;
+        if (id === undefined || id === skipNodeId) return null;
+        const node = this.nodeById(id);
+        if (node === undefined || node.type === 'group') return null;
+        return id;
     }
 
     // ─── Text-card inline editing ───
@@ -538,15 +750,57 @@ export class CanvasRenderer {
     private onPointerDown = (event: PointerEvent): void => {
         if (event.button !== 0) return;
 
-        const target = event.target as HTMLElement;
+        const target = event.target as HTMLElement | SVGElement;
 
         // Textareas: let the browser handle the click normally.
         if (target.tagName === 'TEXTAREA') return;
         // Links inside cards: let them be clicked normally.
         if (target.tagName === 'A') return;
 
-        const cardEl = target.closest('.canvas-card') as HTMLElement | null;
-        const isResizeHandle = target.dataset.role === 'resize';
+        // ── Edge-first: an anchor dot beats the card behind it, an edge
+        //     handle beats the edge behind it, an edge beats an empty
+        //     background.
+        if (this.editable && target instanceof HTMLElement && target.dataset.role === 'anchor') {
+            const cardEl = target.closest('.canvas-card') as HTMLElement | null;
+            const fromNode = cardEl?.dataset.nodeId;
+            const side = target.dataset.side as CanvasSide | undefined;
+            if (fromNode !== undefined && side !== undefined) {
+                const {x, y} = this.toWorld(event.clientX, event.clientY);
+                this.edgeDraft = {fromNode, fromSide: side, currentWorldX: x, currentWorldY: y};
+                this.element.classList.add('edge-drafting');
+                this.element.setPointerCapture(event.pointerId);
+                this.renderEdges();
+                return;
+            }
+        }
+
+        if (this.editable && target instanceof SVGElement && target.classList.contains('canvas-edge-handle')) {
+            const edgeId = target.dataset.edgeId;
+            const endpoint = target.dataset.endpoint as 'from' | 'to' | undefined;
+            if (edgeId !== undefined && (endpoint === 'from' || endpoint === 'to')) {
+                const {x, y} = this.toWorld(event.clientX, event.clientY);
+                this.edgeHandleDrag = {edgeId, endpoint, currentWorldX: x, currentWorldY: y};
+                this.element.classList.add('edge-drafting');
+                this.element.setPointerCapture(event.pointerId);
+                this.renderEdges();
+                return;
+            }
+        }
+
+        if (target instanceof SVGElement) {
+            const edgeGroup = target.closest('.canvas-edge-group') as SVGGElement | null;
+            if (edgeGroup !== null) {
+                const edgeId = edgeGroup.dataset.edgeId;
+                if (edgeId !== undefined) {
+                    this.selectEdge(edgeId);
+                    return;
+                }
+            }
+        }
+
+        const targetEl = target instanceof HTMLElement ? target : null;
+        const cardEl = targetEl?.closest('.canvas-card') as HTMLElement | null ?? null;
+        const isResizeHandle = targetEl?.dataset.role === 'resize';
 
         if (cardEl !== null && this.editable) {
             const id = cardEl.dataset.nodeId;
@@ -554,7 +808,7 @@ export class CanvasRenderer {
             const node = this.nodeById(id);
             if (node === undefined) return;
 
-            this.select(id);
+            this.selectCard(id);
 
             // Never drag while inline text edit is active on this card.
             if (this.editingId === id) return;
@@ -575,7 +829,8 @@ export class CanvasRenderer {
         }
 
         // Empty background — deselect + start panning.
-        this.select(null);
+        this.selectCard(null);
+        this.selectEdge(null);
         this.panning = true;
         this.panStartX = event.clientX;
         this.panStartY = event.clientY;
@@ -586,6 +841,22 @@ export class CanvasRenderer {
     };
 
     private onPointerMove = (event: PointerEvent): void => {
+        if (this.edgeDraft !== null) {
+            const {x, y} = this.toWorld(event.clientX, event.clientY);
+            this.edgeDraft.currentWorldX = x;
+            this.edgeDraft.currentWorldY = y;
+            this.renderEdges();
+            return;
+        }
+
+        if (this.edgeHandleDrag !== null) {
+            const {x, y} = this.toWorld(event.clientX, event.clientY);
+            this.edgeHandleDrag.currentWorldX = x;
+            this.edgeHandleDrag.currentWorldY = y;
+            this.renderEdges();
+            return;
+        }
+
         if (this.dragState !== null) {
             const dx = (event.clientX - this.dragState.startClientX) / this.scale;
             const dy = (event.clientY - this.dragState.startClientY) / this.scale;
@@ -624,6 +895,47 @@ export class CanvasRenderer {
     };
 
     private onPointerUp = (event: PointerEvent): void => {
+        if (this.edgeDraft !== null) {
+            const draft = this.edgeDraft;
+            this.edgeDraft = null;
+            this.element.classList.remove('edge-drafting');
+            if (this.element.hasPointerCapture(event.pointerId)) {
+                this.element.releasePointerCapture(event.pointerId);
+            }
+
+            const targetNodeId = this.resolveTargetNodeId(event.clientX, event.clientY, draft.fromNode);
+            if (targetNodeId !== null) {
+                const edge = this.addEdge(draft.fromNode, draft.fromSide, targetNodeId);
+                this.renderEdges();
+                this.selectEdge(edge.id);
+                this.commit();
+            } else {
+                this.renderEdges();
+            }
+            return;
+        }
+
+        if (this.edgeHandleDrag !== null) {
+            const drag = this.edgeHandleDrag;
+            this.edgeHandleDrag = null;
+            this.element.classList.remove('edge-drafting');
+            if (this.element.hasPointerCapture(event.pointerId)) {
+                this.element.releasePointerCapture(event.pointerId);
+            }
+
+            const edge = this.doc.edges.find((e) => e.id === drag.edgeId);
+            if (edge !== undefined) {
+                const opposite = drag.endpoint === 'from' ? edge.toNode : edge.fromNode;
+                const targetNodeId = this.resolveTargetNodeId(event.clientX, event.clientY, opposite);
+                if (targetNodeId !== null) {
+                    this.rerouteEdge(drag.edgeId, drag.endpoint, targetNodeId);
+                    this.commit();
+                }
+            }
+            this.renderEdges();
+            return;
+        }
+
         if (this.dragState !== null) {
             const wasMoved = this.dragState.moved;
             this.dragState = null;
@@ -646,10 +958,24 @@ export class CanvasRenderer {
     private onDoubleClick = (event: MouseEvent): void => {
         if (!this.editable) return;
 
-        const target = event.target as HTMLElement;
+        const target = event.target as HTMLElement | SVGElement;
+
+        // Dbl-click on an edge → inline label editor at the midpoint.
+        if (target instanceof SVGElement) {
+            const edgeGroup = target.closest('.canvas-edge-group') as SVGGElement | null;
+            if (edgeGroup !== null) {
+                const edgeId = edgeGroup.dataset.edgeId;
+                if (edgeId !== undefined) {
+                    this.startEdgeLabelEdit(edgeId);
+                    return;
+                }
+            }
+        }
+
+        const targetEl = target instanceof HTMLElement ? target : null;
 
         // Dbl-click on a file card = open the note (existing behavior).
-        const fileCard = target.closest('.canvas-card-file') as HTMLElement | null;
+        const fileCard = targetEl?.closest('.canvas-card-file') as HTMLElement | null ?? null;
         if (fileCard !== null) {
             const id = fileCard.dataset.nodeId;
             if (id !== undefined) {
@@ -662,7 +988,7 @@ export class CanvasRenderer {
         }
 
         // Dbl-click on a text card = inline edit.
-        const textCard = target.closest('.canvas-card-text') as HTMLElement | null;
+        const textCard = targetEl?.closest('.canvas-card-text') as HTMLElement | null ?? null;
         if (textCard !== null) {
             const id = textCard.dataset.nodeId;
             if (id === undefined) return;
@@ -680,4 +1006,77 @@ export class CanvasRenderer {
             this.startTextEdit(newId, body);
         }
     };
+
+    /**
+     * Inline label editor for an edge. Positions a small text input at the
+     * midpoint of the current edge geometry (in stage/world space, so it
+     * scales with zoom). Enter or blur commits; Escape cancels. An empty
+     * final value clears the label attribute rather than storing "".
+     */
+    private startEdgeLabelEdit(edgeId: string): void {
+        const edge = this.doc.edges.find((e) => e.id === edgeId);
+        if (edge === undefined) return;
+
+        const from = this.nodeById(edge.fromNode);
+        const to = this.nodeById(edge.toNode);
+        if (from === undefined || to === undefined) return;
+        if (from.type === 'group' || to.type === 'group') return;
+
+        const a = anchorFor(from, edge.fromSide, to);
+        const b = anchorFor(to, edge.toSide, from);
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'canvas-edge-label-edit';
+        input.value = edge.label ?? '';
+        input.placeholder = 'label';
+        input.style.left = `${midX}px`;
+        input.style.top = `${midY - 12}px`;
+
+        this.stage.appendChild(input);
+        input.focus();
+        input.select();
+
+        let committed = false;
+        const commit = (): void => {
+            if (committed) return;
+            committed = true;
+            const next = input.value.trim();
+            input.remove();
+
+            const idx = this.doc.edges.findIndex((e) => e.id === edgeId);
+            if (idx === -1) return;
+            const current = this.doc.edges[idx];
+            if (current === undefined) return;
+
+            const previous = current.label ?? '';
+            if (previous === next) return;
+
+            const patched = {...current};
+            if (next.length === 0) {
+                delete patched.label;
+            } else {
+                patched.label = next;
+            }
+            const nextEdges = this.doc.edges.slice();
+            nextEdges[idx] = patched;
+            this.doc = {nodes: this.doc.nodes, edges: nextEdges};
+            this.renderEdges();
+            this.commit();
+        };
+
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                committed = true;
+                input.remove();
+            }
+        });
+    }
 }
