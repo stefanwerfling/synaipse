@@ -699,6 +699,39 @@ export class CanvasRenderer {
             : 'Link card';
         this.bottomBar.appendChild(el('span', {class: 'canvas-bottom-bar-kind', text: label}));
 
+        // Text cards edit inline (dblclick works too, but a bar action is
+        // more discoverable). File/link cards have their own semantics.
+        if (node.type === 'text') {
+            this.bottomBar.appendChild(el('button', {
+                class: 'canvas-bottom-bar-btn',
+                attrs: {type: 'button', title: 'Edit text (dblclick)', 'aria-label': 'Edit text'},
+                text: '✎ Edit',
+                on: {click: (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const cardEl = this.cardEls.get(nodeId);
+                    const body = cardEl?.querySelector<HTMLElement>('[data-role="text-body"]');
+                    if (body !== null && body !== undefined) this.startTextEdit(nodeId, body);
+                }}
+            }));
+            this.bottomBar.appendChild(el('div', {class: 'canvas-bottom-bar-sep'}));
+        }
+
+        if (node.type === 'file') {
+            const fileId = node.file;
+            this.bottomBar.appendChild(el('button', {
+                class: 'canvas-bottom-bar-btn',
+                attrs: {type: 'button', title: 'Open note (dblclick)', 'aria-label': 'Open note'},
+                text: '↗ Open',
+                on: {click: (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    this.opts.onOpenNote(fileId);
+                }}
+            }));
+            this.bottomBar.appendChild(el('div', {class: 'canvas-bottom-bar-sep'}));
+        }
+
         this.appendColorSwatches({
             current: node.color,
             onPick: (preset) => this.setNodeColor(nodeId, preset)
@@ -1035,10 +1068,18 @@ export class CanvasRenderer {
 
         const target = event.target as HTMLElement | SVGElement;
 
-        // Textareas: let the browser handle the click normally.
+        // Textareas + inputs: let the browser handle the click normally.
         if (target.tagName === 'TEXTAREA') return;
+        if (target.tagName === 'INPUT') return;
         // Links inside cards: let them be clicked normally.
         if (target.tagName === 'A') return;
+
+        // Bottom-bar clicks belong to the contextual actions — if we don't
+        // bail here, the "empty background" branch below would clear the
+        // selection, hide the bar, and detach the button before its click
+        // handler ever runs. Same for the group-label / edge-label inline
+        // inputs (their pointerdown would similarly trigger a pan).
+        if (target instanceof HTMLElement && target.closest('.canvas-bottom-bar') !== null) return;
 
         // ── Edge-first: an anchor dot beats the card behind it, an edge
         //     handle beats the edge behind it, an edge beats an empty
