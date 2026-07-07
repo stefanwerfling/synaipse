@@ -6292,6 +6292,15 @@ button.typed-link-badge:hover {
     border: 2px dashed rgba(255, 255, 255, 0.25);
     border-radius: var(--r-3);
     background: rgba(255, 255, 255, 0.02);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+
+/* Group with picked colour — border matches, faint tint on the fill. */
+.canvas-group[data-color] {
+    border-color: var(--card-color);
+    background: color-mix(in srgb, var(--card-color) 6%, rgba(255, 255, 255, 0.02));
 }
 
 .canvas-group-label {
@@ -6307,6 +6316,12 @@ button.typed-link-badge:hover {
     letter-spacing: 0.02em;
 }
 
+/* Coloured group → label chip echoes the same tint. */
+.canvas-group[data-color] > .canvas-group-label {
+    color: var(--card-color);
+    border-color: var(--card-color);
+}
+
 .canvas-card {
     position: absolute;
     background: var(--bg-1);
@@ -6316,6 +6331,70 @@ button.typed-link-badge:hover {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* Without this the browser races the drag against a text-selection
+       on whatever body text sits under the pointer — the selection wins
+       partway through and freezes the move. */
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+
+/* While inline-editing, the card temporarily lifts out of the stage
+   and expands into a centred modal-style panel — much bigger writing
+   area than the source rectangle, no matter how tiny the card is on
+   the canvas. Everything else on the canvas dims via the backdrop.
+   Position:fixed breaks the card out of the stage's translate/scale
+   transform, so it lands at true viewport coordinates. */
+.canvas-card.editing-modal {
+    position: fixed !important;
+    top: 8vh !important;
+    left: 8vw !important;
+    right: 8vw !important;
+    bottom: 8vh !important;
+    width: auto !important;
+    height: auto !important;
+    transform: none !important;
+    z-index: 2001;
+    box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.55),
+        0 0 0 1px var(--card-color, var(--border));
+    animation: canvas-card-modal-in 160ms ease-out;
+}
+
+@keyframes canvas-card-modal-in {
+    from {
+        opacity: 0;
+        transform: scale(0.96) !important;
+    }
+    to {
+        opacity: 1;
+        transform: none !important;
+    }
+}
+
+.canvas-editing-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 2000;
+    animation: canvas-backdrop-in 160ms ease-out;
+}
+
+@keyframes canvas-backdrop-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* OneNote-style coloured card — border + subtle body tint. Children
+   (file title band, editor toolbar) key on the same `data-color` flag
+   for their stronger accents. */
+.canvas-card[data-color] {
+    border-color: var(--card-color);
+    background: color-mix(in srgb, var(--card-color) 14%, var(--bg-1));
+    box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--card-color) 35%, transparent);
+}
+.canvas-card[data-color].selected {
+    box-shadow: var(--shadow-sm), 0 0 0 2px var(--card-color);
 }
 
 .canvas-card-clickable {
@@ -6328,12 +6407,58 @@ button.typed-link-badge:hover {
     box-shadow: var(--shadow-md);
 }
 
+/* Card-scoped Markdown typography — the global .md-preview rules leave
+   heading sizes on browser default (h1 = 2em) and the body sits at
+   13px, which reads huge on the 260x140 card canvas. Compact the base
+   to 11px + tighter line-height and pull every block down. Applies
+   equally to the read preview (.canvas-card-body) and the WYSIWYG
+   editor surface (.canvas-card-editor). */
+.canvas-card-body,
+.canvas-card-editor { font-size: 11px !important; line-height: 1.4 !important; }
+
+.canvas-card-body.md-preview h1,
+.canvas-card-editor h1 { font-size: 1.35em; margin: 0.45em 0 0.25em; font-weight: 700; }
+.canvas-card-body.md-preview h2,
+.canvas-card-editor h2 { font-size: 1.2em; margin: 0.45em 0 0.25em; font-weight: 700; }
+.canvas-card-body.md-preview h3,
+.canvas-card-editor h3 { font-size: 1.08em; margin: 0.4em 0 0.2em; font-weight: 700; }
+.canvas-card-body.md-preview h4,
+.canvas-card-body.md-preview h5,
+.canvas-card-body.md-preview h6,
+.canvas-card-editor h4,
+.canvas-card-editor h5,
+.canvas-card-editor h6 { font-size: 1em; margin: 0.4em 0 0.2em; font-weight: 700; }
+
+.canvas-card-body.md-preview h1:first-child,
+.canvas-card-body.md-preview h2:first-child,
+.canvas-card-body.md-preview h3:first-child,
+.canvas-card-editor h1:first-child,
+.canvas-card-editor h2:first-child,
+.canvas-card-editor h3:first-child { margin-top: 0; }
+
+.canvas-card-body.md-preview p,
+.canvas-card-editor p { margin: 0.3em 0; }
+.canvas-card-body.md-preview p:first-child,
+.canvas-card-editor p:first-child { margin-top: 0; }
+
+.canvas-card-body.md-preview ul,
+.canvas-card-body.md-preview ol,
+.canvas-card-editor ul,
+.canvas-card-editor ol { margin: 0.3em 0; padding-left: 1.3em; }
+
+.canvas-card-body.md-preview pre,
+.canvas-card-editor pre { padding: 4px 6px; margin: 0.3em 0; font-size: 10px; }
+
+.canvas-card-body.md-preview code,
+.canvas-card-editor code { font-size: 10px; padding: 0 3px; }
+
+.canvas-card-body.md-preview blockquote,
+.canvas-card-editor blockquote { margin: 0.3em 0; padding-left: 8px; border-left: 2px solid var(--border); }
+
 .canvas-card-body {
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-2) var(--space-3);
     overflow: auto;
     flex: 1 1 auto;
-    font-size: 13px;
-    line-height: 1.55;
 }
 
 .canvas-card-file-title {
@@ -6346,6 +6471,14 @@ button.typed-link-badge:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Coloured file card → header wears the full colour band, OneNote-tab
+   style; body inherits the softer body tint from `.canvas-card[...]`. */
+.canvas-card[data-color] > .canvas-card-file-title {
+    background: color-mix(in srgb, var(--card-color) 55%, var(--bg-2));
+    border-bottom-color: var(--card-color);
+    color: var(--text-0);
 }
 
 .canvas-card-file-preview {
@@ -6652,6 +6785,132 @@ button.typed-link-badge:hover {
     line-height: 1.5;
     resize: none;
     outline: none;
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: auto;
+}
+
+/* ── WYSIWYG editor ─────────────────────────────────────────────
+   Lives in the .canvas-card-body slot so the card visually stays
+   the same box. Body is a column flexbox; the toolbar clings to
+   the top, the contenteditable surface fills the rest. Both
+   opt back into user-select/touch so the caret + selection work.
+*/
+.canvas-card-editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 4px;
+    margin: calc(var(--space-2) * -1) calc(var(--space-3) * -1) var(--space-2);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-soft);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: auto;
+    position: sticky;
+    top: calc(var(--space-2) * -1);
+    z-index: 2;
+}
+
+/* Coloured card → editor toolbar wears a stronger tint of the same
+   colour so the whole card reads as one visual unit while editing. */
+.canvas-card[data-color] .canvas-card-editor-toolbar {
+    background: color-mix(in srgb, var(--card-color) 30%, var(--bg-2));
+    border-bottom-color: color-mix(in srgb, var(--card-color) 45%, var(--border-soft));
+}
+
+.canvas-card-editor-btn {
+    appearance: none;
+    background: transparent;
+    color: var(--text-1);
+    border: 1px solid transparent;
+    border-radius: var(--r-1);
+    padding: 3px 7px;
+    min-width: 26px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.1;
+    cursor: pointer;
+}
+
+.canvas-card-editor-btn:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    border-color: var(--border-soft);
+}
+
+.canvas-card-editor-btn:active {
+    background: var(--bg-1);
+}
+
+.canvas-card-editor {
+    /* Same typography as the read-mode preview — that's the whole
+       point of the WYSIWYG mode. No monospace, no bg-switch. */
+    outline: none;
+    min-height: 40px;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1.55;
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: auto;
+    /* Caret ownership: while editing, the whole surface should
+       accept pointer input for selection, not the card-drag
+       machinery — the CanvasRenderer's editingId guard handles
+       the actual bail, this just makes the intent obvious. */
+    cursor: text;
+    flex: 1 1 auto;
+    overflow: auto;
+}
+
+.canvas-card-editor:focus {
+    /* No blue browser default — the card border already indicates
+       "you are editing this one" via the outer selection state. */
+    outline: none;
+}
+
+.canvas-card-editor p {
+    margin: 0 0 var(--space-2) 0;
+}
+.canvas-card-editor p:last-child { margin-bottom: 0; }
+
+/* Opaque-block placeholder pills. Read-only islands the WYSIWYG
+   layer can't format but preserves verbatim on commit. */
+.canvas-edit-token {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    background: var(--bg-2);
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-1);
+    color: var(--text-2);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+}
+
+.canvas-edit-token-block {
+    display: flex;
+    margin: var(--space-2) 0;
+}
+
+.canvas-card-editor .canvas-group-label-edit,
+.canvas-card-editor .canvas-edge-label-edit {
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: auto;
+}
+
+.canvas-group-label-edit,
+.canvas-edge-label-edit {
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: auto;
 }
 
 .canvas-toolbar {

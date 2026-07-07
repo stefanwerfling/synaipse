@@ -31,7 +31,8 @@
     "marked-highlight": "^2.2.4",
     "mdfloor": "github:OpenSourcePKG/mdfloor",
     "three": "^0.171.0",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.21.8",

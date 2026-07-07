@@ -1,5 +1,6 @@
 import type {CanvasDocument, CanvasEdge, CanvasNode, CanvasSide, CanvasTextNode} from '@synaipse/core';
 import {api} from './Api.js';
+import {mountCardEditor} from './CardEditor.js';
 import {clear, el} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
 
@@ -262,23 +263,25 @@ export class CanvasRenderer {
         for (const node of this.doc.nodes) {
             if (node.type !== 'group') continue;
 
-            const border = resolveColor(node.color, 'rgba(255,255,255,0.18)');
+            const accent = resolveColor(node.color, '');
             const rect = el('div', {
                 class: node.id === this.selectedId ? 'canvas-group selected' : 'canvas-group',
                 style: {
                     left: `${node.x}px`,
                     top: `${node.y}px`,
                     width: `${node.width}px`,
-                    height: `${node.height}px`,
-                    borderColor: border
+                    height: `${node.height}px`
                 }
             });
             rect.dataset.nodeId = node.id;
+            if (accent.length > 0) {
+                rect.style.setProperty('--card-color', accent);
+                rect.dataset.color = '1';
+            }
 
             if (node.label !== undefined && node.label.length > 0) {
                 rect.appendChild(el('div', {
                     class: 'canvas-group-label',
-                    style: {color: border},
                     text: node.label
                 }));
             }
@@ -312,10 +315,14 @@ export class CanvasRenderer {
         });
         card.dataset.nodeId = node.id;
 
+        // OneNote-style tint: the whole card BG shifts toward the picked
+        // colour, border matches, and children (editor toolbar, file
+        // header) can inherit via `var(--card-color)`. `data-color` is
+        // the flag CSS rules key on so the untinted default stays clean.
         const accent = resolveColor(node.color, '');
         if (accent.length > 0) {
-            card.style.borderColor = accent;
-            card.style.boxShadow = `inset 3px 0 0 ${accent}`;
+            card.style.setProperty('--card-color', accent);
+            card.dataset.color = '1';
         }
 
         if (node.id === this.selectedId) card.classList.add('selected');
@@ -1002,24 +1009,56 @@ export class CanvasRenderer {
         const node = this.nodeById(id);
         if (node === undefined || node.type !== 'text') return;
 
-        clear(body);
-        const textarea = document.createElement('textarea');
-        textarea.className = 'canvas-card-edit';
-        textarea.value = node.text;
-        textarea.spellcheck = false;
-        body.appendChild(textarea);
-        textarea.focus();
-        // Move caret to end so the user can continue typing on new cards.
-        textarea.selectionStart = textarea.value.length;
-        textarea.selectionEnd = textarea.value.length;
+        // Lift the card out of the stage into a screen-fixed modal so
+        // the writing area is roomy regardless of the source card's
+        // size. The stored node.x/y/w/h are untouched — the class
+        // triggers a CSS position:fixed + transform reset for the
+        // duration of the edit. We *portal* the card and backdrop into
+        // document.body because position:fixed inside the transformed
+        // `.canvas-stage` uses the stage as its containing block, not
+        // the viewport (per CSS spec) — which would render the modal
+        // in stage coordinates and completely wrong.
+        const cardEl = this.cardEls.get(id);
+        const cardParent = cardEl?.parentElement ?? null;
+        const cardNextSibling = cardEl?.nextSibling ?? null;
+        if (cardEl !== undefined) {
+            cardEl.classList.add('editing-modal');
+            document.body.appendChild(cardEl);
+        }
+        const backdrop = el('div', {class: 'canvas-editing-backdrop'});
+        document.body.appendChild(backdrop);
 
-        const commit = (): void => {
-            const nextText = textarea.value;
-            this.editingId = null;
-            const idx = this.doc.nodes.findIndex((n) => n.id === id);
-            if (idx === -1) return;
-            const current = this.doc.nodes[idx];
-            if (current !== undefined && current.type === 'text') {
+        // Clicking the dimmed area behind the modal = commit. The
+        // editor's blur handler already handles focus loss, so this
+        // just makes the target explicit + preempts the focus race.
+        backdrop.addEventListener('pointerdown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const surface = cardEl?.querySelector<HTMLElement>('.canvas-card-editor');
+            surface?.blur();
+        });
+
+        const restoreCardToStage = (): void => {
+            if (cardEl === undefined) return;
+            cardEl.classList.remove('editing-modal');
+            if (cardParent !== null) {
+                if (cardNextSibling !== null && cardNextSibling.parentNode === cardParent) {
+                    cardParent.insertBefore(cardEl, cardNextSibling);
+                } else {
+                    cardParent.appendChild(cardEl);
+                }
+            }
+        };
+
+        mountCardEditor(body, node.text, {
+            onCommit: (nextText) => {
+                this.editingId = null;
+                restoreCardToStage();
+                backdrop.remove();
+                const idx = this.doc.nodes.findIndex((n) => n.id === id);
+                if (idx === -1) return;
+                const current = this.doc.nodes[idx];
+                if (current === undefined || current.type !== 'text') return;
                 const changed = current.text !== nextText;
                 if (changed) {
                     const nextNodes = this.doc.nodes.slice();
@@ -1029,14 +1068,6 @@ export class CanvasRenderer {
                 clear(body);
                 renderMarkdownInto(body, nextText);
                 if (changed) this.commit();
-            }
-        };
-
-        textarea.addEventListener('blur', commit);
-        textarea.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                commit();
             }
         });
     }
@@ -1148,6 +1179,11 @@ export class CanvasRenderer {
                 startClientY: event.clientY,
                 moved: false
             };
+            // Belt-and-suspenders alongside `user-select: none` on the card:
+            // suppresses the native text-selection that would otherwise start
+            // on whatever text sits under the pointer and eventually cancel
+            // the drag when the selection "wins" the pointer stream.
+            event.preventDefault();
             this.element.setPointerCapture(event.pointerId);
             return;
         }
