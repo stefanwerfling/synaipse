@@ -559,16 +559,27 @@ body.sidebar-resizing {
     border-radius: var(--r-2);
     cursor: pointer;
     border-left: 2px solid transparent;
-    transition: background var(--t-fast), border-color var(--t-fast);
+    /* Row separator — cheap and works in the virtualised mode where a
+       flex `gap` is impossible (children are absolutely positioned). */
+    border-bottom: 1px solid var(--border-soft);
+    transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+    position: relative;
 }
 
 .note-list-item:hover {
     background: var(--bg-2);
+    /* Feather-light lift so the row telegraphs "this is a click target"
+       without leaping off the page. */
+    box-shadow: inset 0 0 0 1px var(--border-soft);
 }
 
 .note-list-item.active {
-    background: var(--bg-3);
+    /* Accent-tinted highlight so the selected row reads at a glance,
+       plus the same left rail as before for a hint of direction. */
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-2));
     border-left-color: var(--accent);
+    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border-soft));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .note-group-header {
@@ -576,12 +587,25 @@ body.sidebar-resizing {
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-2);
-    margin-top: var(--space-3);
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-2);
     cursor: pointer;
-    border-radius: var(--r-1);
+    border-radius: 0;
     color: var(--text-2);
     transition: color var(--t-fast), background var(--t-fast);
     user-select: none;
+    /* Section cap between the folder label and the notes below.
+       Combined with a slightly larger top margin this gives every
+       group its own airspace, so the header no longer collides with
+       the first note. */
+    border-bottom: 1px solid var(--border-soft);
+    /* Sticky while scrolling the list so the user always knows which
+       folder they're in — the bg keeps the tag/id lines from bleeding
+       through. */
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-1);
 }
 
 .note-group-header:first-child {
@@ -773,13 +797,15 @@ body.sidebar-resizing {
 }
 
 .note-list-path {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-3);
     font-family: var(--font-mono);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
     display: block;
+    opacity: 0.75;
+    letter-spacing: 0.02em;
 }
 
 .note-list-tags {
