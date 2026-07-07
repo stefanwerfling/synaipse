@@ -168,6 +168,10 @@ export class CanvasRenderer {
     private selectedId: string | null = null;
     private selectedEdgeId: string | null = null;
     private editingId: string | null = null;
+    /** If the modal editor is open, this force-commits it. Used by the
+     *  destroy path so a tab-switch tears down the portalled modal and
+     *  writes any pending text back rather than leaving it hovering. */
+    private editingTeardown: (() => void) | null = null;
     private dragState: DragState | null = null;
     private edgeDraft: EdgeDraftState | null = null;
     private edgeHandleDrag: EdgeHandleDragState | null = null;
@@ -213,8 +217,20 @@ export class CanvasRenderer {
     }
 
     public destroy(): void {
+        // Tear down the modal editor first so we don't leave the
+        // portalled card + backdrop hovering after the panel unmounts
+        // (they live under document.body, not under our stage).
+        this.stopEditing();
         document.removeEventListener('keydown', this.onKeyDown);
-        
+    }
+
+    /**
+     * Force-close the modal editor (commit pending changes). Called
+     * by the parent panel on tab-switch — the modal is portalled to
+     * document.body and would otherwise outlive our stage element.
+     */
+    public stopEditing(): void {
+        this.editingTeardown?.();
     }
 
     /** Current document — CanvasPanel reads this to persist. */
@@ -1050,9 +1066,10 @@ export class CanvasRenderer {
             }
         };
 
-        mountCardEditor(body, node.text, {
+        const handle = mountCardEditor(body, node.text, {
             onCommit: (nextText) => {
                 this.editingId = null;
+                this.editingTeardown = null;
                 restoreCardToStage();
                 backdrop.remove();
                 const idx = this.doc.nodes.findIndex((n) => n.id === id);
@@ -1070,6 +1087,9 @@ export class CanvasRenderer {
                 if (changed) this.commit();
             }
         });
+        // Force-commit hook — destroy() (tab-switch, canvas-swap) fires
+        // this so the modal never survives its owning panel.
+        this.editingTeardown = () => handle.destroy();
     }
 
     // ─── Pointer handling ───

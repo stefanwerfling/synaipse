@@ -51,6 +51,16 @@ export class CanvasPanel {
         this.renderer?.mount();
     }
 
+    /**
+     * Called by the App when the user tabs away from the canvas view.
+     * The renderer's modal editor is portalled to document.body so
+     * without this it would keep hovering over the next tab.
+     */
+    public onHide(): void {
+        this.renderer?.stopEditing();
+        this.flushSave();
+    }
+
     public destroy(): void {
         this.flushSave();
         this.renderer?.destroy();

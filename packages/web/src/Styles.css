@@ -6839,8 +6839,47 @@ button.typed-link-badge:hover {
     border-color: var(--border-soft);
 }
 
+.canvas-card-editor-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .canvas-card-editor-btn:active {
     background: var(--bg-1);
+}
+
+/* Coloured card → the toolbar wears a tint of the card colour, so
+   raise the button text to the highest-contrast slot and give the
+   button chrome a matching accent so hover/active read clearly. */
+.canvas-card[data-color] .canvas-card-editor-btn {
+    color: var(--text-0);
+}
+.canvas-card[data-color] .canvas-card-editor-btn:hover {
+    background: color-mix(in srgb, var(--card-color) 55%, var(--bg-3));
+    border-color: var(--card-color);
+}
+.canvas-card[data-color] .canvas-card-editor-btn:active {
+    background: color-mix(in srgb, var(--card-color) 30%, var(--bg-1));
+}
+
+/* Push the close button flush-right; on OneNote-scale toolbars the
+   spacer keeps everything else grouped left. */
+.canvas-card-editor-spacer {
+    flex: 1 1 auto;
+    min-width: 4px;
+}
+
+.canvas-card-editor-btn-close {
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 8px;
+    min-width: 24px;
+    color: var(--text-2);
+}
+.canvas-card-editor-btn-close:hover {
+    background: color-mix(in srgb, var(--danger, #e56565) 25%, var(--bg-3));
+    color: var(--text-0);
+    border-color: color-mix(in srgb, var(--danger, #e56565) 50%, var(--border-soft));
 }
 
 .canvas-card-editor {

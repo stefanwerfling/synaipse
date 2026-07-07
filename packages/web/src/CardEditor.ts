@@ -282,8 +282,13 @@ export const mountCardEditor = (
         if (btn === null) return;
         ev.preventDefault();
         ev.stopPropagation();
+        const cmd = btn.dataset.cmd ?? '';
+        if (cmd === 'close') {
+            doCommit();
+            return;
+        }
         surface.focus();
-        runCommand(btn.dataset.cmd ?? '', surface);
+        runCommand(cmd, surface);
     });
 
     // Paste as plain text — arbitrary HTML from external sources would
@@ -314,6 +319,38 @@ export const mountCardEditor = (
                 ev.preventDefault();
                 runCommand('link', surface);
             }
+        }
+    });
+
+    // Focus trap — keep Tab inside the editor+toolbar rather than
+    // spilling into the dimmed background UI. Bound on host so both
+    // toolbar buttons and the surface funnel through here.
+    host.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Tab') return;
+        const focusables = [
+            ...host.querySelectorAll<HTMLElement>('[data-cmd], [contenteditable="true"]')
+        ].filter((n) => !n.hasAttribute('disabled'));
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (first === undefined || last === undefined) return;
+        const active = document.activeElement;
+        if (ev.shiftKey && active === first) {
+            ev.preventDefault();
+            last.focus();
+        } else if (!ev.shiftKey && active === last) {
+            ev.preventDefault();
+            first.focus();
+        }
+    });
+
+    // Esc anywhere in the modal (toolbar buttons don't get the surface
+    // keydown) → commit. Guards against the caret being outside the
+    // contenteditable surface, e.g. right after clicking a button.
+    host.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && !committed) {
+            ev.preventDefault();
+            doCommit();
         }
     });
 
@@ -366,6 +403,19 @@ const buildToolbar = (): HTMLElement => {
         btn.dataset.cmd = b.cmd;
         bar.appendChild(btn);
     }
+
+    // Close pushed to the right — clear commit affordance so the user
+    // doesn't have to know about backdrop-click / Esc.
+    const spacer = el('div', {class: 'canvas-card-editor-spacer'});
+    bar.appendChild(spacer);
+    const close = el('button', {
+        class: 'canvas-card-editor-btn canvas-card-editor-btn-close',
+        attrs: {type: 'button', title: 'Close (Esc)', 'aria-label': 'Close'},
+        text: '×'
+    });
+    close.dataset.cmd = 'close';
+    bar.appendChild(close);
+
     return bar;
 };
 

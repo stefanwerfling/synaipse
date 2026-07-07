@@ -538,6 +538,9 @@ export class App {
         if (this.tab === 'chat') {
             this.chatPanel.onHide();
         }
+        if (this.tab === 'canvas') {
+            this.canvasPanel.onHide();
+        }
 
         this.tab = tab;
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
