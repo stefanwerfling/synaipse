@@ -586,30 +586,22 @@ body.sidebar-resizing {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-2);
-    margin-top: var(--space-4);
-    margin-bottom: var(--space-2);
+    /* NOTE: this element lives inside a virtualised list that
+       inline-styles `position:absolute; height:32px` on every row,
+       overriding any layout margin/sticky we'd try to add here. So no
+       vertical margins (they'd push the header down without moving
+       the next row's computed offset — the header would overlap the
+       first note) and no position:sticky (the inline absolute wins
+       specificity). The border-bottom is the section cap. */
+    padding: 0 var(--space-2);
     cursor: pointer;
     border-radius: 0;
     color: var(--text-2);
     transition: color var(--t-fast), background var(--t-fast);
     user-select: none;
-    /* Section cap between the folder label and the notes below.
-       Combined with a slightly larger top margin this gives every
-       group its own airspace, so the header no longer collides with
-       the first note. */
     border-bottom: 1px solid var(--border-soft);
-    /* Sticky while scrolling the list so the user always knows which
-       folder they're in — the bg keeps the tag/id lines from bleeding
-       through. */
-    position: sticky;
-    top: 0;
-    z-index: 5;
     background: var(--bg-1);
-}
-
-.note-group-header:first-child {
-    margin-top: 0;
+    box-sizing: border-box;
 }
 
 .note-group-header:hover {
@@ -872,11 +864,46 @@ body.sidebar-resizing {
 }
 
 .viewer-toc-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
-    padding: 0 var(--space-2);
+    padding: 4px var(--space-2);
+    background: transparent;
+    border: none;
+    border-radius: var(--r-1);
+    cursor: pointer;
+    font: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    transition: color var(--t-fast), background var(--t-fast);
+    text-align: left;
+    width: 100%;
+}
+
+.viewer-toc-head:hover {
+    color: var(--text-1);
+    background: var(--bg-2);
+}
+
+.viewer-toc-caret {
+    font-size: 10px;
+    line-height: 1;
+    transition: transform var(--t-base);
+    display: inline-block;
+    width: 10px;
+}
+
+.viewer-toc.collapsed .viewer-toc-caret {
+    transform: rotate(-90deg);
+}
+
+.viewer-toc.collapsed .viewer-toc-list {
+    display: none;
 }
 
 .viewer-toc-list {

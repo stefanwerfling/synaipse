@@ -43,18 +43,57 @@ export interface TocPanelOptions {
     onNavigate: (id: string) => void;
 }
 
+const TOC_COLLAPSED_KEY = 'synaipse-toc-collapsed';
+
 export class TocPanel {
     public readonly element: HTMLElement;
     private readonly list: HTMLElement;
+    private readonly head: HTMLElement;
     private readonly buttons = new Map<string, HTMLButtonElement>();
     private activeId: string | null = null;
+    private collapsed = false;
 
     public constructor(private readonly opts: TocPanelOptions) {
         this.list = el('ul', {class: 'viewer-toc-list'});
+        this.head = el('button', {
+            class: 'viewer-toc-head',
+            attrs: {type: 'button', 'aria-expanded': 'true', title: 'Toggle outline'}
+        },
+            el('span', {class: 'viewer-toc-caret', text: '▾'}),
+            el('span', {class: 'viewer-toc-head-label', text: 'On this page'})
+        );
+        this.head.addEventListener('click', () => this.toggle());
+
         this.element = el('aside', {class: 'viewer-toc', attrs: {'aria-label': 'Note outline'}},
-            el('div', {class: 'viewer-toc-head', text: 'On this page'}),
+            this.head,
             this.list
         );
+
+        // Restore prior collapse state. Fail-silent if localStorage is
+        // locked down (e.g. private mode) — the panel just starts open.
+        try {
+            if (window.localStorage.getItem(TOC_COLLAPSED_KEY) === '1') {
+                this.setCollapsed(true);
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+
+    private toggle(): void {
+        this.setCollapsed(!this.collapsed);
+    }
+
+    private setCollapsed(next: boolean): void {
+        if (this.collapsed === next) return;
+        this.collapsed = next;
+        this.element.classList.toggle('collapsed', next);
+        this.head.setAttribute('aria-expanded', next ? 'false' : 'true');
+        try {
+            window.localStorage.setItem(TOC_COLLAPSED_KEY, next ? '1' : '0');
+        } catch {
+            /* ignore */
+        }
     }
 
     public setEntries(entries: readonly TocEntry[]): void {
