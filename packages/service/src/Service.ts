@@ -67,7 +67,7 @@ export interface SnapshotEntry {
     type: 'file' | 'dir';
     sha: string;
 }
-import {createEmbedder, QdrantStore, VectorIndex} from '@synaipse/vector';
+import {createEmbedder, createReranker, QdrantStore, VectorIndex, type Reranker} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
@@ -277,6 +277,12 @@ export interface ServiceOverrides {
     history?: History;
     assetStore?: AssetStore;
     skipWatcher?: boolean;
+    /**
+     * Escape hatch for tests — inject a stub Reranker without spinning
+     * up ONNX runtime. `null` explicitly disables reranking; omit
+     * entirely to fall through to `createReranker(config)`.
+     */
+    reranker?: Reranker | null;
 }
 
 export class SynaipseService {
@@ -286,6 +292,10 @@ export class SynaipseService {
     private readonly history: History;
     private readonly assetStore: AssetStore;
     private readonly index: VectorIndex | null;
+    /** Optional cross-encoder that re-orders the top of RRF fusion. Null when disabled. */
+    private readonly reranker: Reranker | null;
+    /** How many hits to feed the reranker per query. Only used when reranker !== null. */
+    private readonly rerankTopN: number;
     private readonly watcher: VaultWatcher;
     private readonly skipWatcher: boolean;
     private readonly chats: ChatAdapter;
@@ -358,6 +368,9 @@ export class SynaipseService {
             this.embedderProviderId = null;
             this.embedderIsExternal = false;
         }
+
+        this.reranker = overrides.reranker ?? createReranker(config);
+        this.rerankTopN = config.reranker?.topN ?? 30;
 
         if (embedder === null) {
             this.index = null;
@@ -581,10 +594,88 @@ export class SynaipseService {
         const graph = this.buildGraphSignal([titles, sem, ft], limit);
         if (graph !== null) signals.push(graph);
 
-        return reciprocalRankFusion(signals, {
-            limit,
+        // Fusion runs at a widened budget when reranking so the cross-
+        // encoder gets more candidates to reorder — otherwise it can
+        // only shuffle within a set that fusion already trimmed.
+        const fusionLimit = this.reranker !== null
+            ? Math.max(limit, this.rerankTopN)
+            : limit;
+        const fused = reciprocalRankFusion(signals, {
+            limit: fusionLimit,
             weightFor: defaultDemote((id) => this.notes.tryGet(id))
         });
+
+        if (this.reranker === null || fused.length === 0) {
+            return fused.slice(0, limit);
+        }
+
+        return this.rerankHits(query, fused, limit);
+    }
+
+    /**
+     * Cross-encoder re-rank of the top-N RRF hits. Each hit is paired
+     * with a passage (its snippet, or a title + content prefix when the
+     * signal didn't populate one), and the whole batch is scored in
+     * one model call. The final ordering uses the reranker score; the
+     * previous fusion components stay on the hit for `explain` output.
+     */
+    private async rerankHits(
+        query: string,
+        fused: readonly SearchHit[],
+        limit: number
+    ): Promise<SearchHit[]> {
+        if (this.reranker === null) return fused.slice(0, limit);
+
+        const window = fused.slice(0, this.rerankTopN);
+        const rest = fused.slice(this.rerankTopN);
+
+        const passages = window.map((hit) => this.passageFor(hit));
+
+        let scores: number[];
+        try {
+            scores = await this.reranker.score(query, passages);
+        } catch (error) {
+            // Rerank is optional — if the model errors we return the
+            // pre-rerank fusion order rather than blowing up the whole
+            // search. Log once so it doesn't go silent.
+            process.stderr.write(`[synaipse] reranker failed, falling back to fusion order: ${
+                error instanceof Error ? error.message : String(error)
+            }\n`);
+            return fused.slice(0, limit);
+        }
+
+        const scored = window.map((hit, i) => ({hit, score: scores[i] ?? 0, origRank: i + 1}));
+        scored.sort((a, b) => b.score - a.score);
+
+        const reranked: SearchHit[] = scored.map((entry, idx) => ({
+            ...entry.hit,
+            score: entry.score,
+            components: {
+                ...(entry.hit.components ?? {}),
+                rerank: {score: entry.score, rank: idx + 1}
+            }
+        }));
+
+        // Anything past the rerank window keeps its fusion order at the
+        // bottom of the list — the reranker can't have opinions about
+        // hits it never saw, so we don't reshuffle them.
+        return [...reranked, ...rest].slice(0, limit);
+    }
+
+    /**
+     * Build the passage that goes to the cross-encoder for a given hit.
+     * Prefer the snippet (semantic hits carry chunk text), fall back to
+     * title + note prefix (fulltext/title/graph hits often carry no
+     * snippet). Caps prefix at ~1000 chars so we don't pathologically
+     * blow past the reranker's max_length on long notes.
+     */
+    private passageFor(hit: SearchHit): string {
+        if (hit.snippet !== undefined && hit.snippet.length > 0) {
+            return hit.snippet;
+        }
+        const note = this.notes.tryGet(hit.noteId);
+        const body = note?.content.slice(0, 1000) ?? '';
+        return `${hit.title}\n\n${body}`.trim();
     }
 
     /**

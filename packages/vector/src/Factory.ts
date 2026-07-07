@@ -4,6 +4,8 @@ import type {Embedder} from './Embedder.js';
 import {OllamaEmbedder} from './Ollama.js';
 import {VoyageEmbedder} from './Embeddings.js';
 import {HuggingFaceEmbedder} from './HuggingFace.js';
+import type {Reranker} from './Reranker.js';
+import {HuggingFaceReranker} from './Reranker.js';
 
 const VOYAGE_DIMS: Record<string, number> = {
     'voyage-3-large': 1024,
@@ -94,4 +96,25 @@ export const createEmbedder = (config: Config): Embedder | null => {
     }
 
     throw new ConfigError(`unknown embeddings provider: ${String(provider)}`);
+};
+
+/**
+ * Cross-encoder reranker — independent of the embedder. Users can pair
+ * a hosted embedder (voyage) with a local reranker (huggingface) so
+ * only the retrieval-heavy path hits the API, and the precision-tune
+ * runs on-device. Returns null when disabled (default, no config).
+ */
+export const createReranker = (config: Config): Reranker | null => {
+    const cfg = config.reranker;
+    if (cfg === undefined) return null;
+
+    if (cfg.provider === 'none') return null;
+
+    if (cfg.provider === 'huggingface') {
+        return new HuggingFaceReranker({
+            model: cfg.model ?? 'Xenova/ms-marco-MiniLM-L-6-v2'
+        });
+    }
+
+    throw new ConfigError(`unknown reranker provider: ${String(cfg.provider)}`);
 };

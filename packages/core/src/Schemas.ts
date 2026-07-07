@@ -124,6 +124,19 @@ export const ConfigSchema = Vts.object({
     huggingface: Vts.optional(Vts.object({
         model: Vts.string()
     })),
+    /**
+     * Optional cross-encoder that re-ranks the top-N hits from the
+     * hybrid RRF fusion. Independent from `embeddings.provider` — a
+     * voyage embedder can still use a local huggingface reranker.
+     */
+    reranker: Vts.optional(Vts.object({
+        provider: Vts.or([
+            Vts.equal('huggingface' as const),
+            Vts.equal('none' as const)
+        ]),
+        model: Vts.optional(Vts.string()),
+        topN: Vts.optional(Vts.number())
+    })),
     qdrant: Vts.object({
         url: Vts.string(),
         apiKey: Vts.optional(Vts.string()),

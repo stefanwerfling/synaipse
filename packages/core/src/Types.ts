@@ -87,7 +87,7 @@ export interface SearchQuery {
     paths?: string[];
 }
 
-export type SearchSignalName = 'fulltext' | 'title' | 'semantic' | 'graph';
+export type SearchSignalName = 'fulltext' | 'title' | 'semantic' | 'graph' | 'rerank';
 
 export interface SearchSignalComponent {
     /**
@@ -109,6 +109,13 @@ export interface SearchHitComponents {
      * higher. Only present in hybrid mode when at least one seed exists.
      */
     graph?: SearchSignalComponent;
+    /**
+     * Cross-encoder rerank score, when a Reranker is configured. This
+     * component OVERRIDES the ordering — the final `score` is the
+     * rerank logit, and the fusion score is preserved here in the
+     * other components for debugging.
+     */
+    rerank?: SearchSignalComponent;
     /**
      * Multiplier applied after fusion (e.g. crawler-index demotion).
      * Only present when < 1. Final score = sum(1/(k+rank)) × demote.

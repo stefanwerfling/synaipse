@@ -117,6 +117,27 @@ const parseExcludePrefixes = (raw: string | undefined): string[] => {
     return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
 };
 
+const buildRerankerConfig = (env: NodeJS.ProcessEnv): {
+    provider: 'huggingface' | 'none';
+    model?: string;
+    topN?: number;
+} | null => {
+    const raw = env.RERANKER_PROVIDER?.trim().toLowerCase();
+    if (raw === undefined || raw === '' || raw === 'none') return null;
+
+    if (raw === 'huggingface') {
+        return {
+            provider: 'huggingface',
+            model: env.RERANKER_MODEL?.trim() ?? 'Xenova/ms-marco-MiniLM-L-6-v2',
+            ...(env.RERANKER_TOP_N !== undefined && env.RERANKER_TOP_N !== ''
+                ? {topN: int('RERANKER_TOP_N', env.RERANKER_TOP_N, 30)}
+                : {})
+        };
+    }
+
+    throw new ConfigError(`RERANKER_PROVIDER must be one of huggingface|none, got: ${raw}`);
+};
+
 type ChatProviderKind = 'ollama' | 'openai' | 'anthropic' | 'claude-shell';
 
 const resolveChatProvider = (env: NodeJS.ProcessEnv): ChatProviderKind => {
@@ -293,7 +314,8 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
         ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {}),
         ...(parseExcludePrefixes(env.SYNAIPSE_EMBED_EXCLUDE_PREFIXES).length > 0
             ? {embedExcludePrefixes: parseExcludePrefixes(env.SYNAIPSE_EMBED_EXCLUDE_PREFIXES)}
-            : {})
+            : {}),
+        ...(buildRerankerConfig(env) !== null ? {reranker: buildRerankerConfig(env)!} : {})
     };
 
     const errors: SchemaErrors = [];
