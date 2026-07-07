@@ -440,6 +440,14 @@ body {
     grid-template-columns: var(--sidebar-w, 320px) 220px 1fr;
 }
 
+/* Collapsed TOC → shrink the whole column so the note gets its width
+   back. The rail keeps just enough room for the caret toggle so the
+   user can re-expand without hunting for the control. `:has()` avoids
+   an extra callback wiring TocPanel state up to the app root. */
+.app.has-toc:has(.viewer-toc.collapsed) {
+    grid-template-columns: var(--sidebar-w, 320px) 32px 1fr;
+}
+
 @media (max-width: 1200px) {
     .app.has-toc {
         grid-template-columns: var(--sidebar-w, 320px) 1fr;
@@ -896,6 +904,22 @@ body.sidebar-resizing {
     transition: transform var(--t-base);
     display: inline-block;
     width: 10px;
+}
+
+.viewer-toc.collapsed {
+    /* Shrink to a rail so the note next to us gets its width back. The
+       parent grid column follows via `:has()` up above. */
+    padding: var(--space-4) 4px;
+    overflow: hidden;
+}
+
+.viewer-toc.collapsed .viewer-toc-head {
+    padding: 4px 6px;
+    justify-content: center;
+}
+
+.viewer-toc.collapsed .viewer-toc-head-label {
+    display: none;
 }
 
 .viewer-toc.collapsed .viewer-toc-caret {
