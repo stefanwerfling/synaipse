@@ -434,14 +434,41 @@ export const activityApi = {
     }
 };
 
-export type JobType = 'relink' | 'compile';
+export type JobType = 'relink' | 'compile' | 'crawl-gitea';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
+
+export type GiteaIssueState = 'open' | 'closed' | 'all';
+
+export interface RelinkJobParams {
+    prefix: string;
+    force?: boolean;
+    useLlm?: boolean;
+    limit?: number;
+}
+
+export interface CompileJobParams {
+    prefix: string;
+    force?: boolean;
+    limit?: number;
+}
+
+export interface CrawlGiteaJobParams {
+    baseUrl: string;
+    owner: string;
+    repo: string;
+    project: string;
+    token?: string;
+    state?: GiteaIssueState;
+    since?: string;
+}
+
+export type JobParams = RelinkJobParams | CompileJobParams | CrawlGiteaJobParams;
 
 export interface JobRecord {
     id: string;
     type: JobType;
-    params: {prefix: string; force?: boolean; useLlm?: boolean; limit?: number};
+    params: JobParams;
     status: JobStatus;
     progress: {done: number; total: number; failed: number; current?: string};
     startedAt: number;
@@ -462,7 +489,7 @@ export type JobEvent =
 export const jobsApi = {
     list: async (): Promise<JobRecord[]> => json(await fetch('/api/jobs')),
     get: async (id: string): Promise<JobRecord> => json(await fetch(`/api/jobs/${encodeURIComponent(id)}`)),
-    start: async (type: JobType, params: JobRecord['params']): Promise<JobRecord> => {
+    start: async (type: JobType, params: JobParams): Promise<JobRecord> => {
         const response = await fetch('/api/jobs', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

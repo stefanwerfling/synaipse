@@ -9,6 +9,7 @@
   "include": ["src/**/*", "server/**/*"],
   "references": [
     { "path": "../core" },
+    { "path": "../crawler" },
     { "path": "../mcp-server" },
     { "path": "../server-storage" },
     { "path": "../service" },

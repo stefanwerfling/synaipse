@@ -1,4 +1,10 @@
-import {jobsApi, type JobRecord, type JobType} from './Api.js';
+import {
+    jobsApi,
+    type CrawlGiteaJobParams,
+    type JobParams,
+    type JobRecord,
+    type JobType
+} from './Api.js';
 import {clear, el} from './Dom.js';
 
 /**
@@ -99,6 +105,104 @@ export class JobsPanel {
         for (const spec of LAUNCHERS) {
             this.launcherHost.appendChild(this.renderLauncherCard(spec));
         }
+
+        this.launcherHost.appendChild(this.renderGiteaLauncherCard());
+    }
+
+    private renderGiteaLauncherCard(): HTMLElement {
+        const mkInput = (placeholder: string, type = 'text'): HTMLInputElement =>
+            el('input', {class: 'job-input', attrs: {type, placeholder}}) as HTMLInputElement;
+
+        const baseUrlInput = mkInput('https://gitea.example.com');
+        const ownerInput = mkInput('owner-or-org');
+        const repoInput = mkInput('repository');
+        const projectInput = mkInput('memory project name');
+        const tokenInput = mkInput('optional — required for private repos', 'password');
+
+        const stateSelect = el('select', {class: 'job-input'},
+            el('option', {attrs: {value: 'open'}, text: 'open'}),
+            el('option', {attrs: {value: 'closed'}, text: 'closed'}),
+            el('option', {attrs: {value: 'all'}, text: 'all'})
+        ) as HTMLSelectElement;
+
+        const startBtn = el('button', {
+            class: 'btn btn-primary job-start-btn',
+            attrs: {type: 'button'},
+            text: 'Start'
+        }) as HTMLButtonElement;
+
+        startBtn.addEventListener('click', () => {
+            const baseUrl = baseUrlInput.value.trim();
+            const owner = ownerInput.value.trim();
+            const repo = repoInput.value.trim();
+            const project = projectInput.value.trim();
+            const token = tokenInput.value.trim();
+            const state = stateSelect.value as CrawlGiteaJobParams['state'];
+
+            if (baseUrl === '' || owner === '' || repo === '' || project === '') {
+                window.alert('Base URL, owner, repo and project are required.');
+                return;
+            }
+
+            const params: CrawlGiteaJobParams = {baseUrl, owner, repo, project};
+            if (token !== '') params.token = token;
+            if (state !== undefined) params.state = state;
+
+            void this.launch('crawl-gitea', params);
+        });
+
+        const optionsHost = el('div', {class: 'job-form', attrs: {hidden: 'true'}},
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Base URL'}),
+                baseUrlInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Owner (user or org)'}),
+                ownerInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Repository'}),
+                repoInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Project (target folder + frontmatter.project)'}),
+                projectInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'API token (optional)'}),
+                tokenInput
+            ),
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Issue state'}),
+                stateSelect
+            )
+        );
+
+        const optionsToggle = el('button', {
+            class: 'job-options-toggle',
+            attrs: {type: 'button'},
+            text: '⚙ Options'
+        });
+
+        optionsToggle.addEventListener('click', () => {
+            const hidden = optionsHost.hasAttribute('hidden');
+            if (hidden) optionsHost.removeAttribute('hidden');
+            else optionsHost.setAttribute('hidden', 'true');
+        });
+
+        return el('div', {class: 'job-card'},
+            el('div', {class: 'job-card-head'},
+                el('h3', {text: 'Crawl Gitea issues'}),
+                el('p', {
+                    text: 'Pulls open (or closed / all) issues from a Gitea repository into '
+                        + 'Crawler/Gitea/<project>/. Each note is written with mcp_consent: pending — '
+                        + 'Claude has to wait for your approve/deny in the Consent Inbox before reading '
+                        + 'the note over MCP. Todo lines land in synaipse_todos.'
+                })
+            ),
+            el('div', {class: 'job-actions'}, optionsToggle, startBtn),
+            optionsHost
+        );
     }
 
     private renderLauncherCard(spec: LaunchSpec): HTMLElement {
@@ -173,7 +277,7 @@ export class JobsPanel {
         return card;
     }
 
-    private async launch(type: JobType, params: JobRecord['params']): Promise<void> {
+    private async launch(type: JobType, params: JobParams): Promise<void> {
         try {
             const job = await jobsApi.start(type, params);
             this.upsertJob(job);
@@ -181,6 +285,14 @@ export class JobsPanel {
         } catch (cause) {
             window.alert(`Failed to start job: ${cause instanceof Error ? cause.message : String(cause)}`);
         }
+    }
+
+    private paramSummary(job: JobRecord): string {
+        if (job.type === 'crawl-gitea') {
+            const p = job.params as CrawlGiteaJobParams;
+            return `${p.owner}/${p.repo} → ${p.project}`;
+        }
+        return (job.params as {prefix: string}).prefix;
     }
 
     private async refresh(): Promise<void> {
@@ -234,7 +346,7 @@ export class JobsPanel {
         const element = el('div', {class: 'job-record'},
             el('div', {class: 'job-record-head'},
                 el('span', {class: 'job-record-type', text: job.type}),
-                el('span', {class: 'job-record-prefix', text: job.params.prefix}),
+                el('span', {class: 'job-record-prefix', text: this.paramSummary(job)}),
                 el('span', {class: `job-record-status status-${job.status}`, text: job.status}),
                 stopBtn
             ),

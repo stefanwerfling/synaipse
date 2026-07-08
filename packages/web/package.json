@@ -16,6 +16,7 @@
   "dependencies": {
     "@antv/infographic": "^0.2.19",
     "@synaipse/core": "*",
+    "@synaipse/crawler": "*",
     "@synaipse/mcp-server": "*",
     "@synaipse/server-storage": "*",
     "@synaipse/service": "*",

@@ -651,8 +651,8 @@ export const routes = (
         if (method === 'POST') {
             const body = await readJson<{type?: unknown; params?: unknown}>(req);
 
-            if (body.type !== 'relink' && body.type !== 'compile') {
-                json(res, 400, {error: "field 'type' must be 'relink' or 'compile'"});
+            if (body.type !== 'relink' && body.type !== 'compile' && body.type !== 'crawl-gitea') {
+                json(res, 400, {error: "field 'type' must be 'relink', 'compile' or 'crawl-gitea'"});
                 return;
             }
 
@@ -663,7 +663,14 @@ export const routes = (
 
             const params = body.params as Record<string, unknown>;
 
-            if (typeof params.prefix !== 'string') {
+            if (body.type === 'crawl-gitea') {
+                for (const key of ['baseUrl', 'owner', 'repo', 'project'] as const) {
+                    if (typeof params[key] !== 'string' || (params[key] as string).length === 0) {
+                        json(res, 400, {error: `params.${key} must be a non-empty string`});
+                        return;
+                    }
+                }
+            } else if (typeof params.prefix !== 'string') {
                 json(res, 400, {error: "params.prefix must be a string (empty = all notes)"});
                 return;
             }
