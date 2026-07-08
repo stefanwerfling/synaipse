@@ -98,6 +98,8 @@ const {NoopHistory} = await import('@synaipse/vault');
 const {routes} = await import('./routes.js');
 const {EventBroadcaster} = await import('./events.js');
 const {JobManager} = await import('./jobs.js');
+const {LocalScheduleStore} = await import('./local-schedule-store.js');
+const {Scheduler} = await import('./scheduler.js');
 
 const config = loadConfigFromEnv();
 
@@ -181,11 +183,21 @@ const main = async (): Promise<void> => {
 
     const broadcaster = new EventBroadcaster();
     const jobs = new JobManager(service);
+
+    // Scheduler for recurring jobs (crawl-gitea, relink, compile). Local
+    // mode uses a JSON sidecar; server-mode's MariaDBScheduleStore is
+    // planned for Slice 3b and falls back to the local store for now.
+    const scheduleStore = new LocalScheduleStore(config.schedulesPath);
+    const scheduler = new Scheduler(scheduleStore, jobs);
+    scheduler.start();
+
     const handle = routes(service, broadcaster, jobs, {
         mode: config.mode === 'server' ? 'server' : 'local',
         auth,
         userStore,
-        config
+        config,
+        scheduleStore,
+        scheduler
     });
 
     service.onVaultChange((event) => {
@@ -261,6 +273,8 @@ const main = async (): Promise<void> => {
     const shutdown = async (signal: string): Promise<void> => {
         process.stdout.write(`[synaipse-web-api] ${signal} — shutting down\n`);
         try {
+            scheduler.stop();
+            await scheduleStore.close();
             server.close();
             await service.stop();
             await closeAdapters();

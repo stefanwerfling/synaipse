@@ -195,3 +195,55 @@ export interface AccountStore {
     touchLastLogin(id: number): Promise<void>;
     close(): Promise<void>;
 }
+
+/**
+ * Scheduled recurring job (Slice 3 of Jobs-Aufarbeitung). Persisted so
+ * a server restart doesn't lose the user's cron config. `jobType` +
+ * `jobParams` are stored as opaque strings so this interface stays
+ * decoupled from the web/server JobType union; the runner
+ * (packages/web/server/scheduler.ts) casts them at fire-time.
+ *
+ * The cron expression uses a deliberately tiny grammar for v1:
+ *   - "every Nh"        — fire every N hours, first N hours after createdAt
+ *   - "daily HH:MM"     — fire once per day at HH:MM local time
+ *
+ * See ScheduleStore below for the storage port.
+ */
+export interface Schedule {
+    id: string;
+    name: string;
+    jobType: string;
+    /** JSON-serialized job params; the runner deserializes + casts to JobParams. */
+    jobParams: string;
+    cron: string;
+    enabled: boolean;
+    createdAt: number;
+    lastRun?: number;
+    lastResult?: 'ok' | 'error' | 'stopped';
+    nextRun?: number;
+}
+
+export interface ScheduleInput {
+    name: string;
+    jobType: string;
+    jobParams: string;
+    cron: string;
+    enabled?: boolean;
+}
+
+/**
+ * Storage port for scheduled jobs. Implementations:
+ * - LocalScheduleStore (packages/web/server/local-schedule-store.ts)
+ *   — JSON sidecar under `${vaultPath}/.synaipse-schedules.json`
+ * - MariaDBScheduleStore (@synaipse/server-storage, planned Slice 3b)
+ *   — backed by a `schedules` table analogous to `users`
+ */
+export interface ScheduleStore {
+    list(): Promise<Schedule[]>;
+    get(id: string): Promise<Schedule | null>;
+    create(input: ScheduleInput): Promise<Schedule>;
+    /** Patch a subset of fields. Returns null if no row with that id. */
+    update(id: string, patch: Partial<Omit<Schedule, 'id' | 'createdAt'>>): Promise<Schedule | null>;
+    delete(id: string): Promise<boolean>;
+    close(): Promise<void>;
+}

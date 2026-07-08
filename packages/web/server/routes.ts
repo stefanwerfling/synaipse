@@ -3,7 +3,7 @@ import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
-import type {Config, Frontmatter} from '@synaipse/core';
+import type {Config, Frontmatter, ScheduleStore} from '@synaipse/core';
 import {parseCanvas} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
@@ -15,6 +15,8 @@ import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-r
 import {handleTokensRoute} from './tokens-routes.js';
 import {handleAdminRoute} from './admin-routes.js';
 import {handleConsentRoute} from './consent-routes.js';
+import {handleSchedulesRoute} from './schedules-routes.js';
+import type {Scheduler} from './scheduler.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -258,6 +260,13 @@ export interface RoutesOptions {
      * "no auth configured" and lets requests through).
      */
     config?: Config;
+    /**
+     * Persistent store for /api/schedules CRUD. Optional so tests can
+     * skip the scheduler surface; when both are undefined the routes
+     * respond with 501 for any /api/schedules path.
+     */
+    scheduleStore?: ScheduleStore;
+    scheduler?: Scheduler;
 }
 
 export const routes = (
@@ -306,6 +315,18 @@ export const routes = (
     if (path.startsWith('/api/consent')) {
         const consentResult = await handleConsentRoute(req, res, url, service);
         if (consentResult.handled) return;
+    }
+
+    // Scheduled recurring jobs (Slice 3). When the runner + store are
+    // not wired (test invocations), fall through to 501 so the caller
+    // sees the surface exists but isn't available in this deployment.
+    if (path.startsWith('/api/schedules')) {
+        if (opts.scheduleStore === undefined || opts.scheduler === undefined) {
+            json(res, 501, {error: 'schedules API is not enabled in this deployment'});
+            return;
+        }
+        const schedResult = await handleSchedulesRoute(req, res, url, opts.scheduleStore, opts.scheduler);
+        if (schedResult.handled) return;
     }
 
     if (path === '/api/events/stream') {
