@@ -1,8 +1,97 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
-import type {SearchMode} from '@synaipse/core';
+import type {Note, SearchMode} from '@synaipse/core';
 import {extractTypedLinks} from '@synaipse/core';
-import {SynaipseService, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
+import {SynaipseService, getAuditTokenLabel, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
+
+const CONSENT_TIMEOUT_MS = 60_000;
+
+/**
+ * Enforce just-in-time consent for note reads triggered by MCP. When
+ * the note's `frontmatter.mcp_consent === "pending"`, the tool handler
+ * blocks up to CONSENT_TIMEOUT_MS on a UI-side approve/deny before
+ * returning the note or throwing.
+ *
+ * Callers that don't require the whole note (list/aggregate tools)
+ * MUST NOT go through this path; they use {@link filterByConsent}
+ * instead, which silently drops pending/denied entries.
+ */
+const enforceReadConsent = async (service: SynaipseService, id: string): Promise<Note> => {
+    const initial = service.readNote(id);
+    const status = initial.frontmatter.mcp_consent;
+
+    if (status === undefined || status === 'granted') {
+        return initial;
+    }
+
+    if (status === 'denied') {
+        throw new Error(`Note "${id}" is denied for MCP access by user consent.`);
+    }
+
+    // status === 'pending' → long-poll the UI
+    const requester = getAuditTokenLabel() ?? 'unknown';
+    const result = await service.getConsentStore().request(id, requester, CONSENT_TIMEOUT_MS);
+
+    if (result === 'timeout') {
+        throw new Error(`Note "${id}" needs user consent before MCP can read it. Prompt is pending in the UI; retry the tool call in a moment.`);
+    }
+
+    if (result === 'denied') {
+        throw new Error(`Note "${id}" was denied by user consent.`);
+    }
+
+    // Approved. service.resolveConsent already wrote the decision to
+    // frontmatter; re-read so the returned note reflects the new state.
+    return service.readNote(id);
+};
+
+/**
+ * Silently drop notes that are consent-blocked (pending or denied)
+ * from aggregate result lists. Notes without an `mcp_consent` field
+ * pass through unchanged — the consent layer is opt-in per note.
+ * Returns the filtered list plus the number that were removed so
+ * callers can surface a `skippedByConsent` count.
+ */
+const filterByConsent = <T>(
+    service: SynaipseService,
+    items: readonly T[],
+    getId: (item: T) => string
+): {items: T[]; skipped: number} => {
+    const kept: T[] = [];
+    let skipped = 0;
+
+    for (const item of items) {
+        const id = getId(item);
+        const note = service.tryReadNote(id);
+        const status = note?.frontmatter.mcp_consent;
+        if (status === 'pending' || status === 'denied') {
+            skipped++;
+            continue;
+        }
+        kept.push(item);
+    }
+
+    return {items: kept, skipped};
+};
+
+/**
+ * Same as {@link filterByConsent} for lists of Note objects.
+ */
+const filterNotesByConsent = (
+    notes: readonly Note[]
+): {items: Note[]; skipped: number} => {
+    const kept: Note[] = [];
+    let skipped = 0;
+    for (const note of notes) {
+        const status = note.frontmatter.mcp_consent;
+        if (status === 'pending' || status === 'denied') {
+            skipped++;
+            continue;
+        }
+        kept.push(note);
+    }
+    return {items: kept, skipped};
+};
 
 const DEFAULT_ASSET_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -217,13 +306,16 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const query = asString(args.query, 'query');
             const explain = args.explain === true;
-            const raw = await service.search(query, asSearchMode(args.mode), asNumber(args.limit, 10));
-            const hits = explain
+            const raw = await service.search(query, asSearchMode(args.mode), asNumber(args.limit, 10));const stripped = explain
                 ? raw
                 : raw.map(({components: _components, ...rest}) => rest);
+            const filtered = filterByConsent(service, stripped, (h) => h.noteId);
             return {
-                response: ok({hits}),
-                event: {kind: 'search', touched: hits.slice(0, 5).map((h) => h.noteId), query}
+                response: ok({
+                    hits: filtered.items,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'search', touched: filtered.items.slice(0, 5).map((h) => h.noteId), query}
             };
         }
     },
@@ -241,7 +333,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         },
         handle: async (args) => {
             const id = asString(args.id, 'id');
-            const note = service.readNote(id);
+            const note = await enforceReadConsent(service, id);
             return {response: ok({note}), event: {kind: 'read', touched: [id]}};
         }
     },
@@ -344,12 +436,19 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             const prefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
             const limit = asNumber(args.limit, 200);
 
-            const notes = service.listNotes()
-                .filter((n) => n.id.startsWith(prefix))
+            const raw = service.listNotes().filter((n) => n.id.startsWith(prefix));
+            const filtered = filterNotesByConsent(raw);
+            const notes = filtered.items
                 .slice(0, limit)
                 .map((n) => ({id: n.id, title: n.title, tags: n.tags, mtime: n.mtime}));
 
-            return {response: ok({notes}), event: {kind: 'list', touched: []}};
+            return {
+                response: ok({
+                    notes,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: []}
+            };
         }
     },
     {
@@ -380,11 +479,18 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const tag = asString(args.tag, 'tag');
             const ids = service.tags().get(tag) ?? [];
-            const notes = ids
-                .map((id) => service.getVault().tryGet(id))
-                .filter((n): n is NonNullable<typeof n> => n !== undefined)
-                .map((n) => ({id: n.id, title: n.title, tags: n.tags}));
-            return {response: ok({notes}), event: {kind: 'list', touched: ids.slice(0, 10)}};
+            const raw = ids
+                .map((id) => service.tryReadNote(id))
+                .filter((n): n is NonNullable<typeof n> => n !== undefined);
+            const filtered = filterNotesByConsent(raw);
+            const notes = filtered.items.map((n) => ({id: n.id, title: n.title, tags: n.tags}));
+            return {
+                response: ok({
+                    notes,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: ids.slice(0, 10)}
+            };
         }
     },
     {
@@ -402,7 +508,14 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const id = asString(args.id, 'id');
             const backlinks = service.backlinks(id);
-            return {response: ok({backlinks}), event: {kind: 'list', touched: [id, ...backlinks.slice(0, 5)]}};
+            const filtered = filterByConsent(service, backlinks, (b) => b);
+            return {
+                response: ok({
+                    backlinks: filtered.items,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: [id, ...backlinks.slice(0, 5)]}
+            };
         }
     },
     {
@@ -419,7 +532,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         },
         handle: async (args) => {
             const id = asString(args.id, 'id');
-            const note = service.readNote(id);
+            const note = await enforceReadConsent(service, id);
             const typed = extractTypedLinks(note.frontmatter);
             return {
                 response: ok({wikilinks: note.wikilinks, typed}),
@@ -510,10 +623,14 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         },
         handle: async (args) => {
             const id = asString(args.id, 'id');
-            const related = await service.related(id, asNumber(args.limit, 10));
+            const raw = await service.related(id, asNumber(args.limit, 10));
+            const filtered = filterByConsent(service, raw, (r) => r.id);
             return {
-                response: ok({related}),
-                event: {kind: 'search', touched: [id, ...related.slice(0, 5).map((r) => r.id)]}
+                response: ok({
+                    related: filtered.items,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'search', touched: [id, ...filtered.items.slice(0, 5).map((r) => r.id)]}
             };
         }
     },
@@ -559,10 +676,15 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const prefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
             const includeDone = args.includeDone === true;
-            const todos = service.todos(prefix, includeDone);
+            const raw = service.todos(prefix, includeDone);
+            const filtered = filterByConsent(service, raw, (t) => t.noteId);
             return {
-                response: ok({todos, count: todos.length}),
-                event: {kind: 'list', touched: [...new Set(todos.slice(0, 10).map((t) => t.noteId))]}
+                response: ok({
+                    todos: filtered.items,
+                    count: filtered.items.length,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: [...new Set(filtered.items.slice(0, 10).map((t) => t.noteId))]}
             };
         }
     },
@@ -583,10 +705,16 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             const olderThanDays = typeof args.olderThanDays === 'number' ? args.olderThanDays : 90;
             const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
             const limit = asNumber(args.limit, 100);
-            const notes = service.staleNotes({olderThanDays, pathPrefix, limit});
+            const raw = service.staleNotes({olderThanDays, pathPrefix, limit});
+            const filtered = filterByConsent(service, raw, (n) => n.id);
             return {
-                response: ok({notes, count: notes.length, olderThanDays}),
-                event: {kind: 'list', touched: notes.slice(0, 5).map((n) => n.id)}
+                response: ok({
+                    notes: filtered.items,
+                    count: filtered.items.length,
+                    olderThanDays,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: filtered.items.slice(0, 5).map((n) => n.id)}
             };
         }
     },
@@ -669,10 +797,18 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         handle: async (args) => {
             const limit = asNumber(args.limit, 20);
             const sorted = [...service.listNotes()]
-                .sort((a, b) => b.mtime - a.mtime)
-                .slice(0, limit);
-            const notes = sorted.map((n) => ({id: n.id, title: n.title, mtime: n.mtime}));
-            return {response: ok({notes}), event: {kind: 'list', touched: sorted.slice(0, 5).map((n) => n.id)}};
+                .sort((a, b) => b.mtime - a.mtime);
+            const filtered = filterNotesByConsent(sorted);
+            const notes = filtered.items
+                .slice(0, limit)
+                .map((n) => ({id: n.id, title: n.title, mtime: n.mtime}));
+            return {
+                response: ok({
+                    notes,
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: notes.slice(0, 5).map((n) => n.id)}
+            };
         }
     },
     {
@@ -693,9 +829,18 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             const topic = typeof args.topic === 'string' ? args.topic : '';
             const includeCrawler = args.includeCrawler === true;
             const result = await service.prime({project: ctx?.project ?? null, limit, topic, includeCrawler});
+            const filteredCtx = filterByConsent(service, result.context, (e) => e.id);
+            const filteredTodos = filterByConsent(service, result.todoSample, (t) => t.noteId);
+            const skipped = filteredCtx.skipped + filteredTodos.skipped;
+            const primed = {
+                ...result,
+                context: filteredCtx.items,
+                todoSample: filteredTodos.items,
+                ...(skipped > 0 ? {skippedByConsent: skipped} : {})
+            };
             return {
-                response: ok(result),
-                event: {kind: 'list', touched: result.context.slice(0, 5).map((e) => e.id)}
+                response: ok(primed),
+                event: {kind: 'list', touched: primed.context.slice(0, 5).map((e) => e.id)}
             };
         }
     }

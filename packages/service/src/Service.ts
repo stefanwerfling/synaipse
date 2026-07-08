@@ -14,6 +14,7 @@ import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
 import {AuditLog, type AuditEntry} from './AuditLog.js';
 import {getAuditTokenLabel} from './AuditContext.js';
+import {ConsentStore, type ConsentDecision, type ConsentRequest} from './ConsentStore.js';
 import {
     renderRelatedSection,
     runRelink,
@@ -300,6 +301,7 @@ export class SynaipseService {
     private readonly skipWatcher: boolean;
     private readonly chats: ChatAdapter;
     private readonly auditLog: AuditLog;
+    private readonly consentStore = new ConsentStore();
     private readonly fulltextIndex = new InvertedIndex();
     private readonly project: string | null;
     private readonly configProjectExtraTags: readonly string[];
@@ -2121,6 +2123,16 @@ export class SynaipseService {
         return note;
     }
 
+    /**
+     * Non-throwing variant of {@link readNote}. Returns undefined when
+     * the id is unknown. Does NOT record access — used by lookups that
+     * are auxiliary to the caller's real intent (e.g. consent-filtering
+     * hit lists, where we just need to peek at frontmatter).
+     */
+    public tryReadNote(id: NoteId): Note | undefined {
+        return this.notes.tryGet(id);
+    }
+
     public listNotes(): Note[] {
         return this.notes.list();
     }
@@ -2143,6 +2155,52 @@ export class SynaipseService {
 
     public tags(): Map<string, NoteId[]> {
         return this.notes.tags();
+    }
+
+    /**
+     * The just-in-time consent broker. MCP tool handlers use this to
+     * long-poll the UI when a note carries `frontmatter.mcp_consent === "pending"`.
+     * Web routes use it to list pending requests and forward approve/deny.
+     */
+    public getConsentStore(): ConsentStore {
+        return this.consentStore;
+    }
+
+    /**
+     * Approve or deny a pending consent request. Resolves the store
+     * side (releases the long-poll on the MCP tool handler) and
+     * persists the decision into the note's frontmatter so subsequent
+     * MCP reads skip the prompt.
+     *
+     * Returns null when the request id is unknown or already resolved
+     * (idempotent double-click safety).
+     */
+    public async resolveConsent(id: string, decision: ConsentDecision): Promise<ConsentRequest | null> {
+        const pending = this.consentStore.getById(id);
+        if (pending === undefined || pending.decision !== undefined) return null;
+
+        // Write the frontmatter FIRST so any long-polling MCP handler
+        // that wakes up from the resolve-event and immediately re-reads
+        // the note sees the new mcp_consent value. If we resolved the
+        // store first, the emit would race the write.
+        const note = this.notes.tryGet(pending.noteId);
+        if (note !== undefined) {
+            const updatedFrontmatter: Frontmatter = {
+                ...note.frontmatter,
+                mcp_consent: decision,
+                mcp_consent_at: new Date().toISOString()
+            };
+
+            await this.notes.write({
+                path: note.id,
+                content: note.content,
+                frontmatter: updatedFrontmatter
+            }, {
+                message: `mcp-consent: ${decision} ${pending.noteId}`
+            });
+        }
+
+        return this.consentStore.resolve(id, decision);
     }
 
     public backlinks(id: NoteId): NoteId[] {

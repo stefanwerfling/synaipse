@@ -14,6 +14,7 @@ import {resolveAssetPath} from './asset-route.js';
 import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-routes.js';
 import {handleTokensRoute} from './tokens-routes.js';
 import {handleAdminRoute} from './admin-routes.js';
+import {handleConsentRoute} from './consent-routes.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -299,6 +300,12 @@ export const routes = (
     if (path.startsWith('/api/admin/')) {
         const adminResult = await handleAdminRoute(req, res, url, opts.mode, opts.auth);
         if (adminResult.handled) return;
+    }
+
+    // Just-in-time consent inbox — SSE + approve/deny for MCP note-read gates.
+    if (path.startsWith('/api/consent')) {
+        const consentResult = await handleConsentRoute(req, res, url, service);
+        if (consentResult.handled) return;
     }
 
     if (path === '/api/events/stream') {

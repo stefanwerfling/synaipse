@@ -32,3 +32,5 @@ export type {
 } from './Service.js';
 export {findDecayCandidates, archivePathFor} from './MemoryDecay.js';
 export type {DecayCandidate, DecayOptions} from './MemoryDecay.js';
+export {ConsentStore} from './ConsentStore.js';
+export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';

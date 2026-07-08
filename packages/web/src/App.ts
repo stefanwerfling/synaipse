@@ -10,6 +10,7 @@ import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
 import {ActivityPanel} from './ActivityPanel.js';
 import {AuditPanel} from './AuditPanel.js';
+import {ConsentInbox} from './ConsentInbox.js';
 import {ImportDialog} from './ImportDialog.js';
 import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
@@ -41,7 +42,7 @@ const HEAT_TICK_MS = 15_000;
 const HUGE_GRAPH_FORCE_ATLAS = 20_000;
 const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
 
-type Tab = 'notes' | 'graph' | 'canvas' | 'chat' | 'jobs' | 'activity' | 'audit';
+type Tab = 'notes' | 'graph' | 'canvas' | 'chat' | 'jobs' | 'activity' | 'audit' | 'consent';
 
 export class App {
     public readonly element: HTMLElement;
@@ -68,11 +69,14 @@ export class App {
     private jobsTabBtn!: HTMLButtonElement;
     private activityTabBtn!: HTMLButtonElement;
     private auditTabBtn!: HTMLButtonElement;
+    private consentTabBtn!: HTMLButtonElement;
+    private consentBadge!: HTMLElement;
     private canvasPanel!: CanvasPanel;
     private chatPanel!: ChatPanel;
     private jobsPanel!: JobsPanel;
     private activityPanel!: ActivityPanel;
     private auditPanel!: AuditPanel;
+    private consentPanel!: ConsentInbox;
     private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
     private activityBadge!: HTMLElement;
@@ -169,6 +173,14 @@ export class App {
         });
 
         this.auditPanel = new AuditPanel();
+
+        this.consentPanel = new ConsentInbox({
+            onCountChange: (count) => this.setConsentBadge(count),
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            }
+        });
 
         this.body = el('div', {style: {display: 'contents'}});
         this.graphWrap = el('div', {class: 'graph-wrap'});
@@ -291,6 +303,7 @@ export class App {
         host.appendChild(this.element);
         host.appendChild(this.palette.element);
         this.events.start();
+        this.consentPanel.start();
         this.heatTickTimer = window.setInterval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
         await Promise.all([this.loadNotes(), this.installSearch()]);
     }
@@ -445,6 +458,16 @@ export class App {
             on: {click: () => void this.switchTab('audit')}
         }) as HTMLButtonElement;
 
+        this.consentBadge = el('span', {class: 'tab-badge', style: {display: 'none'}, text: '0'});
+        this.consentTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button', title: 'Just-in-time consent requests from MCP note reads'},
+            on: {click: () => void this.switchTab('consent')}
+        },
+            el('span', {text: 'Consent'}),
+            this.consentBadge
+        ) as HTMLButtonElement;
+
         const brand = el('div', {class: 'brand'});
         const logo = el('span', {class: 'brand-logo'});
         logo.innerHTML = logoSvg;
@@ -502,7 +525,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn, this.consentTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             ...trailing
@@ -528,6 +551,17 @@ export class App {
         }
     }
 
+    private setConsentBadge(count: number): void {
+        if (count > 0) {
+            this.consentBadge.style.display = '';
+            this.consentBadge.textContent = count > 9 ? '9+' : String(count);
+            this.consentTabBtn.classList.add('has-unread');
+        } else {
+            this.consentBadge.style.display = 'none';
+            this.consentTabBtn.classList.remove('has-unread');
+        }
+    }
+
     private async switchTab(tab: Tab): Promise<void> {
         if (this.tab === tab) {
             return;
@@ -550,6 +584,7 @@ export class App {
         this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
         this.activityTabBtn.className = tab === 'activity' ? 'tab active' : 'tab';
         this.auditTabBtn.className = tab === 'audit' ? 'tab active' : 'tab';
+        this.consentTabBtn.className = tab === 'consent' ? 'tab active' : 'tab';
 
         if (tab === 'notes') {
             this.showNotes();
@@ -581,7 +616,18 @@ export class App {
             return;
         }
 
+        if (tab === 'consent') {
+            void this.showConsent();
+            return;
+        }
+
         await this.showGraph();
+    }
+
+    private async showConsent(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.consentPanel.element);
+        await this.consentPanel.onShow();
     }
 
     private async showCanvas(): Promise<void> {

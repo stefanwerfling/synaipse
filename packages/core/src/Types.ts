@@ -56,6 +56,17 @@ export interface Frontmatter {
     supersedes?: string[];
     project?: string;
     links?: TypedLink[];
+    /**
+     * Just-in-time consent state for MCP-side note reads. Only set on
+     * notes that require a UI-side approve/deny before Claude may read
+     * them (typically crawler output). Missing = no gate. Values:
+     *   - "pending" → MCP read triggers a UI prompt (long-poll on tool side)
+     *   - "granted" → MCP reads pass through
+     *   - "denied"  → MCP reads are refused; note stays visible in the vault UI
+     */
+    mcp_consent?: 'pending' | 'granted' | 'denied';
+    /** ISO timestamp of the last mcp_consent change (set by the store side). */
+    mcp_consent_at?: string;
 }
 
 export interface Note {
