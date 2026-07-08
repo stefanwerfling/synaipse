@@ -21,4 +21,22 @@ Re-clipping the same URL updates the existing note instead of creating a duplica
 
 ## Settings
 
-Right-click the extension icon → **Options** to point at a different server URL (e.g. `http://192.168.1.10:3001` for a vault hosted on another machine in your LAN).
+ Right-click the extension icon → **Options**:
+
+- **Server URL** — point at a different host (e.g. `http://192.168.1.10:3001` for a vault hosted on another machine in your LAN).
+- **API token (Bearer)** — sent as `Authorization: Bearer <token>` on every request. Required whenever the server has any auth configured (`SYNAIPSE_MODE=server`, or a `config.server.token` / `config.server.tokens` entry in local mode). Leave blank if the server is unauthenticated.
+
+## Server-side scope
+
+The `/api/clip` endpoint requires **write** scope. If your token has a `pathPrefixes` restriction, it must include (or be a prefix of) `Clipped/` — otherwise the server returns 403.
+
+Recommended: create a dedicated clipper token, e.g.
+
+```bash
+npm run user create -- \
+  --label "web-clipper (laptop)" \
+  --write \
+  --prefix "Clipped/"
+```
+
+Then paste the printed token into the extension's Options page.

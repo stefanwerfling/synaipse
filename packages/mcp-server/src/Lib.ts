@@ -5,3 +5,12 @@
  */
 export {buildMcpHttpHandler, startServer, type StartServerOptions, type TransportMode} from './Server.js';
 export {CachedUserStore} from './CachedUserStore.js';
+export {
+    parseBearer,
+    resolveTokenScope,
+    checkScope,
+    isAuthConfigured,
+    isAdminScope,
+    NO_AUTH_SCOPE,
+    type TokenScope
+} from './Auth.js';

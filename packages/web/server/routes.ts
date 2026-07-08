@@ -3,12 +3,13 @@ import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
-import type {Frontmatter} from '@synaipse/core';
+import type {Config, Frontmatter} from '@synaipse/core';
 import {parseCanvas} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams, JobType} from './jobs.js';
 import type {UserStore} from '@synaipse/core';
+import {resolveTokenScope, checkScope} from '@synaipse/mcp-server';
 import {resolveAssetPath} from './asset-route.js';
 import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from './auth-routes.js';
 import {handleTokensRoute} from './tokens-routes.js';
@@ -249,6 +250,13 @@ export interface RoutesOptions {
      * self-service). Null in local-mode where there is no users table.
      */
     userStore?: UserStore | null;
+    /**
+     * Full config bundle — currently used by /api/clip to gate the
+     * webclipper via `config.server.token(s)` bearer auth. Undefined in
+     * tests that don't care about auth (route treats missing config as
+     * "no auth configured" and lets requests through).
+     */
+    config?: Config;
 }
 
 export const routes = (
@@ -732,6 +740,15 @@ export const routes = (
         return;
     }
 
+    if (method === 'OPTIONS' && path === '/api/clip') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
     if (path === '/api/clip') {
         if (method !== 'POST') {
             methodNotAllowed(res);
@@ -742,6 +759,32 @@ export const routes = (
         // without preflight gymnastics. The server only listens on localhost
         // so this is safe by default.
         res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // Bearer-auth gate. When no config was passed (test-invoke) or the
+        // operator hasn't configured any tokens at all, we let requests
+        // through anonymously — matches the zero-config dev-mode ergonomics
+        // of the MCP surface. Once a token exists, the extension MUST
+        // present one.
+        if (opts.config !== undefined) {
+            const server = opts.config.server;
+            const hasAnyToken =
+                (server.token !== undefined && server.token.length > 0)
+                || (server.tokens !== undefined && server.tokens.length > 0);
+
+            if (hasAnyToken) {
+                const scope = await resolveTokenScope(req.headers.authorization, opts.config, null);
+                if (scope === null) {
+                    json(res, 401, {error: 'clip requires a valid Bearer token'});
+                    return;
+                }
+
+                const denial = checkScope(scope, {name: 'clip', mode: 'write'}, 'Clipped/');
+                if (denial !== null) {
+                    json(res, 403, {error: denial});
+                    return;
+                }
+            }
+        }
 
         const body = await readJson<{
             url?: unknown;
@@ -791,15 +834,6 @@ export const routes = (
             json(res, 500, {error: String(error)});
         }
 
-        return;
-    }
-
-    if (method === 'OPTIONS' && path === '/api/clip') {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.writeHead(204);
-        res.end();
         return;
     }
 

@@ -184,7 +184,8 @@ const main = async (): Promise<void> => {
     const handle = routes(service, broadcaster, jobs, {
         mode: config.mode === 'server' ? 'server' : 'local',
         auth,
-        userStore
+        userStore,
+        config
     });
 
     service.onVaultChange((event) => {

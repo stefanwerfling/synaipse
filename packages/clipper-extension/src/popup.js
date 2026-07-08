@@ -1,23 +1,34 @@
 // MV3 popup script. Pulls the current tab, hands optional selection extraction
 // off to a content script via chrome.scripting.executeScript, then POSTs HTML
-// (or selection) to the Synaipse server on the configured host.
+// (or selection) to the Synaipse server on the configured host. When an API
+// token is stored (Options page), it is sent as `Authorization: Bearer …`.
 
 const DEFAULT_SERVER = 'http://localhost:3001';
 
 const $ = (id) => document.getElementById(id);
 
-const loadServer = async () => {
-    const stored = await chrome.storage.sync.get(['serverUrl']);
-    return stored.serverUrl || DEFAULT_SERVER;
+const loadSettings = async () => {
+    const stored = await chrome.storage.sync.get(['serverUrl', 'apiToken']);
+    return {
+        serverUrl: stored.serverUrl || DEFAULT_SERVER,
+        apiToken: stored.apiToken || ''
+    };
 };
 
-const checkServer = async (serverUrl) => {
+const authHeader = (apiToken) =>
+    apiToken.length > 0 ? {Authorization: `Bearer ${apiToken}`} : {};
+
+const checkServer = async (serverUrl, apiToken) => {
     try {
-        const response = await fetch(`${serverUrl}/api/info`, {method: 'GET'});
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return true;
+        const response = await fetch(`${serverUrl}/api/info`, {
+            method: 'GET',
+            headers: {...authHeader(apiToken)}
+        });
+        if (response.status === 401) return {ok: false, reason: 'unauthorized'};
+        if (!response.ok) return {ok: false, reason: `HTTP ${response.status}`};
+        return {ok: true, reason: null};
     } catch {
-        return false;
+        return {ok: false, reason: 'unreachable'};
     }
 };
 
@@ -48,16 +59,23 @@ const setStatus = (el, ok, msg) => {
     el.textContent = msg;
 };
 
+const describeHealth = (serverUrl, health) => {
+    if (health.ok) return `connected · ${serverUrl}`;
+    if (health.reason === 'unauthorized') return `401 · check API token in Options`;
+    if (health.reason === 'unreachable') return `no server at ${serverUrl}`;
+    return `${health.reason} · ${serverUrl}`;
+};
+
 const init = async () => {
-    const serverUrl = await loadServer();
+    const {serverUrl, apiToken} = await loadSettings();
     const tab = await getActiveTab();
 
     if (tab !== undefined) {
         $('title').value = tab.title ?? '';
     }
 
-    const ok = await checkServer(serverUrl);
-    setStatus($('server-status'), ok, ok ? `connected · ${serverUrl}` : `no server at ${serverUrl}`);
+    const health = await checkServer(serverUrl, apiToken);
+    setStatus($('server-status'), health.ok, describeHealth(serverUrl, health));
 
     $('clip').addEventListener('click', async () => {
         const button = $('clip');
@@ -88,9 +106,20 @@ const init = async () => {
 
             const response = await fetch(`${serverUrl}/api/clip`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...authHeader(apiToken)
+                },
                 body: JSON.stringify(payload)
             });
+
+            if (response.status === 401) {
+                throw new Error('401 unauthorized — set your API token in Options');
+            }
+            if (response.status === 403) {
+                const text = await response.text();
+                throw new Error(`403 forbidden — ${text || 'token lacks required scope'}`);
+            }
 
             if (!response.ok) {
                 const text = await response.text();
