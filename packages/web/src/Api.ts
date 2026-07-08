@@ -563,6 +563,68 @@ export interface ConsentRequestSummary {
     decision?: 'granted' | 'denied';
 }
 
+export interface Schedule {
+    id: string;
+    name: string;
+    jobType: JobType;
+    /** JSON string; deserialize to JobParams before use. */
+    jobParams: string;
+    cron: string;
+    enabled: boolean;
+    createdAt: number;
+    lastRun?: number;
+    lastResult?: 'ok' | 'error' | 'stopped';
+    nextRun?: number;
+}
+
+export interface ScheduleCreateInput {
+    name: string;
+    jobType: JobType;
+    /** Actual params object (not JSON-serialized) — the API takes it as-is. */
+    jobParams: JobParams;
+    cron: string;
+    enabled?: boolean;
+}
+
+export interface SchedulePatchInput {
+    name?: string;
+    cron?: string;
+    enabled?: boolean;
+}
+
+export const schedulesApi = {
+    list: async (): Promise<Schedule[]> => {
+        const {schedules} = await json<{schedules: Schedule[]}>(await fetch('/api/schedules'));
+        return schedules;
+    },
+    create: async (input: ScheduleCreateInput): Promise<Schedule> => {
+        const response = await fetch('/api/schedules', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(input)
+        });
+        const {schedule} = await json<{schedule: Schedule}>(response);
+        return schedule;
+    },
+    update: async (id: string, patch: SchedulePatchInput): Promise<Schedule> => {
+        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(patch)
+        });
+        const {schedule} = await json<{schedule: Schedule}>(response);
+        return schedule;
+    },
+    delete: async (id: string): Promise<void> => {
+        await noContent(await fetch(`/api/schedules/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+    },
+    runNow: async (id: string): Promise<Schedule> => {
+        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}/run-now`, {method: 'POST'});
+        const {schedule} = await json<{schedule: Schedule}>(response);
+        return schedule;
+    }
+};
+
 export const consentApi = {
     listPending: async (): Promise<ConsentRequestSummary[]> => {
         const {requests} = await json<{requests: ConsentRequestSummary[]}>(

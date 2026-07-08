@@ -1,17 +1,38 @@
 import {
     jobsApi,
+    schedulesApi,
     type CrawlGiteaJobParams,
     type JobParams,
     type JobRecord,
-    type JobType
+    type JobType,
+    type Schedule
 } from './Api.js';
 import {clear, el} from './Dom.js';
 
 /**
- * Two-section panel: the top half is a launcher with one card per job type,
- * the bottom half is a live list of running/recent jobs. Each running job
- * gets its own SSE connection and a progress bar that updates in place.
+ * Three-section panel:
+ *   1. Launcher — one card per job type; each launcher's "Schedule ⏰"
+ *      button captures its current params + a name + cron string.
+ *   2. Scheduled — persistent recurring jobs (created via #1) with
+ *      Enable-toggle, Run-Now, Delete.
+ *   3. Active & recent — live list of running/recent one-shot runs.
+ *      Each running job gets its own SSE stream + in-place progress bar.
  */
+
+const formatTime = (ts: number): string => {
+    const now = Date.now();
+    const diff = ts - now;
+    const absDiff = Math.abs(diff);
+    // Very close events read relative for a quick "6 min from now" scan;
+    // farther-out events read as absolute wall time so DST + week-boundary
+    // reasoning stays trivial.
+    if (absDiff < 12 * 60 * 60 * 1000) {
+        const minutes = Math.round(absDiff / 60_000);
+        if (diff > 0) return minutes < 1 ? 'in <1 min' : `in ${minutes} min`;
+        return minutes < 1 ? 'just now' : `${minutes} min ago`;
+    }
+    return new Date(ts).toLocaleString();
+};
 
 export interface JobsPanelOptions {
     onChange?: () => void;
@@ -58,14 +79,17 @@ interface JobCard {
 export class JobsPanel {
     public readonly element: HTMLElement;
     private readonly launcherHost: HTMLElement;
+    private readonly scheduledHost: HTMLElement;
     private readonly listHost: HTMLElement;
     private readonly cards = new Map<string, JobCard>();
+    private schedules: Schedule[] = [];
     private mounted = false;
 
     public constructor(private readonly opts: JobsPanelOptions = {}) {
         this.element = el('div', {class: 'jobs-panel'});
 
         this.launcherHost = el('div', {class: 'jobs-launcher'});
+        this.scheduledHost = el('div', {class: 'jobs-scheduled'});
         this.listHost = el('div', {class: 'jobs-list'});
 
         this.element.appendChild(el('div', {class: 'jobs-head'},
@@ -79,10 +103,13 @@ export class JobsPanel {
         ));
 
         this.element.appendChild(this.launcherHost);
+        this.element.appendChild(el('h3', {class: 'jobs-section-title', text: 'Scheduled'}));
+        this.element.appendChild(this.scheduledHost);
         this.element.appendChild(el('h3', {class: 'jobs-section-title', text: 'Active & recent'}));
         this.element.appendChild(this.listHost);
 
         this.renderLaunchers();
+        this.renderScheduled();
     }
 
     public async onShow(): Promise<void> {
@@ -125,13 +152,7 @@ export class JobsPanel {
             el('option', {attrs: {value: 'all'}, text: 'all'})
         ) as HTMLSelectElement;
 
-        const startBtn = el('button', {
-            class: 'btn btn-primary job-start-btn',
-            attrs: {type: 'button'},
-            text: 'Start'
-        }) as HTMLButtonElement;
-
-        startBtn.addEventListener('click', () => {
+        const collectParams = (): CrawlGiteaJobParams | null => {
             const baseUrl = baseUrlInput.value.trim();
             const owner = ownerInput.value.trim();
             const repo = repoInput.value.trim();
@@ -141,15 +162,14 @@ export class JobsPanel {
 
             if (baseUrl === '' || owner === '' || repo === '' || project === '') {
                 window.alert('Base URL, owner, repo and project are required.');
-                return;
+                return null;
             }
 
             const params: CrawlGiteaJobParams = {baseUrl, owner, repo, project};
             if (token !== '') params.token = token;
             if (state !== undefined) params.state = state;
-
-            void this.launch('crawl-gitea', params);
-        });
+            return params;
+        };
 
         const optionsHost = el('div', {class: 'job-form', attrs: {hidden: 'true'}},
             el('label', {class: 'job-field'},
@@ -178,6 +198,40 @@ export class JobsPanel {
             )
         );
 
+        const actionsHost = el('div', {class: 'job-actions'});
+        const scheduleForm = this.wireLauncherActions(actionsHost, optionsHost, 'crawl-gitea', collectParams);
+
+        return el('div', {class: 'job-card'},
+            el('div', {class: 'job-card-head'},
+                el('h3', {text: 'Crawl Gitea issues'}),
+                el('p', {
+                    text: 'Pulls open (or closed / all) issues from a Gitea repository into '
+                        + 'Crawler/Gitea/<project>/. Each note is written with mcp_consent: pending — '
+                        + 'Claude has to wait for your approve/deny in the Consent Inbox before reading '
+                        + 'the note over MCP. Todo lines land in synaipse_todos.'
+                })
+            ),
+            actionsHost,
+            scheduleForm,
+            optionsHost
+        );
+    }
+
+    /**
+     * Wire the shared launcher action bar: [⚙ Options] [Schedule ⏰] [Start].
+     * "Options" toggles the form. "Start" runs the job once. "Schedule" opens
+     * a small inline sub-form for name + cron, then creates a persistent
+     * schedule via schedulesApi.
+     *
+     * Returns the inline schedule sub-form so the caller can place it in the
+     * card DOM (typically between the action bar and the options form).
+     */
+    private wireLauncherActions(
+        actionsHost: HTMLElement,
+        optionsHost: HTMLElement,
+        jobType: JobType,
+        collectParams: () => JobParams | null
+    ): HTMLElement {
         const optionsToggle = el('button', {
             class: 'job-options-toggle',
             attrs: {type: 'button'},
@@ -190,19 +244,100 @@ export class JobsPanel {
             else optionsHost.setAttribute('hidden', 'true');
         });
 
-        return el('div', {class: 'job-card'},
-            el('div', {class: 'job-card-head'},
-                el('h3', {text: 'Crawl Gitea issues'}),
-                el('p', {
-                    text: 'Pulls open (or closed / all) issues from a Gitea repository into '
-                        + 'Crawler/Gitea/<project>/. Each note is written with mcp_consent: pending — '
-                        + 'Claude has to wait for your approve/deny in the Consent Inbox before reading '
-                        + 'the note over MCP. Todo lines land in synaipse_todos.'
-                })
+        const scheduleBtn = el('button', {
+            class: 'btn job-schedule-btn',
+            attrs: {type: 'button'},
+            text: 'Schedule ⏰'
+        }) as HTMLButtonElement;
+
+        const startBtn = el('button', {
+            class: 'btn btn-primary job-start-btn',
+            attrs: {type: 'button'},
+            text: 'Start'
+        }) as HTMLButtonElement;
+
+        startBtn.addEventListener('click', () => {
+            const params = collectParams();
+            if (params === null) return;
+            void this.launch(jobType, params);
+        });
+
+        // Inline schedule sub-form. Toggled by the Schedule button; the
+        // Save button reads from these inputs and posts to schedulesApi.
+        const nameInput = el('input', {
+            class: 'job-input',
+            attrs: {type: 'text', placeholder: 'e.g. "Nightly relink"'}
+        }) as HTMLInputElement;
+
+        const cronInput = el('input', {
+            class: 'job-input',
+            attrs: {type: 'text', placeholder: 'every 2h  |  daily 08:00'}
+        }) as HTMLInputElement;
+
+        const saveBtn = el('button', {
+            class: 'btn btn-primary',
+            attrs: {type: 'button'},
+            text: 'Save'
+        }) as HTMLButtonElement;
+
+        const cancelBtn = el('button', {
+            class: 'btn',
+            attrs: {type: 'button'},
+            text: 'Cancel'
+        }) as HTMLButtonElement;
+
+        const scheduleForm = el('div', {class: 'schedule-inline-form', attrs: {hidden: 'true'}},
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Schedule name'}),
+                nameInput
             ),
-            el('div', {class: 'job-actions'}, optionsToggle, startBtn),
-            optionsHost
+            el('label', {class: 'job-field'},
+                el('span', {text: 'Cron'}),
+                cronInput
+            ),
+            el('div', {class: 'schedule-inline-actions'}, cancelBtn, saveBtn)
         );
+
+        scheduleBtn.addEventListener('click', () => {
+            const wasHidden = scheduleForm.hasAttribute('hidden');
+            if (wasHidden) {
+                scheduleForm.removeAttribute('hidden');
+                // Also open the params form so the user can review what they're
+                // about to schedule with — silently scheduling with an empty
+                // prefix is a footgun.
+                optionsHost.removeAttribute('hidden');
+                nameInput.focus();
+            } else {
+                scheduleForm.setAttribute('hidden', 'true');
+            }
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            scheduleForm.setAttribute('hidden', 'true');
+            nameInput.value = '';
+            cronInput.value = '';
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            const cron = cronInput.value.trim();
+            if (name === '' || cron === '') {
+                window.alert('Schedule name and cron are required.');
+                return;
+            }
+            const params = collectParams();
+            if (params === null) return;
+            void this.createSchedule(name, jobType, params, cron).then(() => {
+                scheduleForm.setAttribute('hidden', 'true');
+                nameInput.value = '';
+                cronInput.value = '';
+            });
+        });
+
+        actionsHost.appendChild(optionsToggle);
+        actionsHost.appendChild(scheduleBtn);
+        actionsHost.appendChild(startBtn);
+        return scheduleForm;
     }
 
     private renderLauncherCard(spec: LaunchSpec): HTMLElement {
@@ -220,23 +355,17 @@ export class JobsPanel {
         const forceBox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
         const llmBox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
 
-        const startBtn = el('button', {
-            class: 'btn btn-primary job-start-btn',
-            attrs: {type: 'button'},
-            text: 'Start'
-        }) as HTMLButtonElement;
-
-        startBtn.addEventListener('click', () => {
+        const collectParams = (): JobParams => {
             const prefix = prefixInput.value.trim();
             const limitRaw = limitInput.value.trim();
             const limit = limitRaw === '' ? undefined : Number.parseInt(limitRaw, 10);
-            void this.launch(spec.type, {
+            return {
                 prefix,
                 ...(forceBox.checked ? {force: true} : {}),
                 ...(spec.showLlm && llmBox.checked ? {useLlm: true} : {}),
                 ...(limit !== undefined && Number.isFinite(limit) && limit > 0 ? {limit} : {})
-            });
-        });
+            };
+        };
 
         const optionsHost = el('div', {class: 'job-form', attrs: {hidden: 'true'}},
             el('label', {class: 'job-field'},
@@ -253,24 +382,16 @@ export class JobsPanel {
                 : [])
         );
 
-        const optionsToggle = el('button', {
-            class: 'job-options-toggle',
-            attrs: {type: 'button'},
-            text: '⚙ Options'
-        });
-
-        optionsToggle.addEventListener('click', () => {
-            const hidden = optionsHost.hasAttribute('hidden');
-            if (hidden) optionsHost.removeAttribute('hidden');
-            else optionsHost.setAttribute('hidden', 'true');
-        });
+        const actionsHost = el('div', {class: 'job-actions'});
+        const scheduleForm = this.wireLauncherActions(actionsHost, optionsHost, spec.type, collectParams);
 
         const card = el('div', {class: 'job-card'},
             el('div', {class: 'job-card-head'},
                 el('h3', {text: spec.title}),
                 el('p', {text: spec.description})
             ),
-            el('div', {class: 'job-actions'}, optionsToggle, startBtn),
+            actionsHost,
+            scheduleForm,
             optionsHost
         );
 
@@ -284,6 +405,119 @@ export class JobsPanel {
             this.opts.onChange?.();
         } catch (cause) {
             window.alert(`Failed to start job: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+    }
+
+    private async createSchedule(
+        name: string,
+        jobType: JobType,
+        jobParams: JobParams,
+        cron: string
+    ): Promise<void> {
+        try {
+            await schedulesApi.create({name, jobType, jobParams, cron});
+            await this.refreshSchedules();
+        } catch (cause) {
+            window.alert(`Failed to create schedule: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+    }
+
+    private async refreshSchedules(): Promise<void> {
+        try {
+            this.schedules = await schedulesApi.list();
+            this.renderScheduled();
+        } catch (cause) {
+            console.error('schedules list failed', cause);
+        }
+    }
+
+    private renderScheduled(): void {
+        clear(this.scheduledHost);
+
+        if (this.schedules.length === 0) {
+            this.scheduledHost.appendChild(el('p', {
+                class: 'jobs-scheduled-empty',
+                text: 'No schedules yet. Fill out a launcher above, click "Schedule ⏰", '
+                    + 'name it and give it a cron ("every 2h" or "daily 08:00").'
+            }));
+            return;
+        }
+
+        for (const s of this.schedules) {
+            this.scheduledHost.appendChild(this.renderScheduleRow(s));
+        }
+    }
+
+    private renderScheduleRow(s: Schedule): HTMLElement {
+        const paramSummary = this.scheduleParamSummary(s);
+        const nextText = s.nextRun !== undefined ? formatTime(s.nextRun) : '—';
+        const lastText = s.lastRun !== undefined
+            ? `${formatTime(s.lastRun)} (${s.lastResult ?? 'ok'})`
+            : 'never';
+
+        const enabledToggle = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
+        enabledToggle.checked = s.enabled;
+        enabledToggle.addEventListener('change', () => {
+            void schedulesApi.update(s.id, {enabled: enabledToggle.checked})
+                .then(() => this.refreshSchedules())
+                .catch((cause) => {
+                    window.alert(`Failed to toggle schedule: ${String(cause)}`);
+                    enabledToggle.checked = s.enabled;
+                });
+        });
+
+        const runNowBtn = el('button', {
+            class: 'btn schedule-run-now',
+            attrs: {type: 'button', title: 'Trigger now (advances nextRun to this moment)'},
+            text: 'Run now'
+        });
+        runNowBtn.addEventListener('click', () => {
+            void schedulesApi.runNow(s.id)
+                .then(() => this.refreshSchedules())
+                .catch((cause) => window.alert(`Run-now failed: ${String(cause)}`));
+        });
+
+        const deleteBtn = el('button', {
+            class: 'btn btn-danger schedule-delete',
+            attrs: {type: 'button'},
+            text: 'Delete'
+        });
+        deleteBtn.addEventListener('click', () => {
+            if (!window.confirm(`Delete schedule "${s.name}"?`)) return;
+            void schedulesApi.delete(s.id)
+                .then(() => this.refreshSchedules())
+                .catch((cause) => window.alert(`Delete failed: ${String(cause)}`));
+        });
+
+        return el('div', {class: `schedule-row${s.enabled ? '' : ' schedule-row-disabled'}`},
+            el('div', {class: 'schedule-row-main'},
+                el('div', {class: 'schedule-row-head'},
+                    el('label', {class: 'schedule-enabled'}, enabledToggle, el('span', {text: ''})),
+                    el('span', {class: 'schedule-name', text: s.name}),
+                    el('span', {class: 'schedule-type', text: s.jobType}),
+                    el('code', {class: 'schedule-cron', text: s.cron})
+                ),
+                el('div', {class: 'schedule-row-meta'},
+                    el('span', {class: 'schedule-summary', text: paramSummary}),
+                    el('span', {class: 'schedule-next', text: `next: ${nextText}`}),
+                    el('span', {class: 'schedule-last', text: `last: ${lastText}`})
+                )
+            ),
+            el('div', {class: 'schedule-row-actions'}, runNowBtn, deleteBtn)
+        );
+    }
+
+    private scheduleParamSummary(s: Schedule): string {
+        try {
+            const params = JSON.parse(s.jobParams) as JobParams;
+            if (s.jobType === 'crawl-gitea') {
+                const p = params as CrawlGiteaJobParams;
+                return `${p.owner}/${p.repo} → ${p.project}`;
+            }
+            const prefix = (params as {prefix?: string}).prefix ?? '';
+            return prefix === '' ? '(all notes)' : prefix;
+        } catch {
+            return '(unparseable params)';
         }
     }
 
@@ -305,6 +539,8 @@ export class JobsPanel {
         } catch (cause) {
             console.error('jobs list failed', cause);
         }
+
+        await this.refreshSchedules();
     }
 
     private upsertJob(job: JobRecord): void {

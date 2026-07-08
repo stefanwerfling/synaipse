@@ -3002,6 +3002,143 @@ body.sidebar-resizing {
     display: none;
 }
 
+/* Inline "schedule this job" mini-form — lives inside each launcher card. */
+
+.schedule-inline-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    background: var(--bg-2);
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-2);
+}
+
+.schedule-inline-form[hidden] {
+    display: none;
+}
+
+.schedule-inline-actions {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: flex-end;
+}
+
+.job-schedule-btn {
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--text-2);
+    padding: 8px 12px;
+    border-radius: var(--r-2);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.job-schedule-btn:hover {
+    color: var(--text-1);
+    border-color: var(--accent);
+}
+
+/* Scheduled-jobs list section. */
+
+.jobs-scheduled {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+}
+
+.jobs-scheduled-empty {
+    color: var(--text-3);
+    font-size: 12px;
+    margin: 0;
+    padding: var(--space-2);
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-2);
+    background: var(--bg-2);
+}
+
+.schedule-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+}
+
+.schedule-row-disabled {
+    opacity: 0.55;
+}
+
+.schedule-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.schedule-row-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.schedule-enabled {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.schedule-name {
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.schedule-type {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-3);
+    padding: 2px 6px;
+    background: var(--bg-3);
+    border-radius: var(--r-1);
+}
+
+.schedule-cron {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    color: var(--accent);
+    padding: 2px 6px;
+    background: var(--bg-3);
+    border-radius: var(--r-1);
+}
+
+.schedule-row-meta {
+    display: flex;
+    gap: var(--space-2);
+    font-size: 12px;
+    color: var(--text-3);
+    flex-wrap: wrap;
+}
+
+.schedule-summary {
+    color: var(--text-2);
+}
+
+.schedule-row-actions {
+    display: flex;
+    gap: var(--space-1);
+    flex: 0 0 auto;
+}
+
 .jobs-section-title {
     margin: 0 0 var(--space-2);
     font-size: 12px;
