@@ -111,31 +111,84 @@ const respectRateLimit = async (response: Response, log?: (line: string) => void
     }
 };
 
+/** Cap for transient error retries (network + 502/503/504). */
+const TRANSIENT_MAX_ATTEMPTS = 3;
+/** Exponential-ish backoff: 500ms, 1500ms, 4500ms. */
+const TRANSIENT_BACKOFF_MS = [500, 1500, 4500];
+
+/**
+ * Best-effort classifier for "this fetch throw was a transient network
+ * hiccup, not a permanent config error". We can't rely on error codes
+ * portably (undici, node-fetch and browser fetch all attach different
+ * shapes) so we walk the cause chain looking for the usual suspects.
+ * Unknown throws are treated as transient to err on the side of
+ * retrying — a permanent misconfig will still bubble after N attempts.
+ */
+const isTransientNetworkError = (cause: unknown): boolean => {
+    if (!(cause instanceof Error)) return true;
+    if (cause.name === 'AbortError') return false;
+
+    const codes = new Set(['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EPIPE']);
+    let walker: unknown = cause;
+    for (let hop = 0; hop < 5 && walker instanceof Error; hop++) {
+        const code = (walker as Error & {code?: unknown}).code;
+        if (typeof code === 'string' && codes.has(code)) return true;
+        walker = (walker as Error & {cause?: unknown}).cause;
+    }
+    // TypeError: fetch failed — undici's generic wrapper. Retry.
+    if (cause instanceof TypeError && /fetch/i.test(cause.message)) return true;
+    return true;
+};
+
 const gtFetch = async (
     url: string,
     auth: GiteaAuth,
     opts: FetchOptions
 ): Promise<Response> => {
     const f = opts.fetch ?? fetch;
-    let attempt = 0;
+    let rateLimitAttempt = 0;
+    let transientAttempt = 0;
 
     while (true) {
         if (opts.signal?.aborted === true) {
             throw new Error('aborted');
         }
 
-        const response = await f(url, {
-            headers: buildHeaders(auth),
-            ...(opts.signal !== undefined ? {signal: opts.signal} : {})
-        });
+        let response: Response;
+        try {
+            response = await f(url, {
+                headers: buildHeaders(auth),
+                ...(opts.signal !== undefined ? {signal: opts.signal} : {})
+            });
+        } catch (cause) {
+            if (transientAttempt < TRANSIENT_MAX_ATTEMPTS && isTransientNetworkError(cause)) {
+                const waitMs = TRANSIENT_BACKOFF_MS[transientAttempt] ?? 5000;
+                opts.log?.(`[gitea] network error (${cause instanceof Error ? cause.message : String(cause)}) — retrying in ${Math.round(waitMs / 1000)}s`);
+                await new Promise((r) => setTimeout(r, waitMs));
+                transientAttempt += 1;
+                continue;
+            }
+            throw cause;
+        }
+
+        // Upstream gateway errors — the Gitea server or its reverse proxy
+        // hiccupped. Same treatment as network errors: exponential retry
+        // with a small cap so a truly-down Gitea doesn't hang the crawl.
+        if (response.status >= 502 && response.status <= 504 && transientAttempt < TRANSIENT_MAX_ATTEMPTS) {
+            const waitMs = TRANSIENT_BACKOFF_MS[transientAttempt] ?? 5000;
+            opts.log?.(`[gitea] ${response.status} — retrying in ${Math.round(waitMs / 1000)}s`);
+            await new Promise((r) => setTimeout(r, waitMs));
+            transientAttempt += 1;
+            continue;
+        }
 
         if (response.status === 429 || response.status === 403) {
             const retryAfter = Number.parseInt(response.headers.get('retry-after') ?? '0', 10);
 
-            if (retryAfter > 0 && attempt < 5) {
+            if (retryAfter > 0 && rateLimitAttempt < 5) {
                 opts.log?.(`[gitea] ${response.status} — retrying in ${retryAfter}s`);
                 await new Promise((r) => setTimeout(r, retryAfter * 1000));
-                attempt += 1;
+                rateLimitAttempt += 1;
                 continue;
             }
         }

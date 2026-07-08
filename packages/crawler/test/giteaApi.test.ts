@@ -127,3 +127,85 @@ describe('GiteaApi.listIssues', () => {
             .rejects.toThrow(/Gitea 404/);
     });
 });
+
+// ── retry on transient errors (Slice 5) ────────────────────────────
+
+describe('GiteaApi retry', () => {
+    /**
+     * Fetch mock that queues a sequence of responses / throws. First call
+     * consumes head of the queue, second call consumes the next, etc.
+     * Tracks how many times fetch was invoked in `calls`.
+     */
+    const queuedFetch = (queue: Array<() => Response | Promise<Response>>): {
+        fetch: typeof fetch;
+        calls: {count: number};
+    } => {
+        const calls = {count: 0};
+        const fn = (async (): Promise<Response> => {
+            const handler = queue[calls.count++];
+            if (handler === undefined) throw new Error('queue exhausted');
+            return handler();
+        }) as unknown as typeof fetch;
+        return {fetch: fn, calls};
+    };
+
+    // A network-error look-alike. undici's real "fetch failed" is a
+    // TypeError; that's what our classifier matches on.
+    const networkError = (): never => {
+        throw new TypeError('fetch failed');
+    };
+
+    it('retries a transient network error and eventually succeeds', async () => {
+        const {fetch, calls} = queuedFetch([
+            networkError,
+            () => new Response(JSON.stringify([makeIssue(1)]), {status: 200})
+        ]);
+
+        const out: number[] = [];
+        for await (const issue of listIssues('https://gitea.example.com', 'o', 'r', {fetch})) {
+            out.push(issue.number);
+        }
+
+        expect(out).toEqual([1]);
+        expect(calls.count).toBe(2);
+    }, 10_000);
+
+    it('retries a 503 upstream error and eventually succeeds', async () => {
+        const {fetch, calls} = queuedFetch([
+            () => new Response('gateway timeout', {status: 503}),
+            () => new Response(JSON.stringify([makeIssue(2)]), {status: 200})
+        ]);
+
+        const out: number[] = [];
+        for await (const issue of listIssues('https://gitea.example.com', 'o', 'r', {fetch})) {
+            out.push(issue.number);
+        }
+
+        expect(out).toEqual([2]);
+        expect(calls.count).toBe(2);
+    }, 10_000);
+
+    it('does not retry an AbortError (caller cancelled)', async () => {
+        const {fetch, calls} = queuedFetch([
+            () => { const err = new Error('aborted'); err.name = 'AbortError'; throw err; }
+        ]);
+
+        const gen = listIssues('https://gitea.example.com', 'o', 'r', {fetch});
+        await expect((async () => { for await (const _ of gen) { /* drain */ } })())
+            .rejects.toThrow();
+
+        expect(calls.count).toBe(1);
+    });
+
+    it('does not retry a 4xx client error like 404', async () => {
+        const {fetch, calls} = queuedFetch([
+            () => new Response('not found', {status: 404})
+        ]);
+
+        const gen = listIssues('https://gitea.example.com', 'o', 'r', {fetch});
+        await expect((async () => { for await (const _ of gen) { /* drain */ } })())
+            .rejects.toThrow(/Gitea 404/);
+
+        expect(calls.count).toBe(1);
+    });
+});

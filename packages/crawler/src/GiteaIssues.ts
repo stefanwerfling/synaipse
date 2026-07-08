@@ -24,6 +24,14 @@ export interface GiteaCrawlerDeps {
     log: (line: string) => void;
     write: (input: NoteWriteInput) => Promise<Note>;
     tryRead: (id: NoteId) => Note | undefined;
+    /**
+     * Optional listing hook — when provided AND opts.since is unset,
+     * the crawler infers a `since` timestamp from the maximum
+     * `gitea_updated_at` across existing notes in the target folder.
+     * This turns every scheduled re-run into a cheap delta refresh
+     * instead of a full-repo re-scan.
+     */
+    listNotesUnder?: (prefix: string) => Note[];
     signal?: AbortSignal;
 }
 
@@ -153,6 +161,15 @@ export class GiteaIssuesCrawler {
 
         deps.log(`[gitea] crawling ${this.opts.owner}/${this.opts.repo} → ${prefix}/`);
 
+        // Delta-refresh: when the caller hasn't pinned a `since` and can
+        // list existing notes, walk them for the max gitea_updated_at
+        // and use that as our lower bound. Turns hourly-schedule runs
+        // into a single tiny request instead of full-repo pagination.
+        const effectiveSince = this.opts.since ?? this.inferSince(prefix, deps);
+        if (this.opts.since === undefined && effectiveSince !== undefined) {
+            deps.log(`[gitea] delta-refresh from ${effectiveSince} (inferred from existing notes)`);
+        }
+
         const fetchOpts: FetchOptions = {log: deps.log};
         if (this.opts.token !== undefined) fetchOpts.token = this.opts.token;
         if (this.opts.fetch !== undefined) fetchOpts.fetch = this.opts.fetch;
@@ -167,7 +184,7 @@ export class GiteaIssuesCrawler {
             for await (const issue of listIssues(this.opts.baseUrl, this.opts.owner, this.opts.repo, {
                 ...fetchOpts,
                 state: this.opts.state ?? 'open',
-                ...(this.opts.since !== undefined ? {since: this.opts.since} : {})
+                ...(effectiveSince !== undefined ? {since: effectiveSince} : {})
             })) {
                 if (deps.signal?.aborted === true) {
                     deps.log('[gitea] aborted by caller');
@@ -223,5 +240,28 @@ export class GiteaIssuesCrawler {
         }
 
         return {fetched, written, unchanged, errors, elapsedMs: Date.now() - started};
+    }
+
+    /**
+     * Walk existing notes under `prefix` and return the maximum
+     * `gitea_updated_at` we've seen. Missing / malformed entries are
+     * skipped silently — a partially-populated folder still gives us
+     * a useful lower bound.
+     *
+     * Returns undefined when no listing hook is provided or the folder
+     * is empty; the caller then does a full initial crawl.
+     */
+    private inferSince(prefix: string, deps: GiteaCrawlerDeps): string | undefined {
+        if (deps.listNotesUnder === undefined) return undefined;
+        const notes = deps.listNotesUnder(prefix);
+        if (notes.length === 0) return undefined;
+
+        let max: string | undefined;
+        for (const note of notes) {
+            const ts = note.frontmatter.gitea_updated_at;
+            if (typeof ts !== 'string') continue;
+            if (max === undefined || ts > max) max = ts;
+        }
+        return max;
     }
 }

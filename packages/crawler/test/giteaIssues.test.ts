@@ -258,4 +258,117 @@ describe('GiteaIssuesCrawler', () => {
         await crawler.run(ctx.deps);
         expect(ctx.writes[0]?.path).toBe('Custom/Location/issue-1-fix-the-1.md');
     });
+
+    // ── delta refresh (Slice 5) ────────────────────────────────────
+
+    /**
+     * Capture-fetch: records every URL requested and returns the given
+     * static issue payload. Used to verify the crawler passes the
+     * expected `since` query param.
+     */
+    const captureFetch = (issues: GiteaIssue[]): {fetch: typeof fetch; urls: string[]} => {
+        const urls: string[] = [];
+        const fn = (async (input: string | URL | Request) => {
+            urls.push(String(input));
+            return new Response(JSON.stringify(issues), {status: 200});
+        }) as unknown as typeof fetch;
+        return {fetch: fn, urls};
+    };
+
+    it('infers since from max gitea_updated_at across existing notes', async () => {
+        // Seed three notes with varying timestamps — the crawler should
+        // pick the latest as its `since` cutoff.
+        ctx.seed('Crawler/Gitea/p/issue-1-fix-the-1.md', {
+            gitea_updated_at: '2026-07-01T10:00:00Z'
+        });
+        ctx.seed('Crawler/Gitea/p/issue-2-fix-the-2.md', {
+            gitea_updated_at: '2026-07-05T10:00:00Z'  // max
+        });
+        ctx.seed('Crawler/Gitea/p/issue-3-fix-the-3.md', {
+            gitea_updated_at: '2026-07-03T10:00:00Z'
+        });
+
+        // Extend deps with listNotesUnder — returns anything under prefix.
+        const store = new Map<string, Note>();
+        (ctx as unknown as {seedStore?: Map<string, Note>}).seedStore = store;
+
+        const {fetch: cap, urls} = captureFetch([]);
+
+        // Rebuild deps with listNotesUnder so the crawler can walk them.
+        const seededNotes: Note[] = [];
+        ctx.seed = ((id: NoteId, frontmatter: Record<string, unknown>) => {
+            const note: Note = {
+                id, path: `/tmp/${id}`, title: id,
+                content: '', frontmatter: frontmatter as Note['frontmatter'],
+                tags: [], wikilinks: [], backlinks: [], mtime: 0, hash: 'seed'
+            };
+            seededNotes.push(note);
+        }) as typeof ctx.seed;
+        ctx.seed('Crawler/Gitea/p/issue-1-fix-the-1.md', {gitea_updated_at: '2026-07-01T10:00:00Z'});
+        ctx.seed('Crawler/Gitea/p/issue-2-fix-the-2.md', {gitea_updated_at: '2026-07-05T10:00:00Z'});
+        ctx.seed('Crawler/Gitea/p/issue-3-fix-the-3.md', {gitea_updated_at: '2026-07-03T10:00:00Z'});
+
+        const deps: Parameters<GiteaIssuesCrawler['run']>[0] = {
+            log: (line) => ctx.logs.push(line),
+            tryRead: () => undefined,
+            write: ctx.deps.write,
+            listNotesUnder: (prefix) => seededNotes.filter((n) => n.id.startsWith(prefix))
+        };
+
+        const crawler = new GiteaIssuesCrawler({
+            baseUrl: 'https://gitea.example.com',
+            owner: 'o', repo: 'r', project: 'p',
+            fetch: cap
+        });
+
+        await crawler.run(deps);
+        expect(urls).toHaveLength(1);
+        expect(urls[0]).toContain('since=2026-07-05T10%3A00%3A00Z');
+        expect(ctx.logs.join('\n')).toContain('delta-refresh from 2026-07-05T10:00:00Z');
+    });
+
+    it('respects an explicit since override even when notes exist', async () => {
+        const seededNotes: Note[] = [{
+            id: 'Crawler/Gitea/p/issue-99-x.md' as NoteId,
+            path: '/tmp/x', title: 'x', content: '',
+            frontmatter: {gitea_updated_at: '2026-07-05T00:00:00Z'} as Note['frontmatter'],
+            tags: [], wikilinks: [], backlinks: [], mtime: 0, hash: 'x'
+        }];
+
+        const {fetch: cap, urls} = captureFetch([]);
+        const crawler = new GiteaIssuesCrawler({
+            baseUrl: 'https://gitea.example.com',
+            owner: 'o', repo: 'r', project: 'p',
+            since: '2026-06-01T00:00:00Z',
+            fetch: cap
+        });
+
+        await crawler.run({
+            log: () => undefined,
+            tryRead: () => undefined,
+            write: ctx.deps.write,
+            listNotesUnder: () => seededNotes
+        });
+
+        expect(urls[0]).toContain('since=2026-06-01T00%3A00%3A00Z');
+        expect(urls[0]).not.toContain('since=2026-07-05');
+    });
+
+    it('does no since inference when no notes exist under the prefix', async () => {
+        const {fetch: cap, urls} = captureFetch([]);
+        const crawler = new GiteaIssuesCrawler({
+            baseUrl: 'https://gitea.example.com',
+            owner: 'o', repo: 'r', project: 'p',
+            fetch: cap
+        });
+
+        await crawler.run({
+            log: () => undefined,
+            tryRead: () => undefined,
+            write: ctx.deps.write,
+            listNotesUnder: () => []
+        });
+
+        expect(urls[0]).not.toContain('since=');
+    });
 });

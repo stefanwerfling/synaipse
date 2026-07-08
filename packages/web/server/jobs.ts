@@ -393,6 +393,11 @@ export class JobManager {
             // without requiring a restart.
             write: (input) => this.service.writeNoteUnscoped(input, 'crawl-gitea'),
             tryRead: (id) => this.service.tryReadNote(id),
+            // Enables Slice 5's delta-refresh: the crawler walks existing
+            // notes under the target prefix and derives a `since` from
+            // the max gitea_updated_at, so scheduled hourly runs stay
+            // cheap.
+            listNotesUnder: (prefix) => this.service.listNotes().filter((n) => n.id.startsWith(prefix)),
             signal
         });
 
