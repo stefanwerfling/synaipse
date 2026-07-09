@@ -1,8 +1,9 @@
 import type {Pool} from 'mariadb';
-import type {AccountStore, ChatAdapter, NoteAdapter, UserStore} from '@synaipse/core';
+import type {AccountStore, ChatAdapter, NoteAdapter, ScheduleStore, UserStore} from '@synaipse/core';
 import {MariaDBAccountStore} from './MariaDBAccountStore.js';
 import {MariaDBChatAdapter} from './MariaDBChatAdapter.js';
 import {MariaDBNoteAdapter} from './MariaDBNoteAdapter.js';
+import {MariaDBScheduleStore} from './MariaDBScheduleStore.js';
 import {MariaDBUserStore} from './MariaDBUserStore.js';
 import {applyMigrations, createPool, resolveConfig, type MariaDBConfig} from './Pool.js';
 
@@ -11,6 +12,7 @@ export interface ServerAdapterBundle {
     chats: ChatAdapter;
     users: UserStore;
     accounts: AccountStore;
+    schedules: ScheduleStore;
     pool: Pool;
     /**
      * Closes the underlying connection pool. Call this during shutdown
@@ -41,12 +43,14 @@ export const createServerAdapters = async (cfg: MariaDBConfig): Promise<ServerAd
     const chats = new MariaDBChatAdapter(pool, resolved);
     const users = new MariaDBUserStore(pool, resolved);
     const accounts = new MariaDBAccountStore(pool, resolved);
+    const schedules = new MariaDBScheduleStore(pool, resolved);
 
     return {
         notes,
         chats,
         users,
         accounts,
+        schedules,
         pool,
         close: () => pool.end()
     };

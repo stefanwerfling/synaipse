@@ -5,7 +5,7 @@ import http from 'node:http';
 import {URL} from 'node:url';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
-import type {AccountStore, UserStore} from '@synaipse/core';
+import type {AccountStore, ScheduleStore, UserStore} from '@synaipse/core';
 import {NoopAssetStore, type ServiceOverrides} from '@synaipse/service';
 import {CachedUserStore} from '@synaipse/mcp-server';
 import {InMemorySessionStore} from './sessions.js';
@@ -109,12 +109,19 @@ interface OverridesResult {
     overrides: ServiceOverrides;
     userStore: UserStore | null;
     accountStore: AccountStore | null;
+    scheduleStore: ScheduleStore | null;
     close: () => Promise<void>;
 }
 
 const buildOverrides = async (): Promise<OverridesResult> => {
     if (config.mode !== 'server') {
-        return {overrides: {}, userStore: null, accountStore: null, close: () => Promise.resolve()};
+        return {
+            overrides: {},
+            userStore: null,
+            accountStore: null,
+            scheduleStore: null,
+            close: () => Promise.resolve()
+        };
     }
 
     if (config.mariadb === undefined) {
@@ -139,6 +146,7 @@ const buildOverrides = async (): Promise<OverridesResult> => {
         },
         userStore,
         accountStore: bundle.accounts,
+        scheduleStore: bundle.schedules,
         close: () => bundle.close()
     };
 };
@@ -151,7 +159,7 @@ const resolveSecureCookie = (): boolean => {
 };
 
 const main = async (): Promise<void> => {
-    const {overrides, userStore, accountStore, close: closeAdapters} = await buildOverrides();
+     const {overrides, userStore, accountStore, scheduleStore: mariaScheduleStore, close: closeAdapters} = await buildOverrides();
     if (config.mode === 'server') {
         const cacheTtl = resolveAuthCacheTtlMs();
         const cacheNote = cacheTtl > 0 ? `auth-cache TTL=${cacheTtl}ms` : 'auth-cache OFF';
@@ -184,10 +192,14 @@ const main = async (): Promise<void> => {
     const broadcaster = new EventBroadcaster();
     const jobs = new JobManager(service);
 
-    // Scheduler for recurring jobs (crawl-gitea, relink, compile). Local
-    // mode uses a JSON sidecar; server-mode's MariaDBScheduleStore is
-    // planned for Slice 3b and falls back to the local store for now.
-    const scheduleStore = new LocalScheduleStore(config.schedulesPath);
+    // Scheduler for recurring jobs (crawl-gitea, relink, compile).
+    // - Local mode: JSON sidecar at config.schedulesPath.
+    // - Server mode: MariaDBScheduleStore from the bundle (Slice 3b).
+    // Both implement ScheduleStore so the runner + routes stay identical.
+    const scheduleStore: ScheduleStore = mariaScheduleStore ?? new LocalScheduleStore(config.schedulesPath);
+    if (mariaScheduleStore !== null) {
+        process.stdout.write('[synaipse-web-api] scheduler: MariaDB-backed store\n');
+    }
     const scheduler = new Scheduler(scheduleStore, jobs);
     scheduler.start();
 
