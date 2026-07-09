@@ -6685,11 +6685,32 @@ button.typed-link-badge:hover {
     width: auto !important;
     height: auto !important;
     transform: none !important;
-    z-index: 2001;
+    /* !important because `.canvas-card.selected` (declared later, same
+       specificity) sets z-index: 10 — since editing entry auto-selects
+       the card, both classes coexist and the backdrop (z-index: 2000)
+       would otherwise paint over the modal, blocking pointer input. */
+    z-index: 2001 !important;
     box-shadow:
         0 24px 60px rgba(0, 0, 0, 0.55),
         0 0 0 1px var(--card-color, var(--border));
     animation: canvas-card-modal-in 160ms ease-out;
+}
+
+/* When the modal is open, the card-body has to be an actual column
+   flexbox so the contenteditable surface (`flex: 1 1 auto`) can stretch
+   to fill the vertical space between the sticky toolbar and the bottom
+   of the modal. Without `min-height: 0` the flex item defaults to
+   `min-height: auto` (= content height), which prevents shrinking and
+   collapses the "fill remaining space" behaviour. Scoped to the modal
+   so read-mode cards keep their content-sized layout. */
+.canvas-card.editing-modal .canvas-card-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.canvas-card.editing-modal .canvas-card-editor {
+    min-height: 0;
 }
 
 @keyframes canvas-card-modal-in {
