@@ -68,6 +68,32 @@ interface AnchorPoint {
     y: number;
 }
 
+interface Rect {
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * Every node whose bounding box lies fully inside `group`'s rect (edge-
+ * inclusive). Used by the group-drag path so moving a container carries
+ * its children — including nested groups, since a sub-group's rect is
+ * geometrically inside the outer group's rect too.
+ */
+export function nodesInsideGroup<T extends Rect>(group: Rect, all: readonly T[]): T[] {
+    const gx2 = group.x + group.width;
+    const gy2 = group.y + group.height;
+    return all.filter((n) =>
+        n.id !== group.id &&
+        n.x >= group.x &&
+        n.y >= group.y &&
+        n.x + n.width <= gx2 &&
+        n.y + n.height <= gy2
+    );
+}
+
 const anchorFor = (node: CanvasNode, side: CanvasSide | undefined, other: CanvasNode): AnchorPoint => {
     const cx = node.x + node.width / 2;
     const cy = node.y + node.height / 2;
@@ -1442,21 +1468,59 @@ export class CanvasRenderer {
             return;
         }
 
-        // Group frame click = select. Groups don't drag/resize yet (they
-        // stay pinned to their creation-rect until edited via JSON), but
-        // they need to reach the bottom bar for color/delete actions.
+        // Group frame click. Shift toggles the selection; a plain click
+        // begins a container-move drag that carries every node
+        // geometrically inside the group's rect (children + nested
+        // sub-groups). Multi-selection partners are merged in.
         const groupEl = targetEl?.closest('.canvas-group') as HTMLElement | null ?? null;
         if (groupEl !== null && this.editable) {
             const id = groupEl.dataset.nodeId;
-            if (id !== undefined) {
-                if (event.shiftKey) {
-                    this.toggleNodeSelection(id);
-                    event.preventDefault();
-                } else {
-                    this.selectNode(id);
-                }
+            if (id === undefined) return;
+            const node = this.nodeById(id);
+            if (node === undefined || node.type !== 'group') return;
+
+            if (event.shiftKey) {
+                this.toggleNodeSelection(id);
+                event.preventDefault();
                 return;
             }
+            if (!this.selectedIds.has(id)) {
+                this.selectNode(id);
+            }
+
+            const partnerMap = new Map<string, {id: string; origX: number; origY: number}>();
+            if (this.selectedIds.size > 1) {
+                for (const otherId of this.selectedIds) {
+                    if (otherId === id) continue;
+                    const other = this.nodeById(otherId);
+                    if (other === undefined) continue;
+                    partnerMap.set(otherId, {id: otherId, origX: other.x, origY: other.y});
+                }
+            }
+            for (const contained of nodesInsideGroup(node, this.doc.nodes)) {
+                if (partnerMap.has(contained.id)) continue;
+                partnerMap.set(contained.id, {
+                    id: contained.id,
+                    origX: contained.x,
+                    origY: contained.y
+                });
+            }
+
+            this.dragState = {
+                id,
+                mode: 'move',
+                origX: node.x,
+                origY: node.y,
+                origW: node.width,
+                origH: node.height,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                moved: false,
+                partners: [...partnerMap.values()]
+            };
+            event.preventDefault();
+            this.element.setPointerCapture(event.pointerId);
+            return;
         }
 
         // Empty background — decide between three drag modes:
