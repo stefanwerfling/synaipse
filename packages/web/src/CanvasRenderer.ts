@@ -14,6 +14,14 @@ const MIN_CARD_H = 60;
 const DEFAULT_TEXT_CARD_W = 260;
 const DEFAULT_TEXT_CARD_H = 140;
 
+// Position + size snap grid for cards and groups. 20px matches Obsidian
+// Canvas's default so notes moved between the two look consistent.
+// Alt (option) held during drag/resize bypasses the snap for pixel-
+// precise placement.
+const GRID_STEP = 20;
+
+const snap = (v: number): number => Math.round(v / GRID_STEP) * GRID_STEP;
+
 const COLOR_PRESETS: Readonly<Record<string, string>> = {
     '1': '#e56565',
     '2': '#e78e4f',
@@ -179,16 +187,48 @@ export class CanvasRenderer {
     private bandRectEl: HTMLElement | null = null;
     private bottomBar!: HTMLElement;
 
+    // Undo/redo: every commit() records the pre-mutation doc into
+    // `undoStack` before firing onChange, wiping the redo stack. `undo()`
+    // and `redo()` swap in a snapshot from the appropriate stack and
+    // save it via onChange without recording — so a redo isn't itself
+    // undoable as a fresh action.
+    // `lastCommittedDoc` mirrors `this.doc` at every commit so we always
+    // have a clean pre-mutation snapshot to push. Snapshots use
+    // structuredClone so `patch({...x, y})` mutations don't share
+    // references with earlier snapshots.
+    private undoStack: CanvasDocument[] = [];
+    private redoStack: CanvasDocument[] = [];
+    private lastCommittedDoc!: CanvasDocument;
+    private readonly MAX_HISTORY = 50;
+
     private onKeyDown = (event: KeyboardEvent): void => {
         if (!this.editable) return;
         if (!this.element.isConnected) return;
         if (this.editingId !== null) return; // typing in textarea
-        if (event.key !== 'Delete' && event.key !== 'Backspace') return;
 
-        // Guard against removing while the user was typing in an
-        // unrelated input elsewhere on the page.
+        // Guard against catching shortcuts while the user was typing in an
+        // unrelated input elsewhere on the page (chat box, settings, etc).
         const active = document.activeElement;
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+        if (active instanceof HTMLElement && active.isContentEditable) return;
+
+        // Undo/Redo — Cmd on mac, Ctrl elsewhere. Cmd/Ctrl-Z = undo,
+        // Cmd/Ctrl-Shift-Z or Cmd/Ctrl-Y = redo (both conventions).
+        if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+            const k = event.key.toLowerCase();
+            if (k === 'z' && !event.shiftKey) {
+                event.preventDefault();
+                this.undo();
+                return;
+            }
+            if ((k === 'z' && event.shiftKey) || k === 'y') {
+                event.preventDefault();
+                this.redo();
+                return;
+            }
+        }
+
+        if (event.key !== 'Delete' && event.key !== 'Backspace') return;
 
         if (this.selectedEdgeId !== null) {
             event.preventDefault();
@@ -204,6 +244,7 @@ export class CanvasRenderer {
 
     public constructor(doc: CanvasDocument, private readonly opts: CanvasRendererOptions) {
         this.doc = doc;
+        this.lastCommittedDoc = structuredClone(doc);
         this.element = el('div', {class: 'canvas-viewport', attrs: {tabindex: '0'}});
         this.build();
     }
@@ -877,6 +918,44 @@ export class CanvasRenderer {
     // ─── Mutations ───
 
     private commit(): void {
+        // Snapshot the pre-mutation state onto the undo stack so a
+        // subsequent Ctrl-Z restores it. Any new commit invalidates the
+        // redo stack — you can't redo forwards through a branch that
+        // no longer exists.
+        this.undoStack.push(this.lastCommittedDoc);
+        if (this.undoStack.length > this.MAX_HISTORY) this.undoStack.shift();
+        this.redoStack = [];
+        this.lastCommittedDoc = structuredClone(this.doc);
+        this.opts.onChange?.(this.doc);
+    }
+
+    public undo(): void {
+        const prev = this.undoStack.pop();
+        if (prev === undefined) return;
+        this.redoStack.push(this.lastCommittedDoc);
+        this.doc = prev;
+        this.lastCommittedDoc = structuredClone(prev);
+        // Selection state doesn't survive undo — an old selectedId may
+        // point at a node that no longer exists in the restored doc.
+        this.selectedId = null;
+        this.selectedEdgeId = null;
+        this.renderAll();
+        this.refreshBottomBar();
+        // Fire onChange to persist the restored state, but bypass
+        // commit() so we don't re-record it as a new mutation.
+        this.opts.onChange?.(this.doc);
+    }
+
+    public redo(): void {
+        const next = this.redoStack.pop();
+        if (next === undefined) return;
+        this.undoStack.push(this.lastCommittedDoc);
+        this.doc = next;
+        this.lastCommittedDoc = structuredClone(next);
+        this.selectedId = null;
+        this.selectedEdgeId = null;
+        this.renderAll();
+        this.refreshBottomBar();
         this.opts.onChange?.(this.doc);
     }
 
@@ -976,8 +1055,8 @@ export class CanvasRenderer {
         const node: CanvasTextNode = {
             id,
             type: 'text',
-            x: Math.round(worldX - DEFAULT_TEXT_CARD_W / 2),
-            y: Math.round(worldY - DEFAULT_TEXT_CARD_H / 2),
+            x: snap(worldX - DEFAULT_TEXT_CARD_W / 2),
+            y: snap(worldY - DEFAULT_TEXT_CARD_H / 2),
             width: DEFAULT_TEXT_CARD_W,
             height: DEFAULT_TEXT_CARD_H,
             text
@@ -1288,14 +1367,20 @@ export class CanvasRenderer {
             const card = this.cardEls.get(this.dragState.id);
             if (card === undefined) return;
 
+            // Alt (option) held → freeform (pixel-precise), otherwise
+            // snap to GRID_STEP. Read on every move so users can toggle
+            // mid-drag without releasing the pointer.
+            const freeform = event.altKey;
+            const align = (v: number): number => freeform ? Math.round(v) : snap(v);
+
             if (this.dragState.mode === 'move') {
-                node.x = Math.round(this.dragState.origX + dx);
-                node.y = Math.round(this.dragState.origY + dy);
+                node.x = align(this.dragState.origX + dx);
+                node.y = align(this.dragState.origY + dy);
                 card.style.left = `${node.x}px`;
                 card.style.top = `${node.y}px`;
             } else {
-                node.width = Math.max(MIN_CARD_W, Math.round(this.dragState.origW + dx));
-                node.height = Math.max(MIN_CARD_H, Math.round(this.dragState.origH + dy));
+                node.width = Math.max(MIN_CARD_W, align(this.dragState.origW + dx));
+                node.height = Math.max(MIN_CARD_H, align(this.dragState.origH + dy));
                 card.style.width = `${node.width}px`;
                 card.style.height = `${node.height}px`;
             }
@@ -1332,7 +1417,11 @@ export class CanvasRenderer {
             // dropping them avoids spawning zero-size group nodes.
             const MIN_GROUP_SIZE = 40;
             if (width >= MIN_GROUP_SIZE && height >= MIN_GROUP_SIZE) {
-                this.addGroup(Math.round(minX), Math.round(minY), Math.round(width), Math.round(height));
+                // Snap group bounds to the same grid so a group holding
+                // snapped cards has coherent geometry. Alt bypass at pointerup
+                // isn't wired — bands are already low-precision from the
+                // pointer arc, extra freeform value is minimal.
+                this.addGroup(snap(minX), snap(minY), snap(width), snap(height));
             }
             return;
         }
