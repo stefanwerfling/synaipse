@@ -50,7 +50,28 @@ export const createPool = (cfg: MariaDBConfig): Pool => {
         bigIntAsNumber: true,
         // Multiple statements off by default — migrations split into per-file
         // calls so each one fits in one statement.
-        multipleStatements: false
+        multipleStatements: false,
+        // Align server-session TZ with Node's local TZ so `CURRENT_TIMESTAMP`
+        // (server-side) and JS-Date-encoded columns (client-side) land in
+        // the same frame. Without this, hosts running MariaDB in a
+        // different SYSTEM TZ than the Node process show a systematic
+        // multi-hour skew between `created_at` and `expires_at` on the
+        // same row (backlog #17).
+        //
+        // Why 'auto' and not 'Z' / 'UTC': the driver's JS-Date encoder
+        // (packet-output-stream.js#writeBinaryDate) uses LOCAL-TZ getters
+        // (`getHours` etc.) unconditionally — forcing session TZ to UTC
+        // while the encoder emits CEST wall-clock creates the OPPOSITE
+        // skew. 'auto' queries the server's SYSTEM tz on connect, converts
+        // it to a fixed offset that matches Node's local TZ, then SET
+        // time_zone on the session. Encoder and server both interpret
+        // "13:04:00" as the same instant.
+        //
+        // For deployments that want DB timestamps in UTC, set the Node
+        // process's TZ to UTC (Docker containers already default to UTC;
+        // for bare-metal, `TZ=UTC node …`). 'auto' then keeps everything
+        // in UTC.
+        timezone: 'auto'
     });
 };
 
