@@ -7003,6 +7003,15 @@ button.typed-link-badge:hover {
     z-index: 5;
 }
 
+/* Ctrl/Cmd-drag rubber-band for multi-select — visually distinct from the
+   group-create band above (solid + warmer hue) so the user can tell the
+   two rubber-band modes apart at a glance. */
+.canvas-band-rect-multi {
+    border-style: solid;
+    border-color: #e0a458;
+    background: rgba(224, 164, 88, 0.10);
+}
+
 /* Bottom bar — screen-fixed contextual actions for the current selection.
    Sits inside .canvas-viewport (not the transformed .canvas-stage) so
    pan/zoom don't move it. */

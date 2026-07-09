@@ -115,6 +115,12 @@ interface DragState {
     startClientX: number;
     startClientY: number;
     moved: boolean;
+    /**
+     * Other nodes moving in lockstep — populated when the drag begins on
+     * a card that is part of a multi-selection. Empty for single-drag
+     * and for resize (multi-resize is out of scope for v1).
+     */
+    partners: Array<{id: string; origX: number; origY: number}>;
 }
 
 /**
@@ -148,10 +154,17 @@ interface EdgeHandleDragState {
  * a positive-area rectangle.
  */
 interface BandSelectState {
+    /**
+     * `group`: on release, create a group node from the rect.
+     * `multi-select`: on release, add all nodes intersecting the rect to
+     * the current selection (or replace it, depending on Ctrl+Shift).
+     */
+    mode: 'group' | 'multi-select';
     startWorldX: number;
     startWorldY: number;
     currentWorldX: number;
     currentWorldY: number;
+    additive: boolean;
 }
 
 export class CanvasRenderer {
@@ -173,7 +186,13 @@ export class CanvasRenderer {
     private doc: CanvasDocument;
     private cardEls = new Map<string, HTMLElement>();
     private groupEls = new Map<string, HTMLElement>();
-    private selectedId: string | null = null;
+    /**
+     * Multi-node selection. Single-select is just size===1. `selectedEdgeId`
+     * stays separate because edges and nodes are mutually exclusive
+     * selection targets (there's a single delete-focus and the bottom bar
+     * shows a different set of controls per kind).
+     */
+    private selectedIds = new Set<string>();
     private selectedEdgeId: string | null = null;
     private editingId: string | null = null;
     /** If the modal editor is open, this force-commits it. Used by the
@@ -236,9 +255,17 @@ export class CanvasRenderer {
             return;
         }
 
-        if (this.selectedId !== null) {
+        if (this.selectedIds.size > 1) {
             event.preventDefault();
-            this.removeNode(this.selectedId);
+            this.removeNodes([...this.selectedIds]);
+            return;
+        }
+
+        if (this.selectedIds.size === 1) {
+            const only = this.singleSelectedNode();
+            if (only === null) return;
+            event.preventDefault();
+            this.removeNode(only);
         }
     };
 
@@ -322,7 +349,7 @@ export class CanvasRenderer {
 
             const accent = resolveColor(node.color, '');
             const rect = el('div', {
-                class: node.id === this.selectedId ? 'canvas-group selected' : 'canvas-group',
+                class: this.selectedIds.has(node.id) ? 'canvas-group selected' : 'canvas-group',
                 style: {
                     left: `${node.x}px`,
                     top: `${node.y}px`,
@@ -382,7 +409,7 @@ export class CanvasRenderer {
             card.dataset.color = '1';
         }
 
-        if (node.id === this.selectedId) card.classList.add('selected');
+        if (this.selectedIds.has(node.id)) card.classList.add('selected');
 
         if (node.type === 'text') {
             const body = el('div', {class: 'canvas-card-body md-preview'});
@@ -652,29 +679,72 @@ export class CanvasRenderer {
      * Nodes (cards + groups) and edges have mutually exclusive selection
      * state — a keypress needs a single "delete the currently focused
      * thing" target, and showing endpoint handles on an edge while a card
-     * is also outlined is confusing. Both helpers no-op when nothing
-     * changes and drive a single bottom-bar refresh.
+     * is also outlined is confusing.
+     *
+     * `selectNode` sets a single-node selection (or clears when id=null),
+     * replacing any prior multi. Use `toggleNodeSelection` for Shift-click
+     * add/remove, and `setMultiSelection` for the rubber-band bulk-apply.
      */
     private selectNode(id: string | null): void {
-        if (this.selectedEdgeId !== null) {
-            this.selectedEdgeId = null;
-            this.renderEdges();
+        this.clearEdgeSelectionOnly();
+        for (const prev of this.selectedIds) {
+            if (prev === id) continue;
+            this.nodeElement(prev)?.classList.remove('selected');
         }
-        if (this.selectedId === id) return;
-        if (this.selectedId !== null) {
-            this.nodeElement(this.selectedId)?.classList.remove('selected');
-        }
-        this.selectedId = id;
+        this.selectedIds.clear();
         if (id !== null) {
+            this.selectedIds.add(id);
             this.nodeElement(id)?.classList.add('selected');
         }
         this.refreshBottomBar();
     }
 
+    private toggleNodeSelection(id: string): void {
+        this.clearEdgeSelectionOnly();
+        if (this.selectedIds.has(id)) {
+            this.selectedIds.delete(id);
+            this.nodeElement(id)?.classList.remove('selected');
+        } else {
+            this.selectedIds.add(id);
+            this.nodeElement(id)?.classList.add('selected');
+        }
+        this.refreshBottomBar();
+    }
+
+    private setMultiSelection(ids: string[], additive: boolean): void {
+        this.clearEdgeSelectionOnly();
+        if (!additive) {
+            for (const prev of this.selectedIds) {
+                this.nodeElement(prev)?.classList.remove('selected');
+            }
+            this.selectedIds.clear();
+        }
+        for (const id of ids) {
+            if (this.selectedIds.has(id)) continue;
+            this.selectedIds.add(id);
+            this.nodeElement(id)?.classList.add('selected');
+        }
+        this.refreshBottomBar();
+    }
+
+    private clearEdgeSelectionOnly(): void {
+        if (this.selectedEdgeId === null) return;
+        this.selectedEdgeId = null;
+        this.renderEdges();
+    }
+
+    private singleSelectedNode(): string | null {
+        if (this.selectedIds.size !== 1) return null;
+        const first = this.selectedIds.values().next().value;
+        return first ?? null;
+    }
+
     private selectEdge(id: string | null): void {
-        if (this.selectedId !== null) {
-            this.nodeElement(this.selectedId)?.classList.remove('selected');
-            this.selectedId = null;
+        if (this.selectedIds.size > 0) {
+            for (const prev of this.selectedIds) {
+                this.nodeElement(prev)?.classList.remove('selected');
+            }
+            this.selectedIds.clear();
         }
         if (this.selectedEdgeId === id) return;
         this.selectedEdgeId = id;
@@ -705,8 +775,15 @@ export class CanvasRenderer {
             }
         }
 
-        if (this.selectedId !== null) {
-            const node = this.nodeById(this.selectedId);
+        if (this.selectedIds.size > 1) {
+            this.populateMultiControls();
+            this.bottomBar.removeAttribute('hidden');
+            return;
+        }
+
+        const only = this.singleSelectedNode();
+        if (only !== null) {
+            const node = this.nodeById(only);
             if (node !== undefined) {
                 this.populateNodeControls(node.id);
                 this.bottomBar.removeAttribute('hidden');
@@ -715,6 +792,28 @@ export class CanvasRenderer {
         }
 
         this.bottomBar.setAttribute('hidden', 'hidden');
+    }
+
+    private populateMultiControls(): void {
+        const ids = [...this.selectedIds];
+        const count = ids.length;
+
+        this.bottomBar.appendChild(el('span', {
+            class: 'canvas-bottom-bar-kind',
+            text: `${count} selected`
+        }));
+
+        // Reflect the current colour only if every selected node agrees —
+        // a mixed selection shows all-inactive so no swatch pretends to
+        // represent the group. Clicking still applies to every node.
+        const colors = ids.map((id) => this.nodeById(id)?.color);
+        const uniform = colors.every((c) => c === colors[0]);
+        this.appendColorSwatches({
+            current: uniform ? colors[0] : undefined,
+            onPick: (preset) => this.setNodesColor(ids, preset)
+        });
+
+        this.appendDeleteButton(() => this.removeNodes(ids));
     }
 
     private populateEdgeControls(edgeId: string): void {
@@ -935,9 +1034,9 @@ export class CanvasRenderer {
         this.redoStack.push(this.lastCommittedDoc);
         this.doc = prev;
         this.lastCommittedDoc = structuredClone(prev);
-        // Selection state doesn't survive undo — an old selectedId may
-        // point at a node that no longer exists in the restored doc.
-        this.selectedId = null;
+        // Selection state doesn't survive undo — an old id may point at a
+        // node that no longer exists in the restored doc.
+        this.selectedIds.clear();
         this.selectedEdgeId = null;
         this.renderAll();
         this.refreshBottomBar();
@@ -952,7 +1051,7 @@ export class CanvasRenderer {
         this.undoStack.push(this.lastCommittedDoc);
         this.doc = next;
         this.lastCommittedDoc = structuredClone(next);
-        this.selectedId = null;
+        this.selectedIds.clear();
         this.selectedEdgeId = null;
         this.renderAll();
         this.refreshBottomBar();
@@ -968,8 +1067,39 @@ export class CanvasRenderer {
             nodes: this.doc.nodes.filter((n) => n.id !== id),
             edges: this.doc.edges.filter((e) => e.fromNode !== id && e.toNode !== id)
         };
-        if (this.selectedId === id) this.selectedId = null;
+        this.selectedIds.delete(id);
         this.renderAll();
+        this.refreshBottomBar();
+        this.commit();
+    }
+
+    private removeNodes(ids: string[]): void {
+        if (ids.length === 0) return;
+        const drop = new Set(ids);
+        this.doc = {
+            nodes: this.doc.nodes.filter((n) => !drop.has(n.id)),
+            edges: this.doc.edges.filter((e) => !drop.has(e.fromNode) && !drop.has(e.toNode))
+        };
+        for (const id of ids) this.selectedIds.delete(id);
+        this.renderAll();
+        this.refreshBottomBar();
+        this.commit();
+    }
+
+    private setNodesColor(ids: string[], preset: string | undefined): void {
+        if (ids.length === 0) return;
+        const paint = new Set(ids);
+        const nextNodes = this.doc.nodes.map((node) => {
+            if (!paint.has(node.id)) return node;
+            if (preset === undefined) {
+                const {color: _color, ...rest} = node;
+                return rest as CanvasNode;
+            }
+            return {...node, color: preset};
+        });
+        this.doc = {nodes: nextNodes, edges: this.doc.edges};
+        this.renderAll();
+        this.refreshBottomBar();
         this.commit();
     }
 
@@ -1262,10 +1392,34 @@ export class CanvasRenderer {
             const node = this.nodeById(id);
             if (node === undefined) return;
 
-            this.selectNode(id);
+            // Selection semantics:
+            // - Shift(+click) → toggle this card in the multi-selection, no drag.
+            // - Card already selected → keep selection; a subsequent drag
+            //   moves all selected nodes together.
+            // - Otherwise → replace selection with just this card.
+            if (event.shiftKey) {
+                this.toggleNodeSelection(id);
+                event.preventDefault();
+                return;
+            }
+            if (!this.selectedIds.has(id)) {
+                this.selectNode(id);
+            }
 
             // Never drag while inline text edit is active on this card.
             if (this.editingId === id) return;
+
+            // Resize is single-card only — multi-resize would need a
+            // shared origin + a scaling policy, out of scope for v1.
+            const partners: DragState['partners'] = [];
+            if (!isResizeHandle && this.selectedIds.size > 1) {
+                for (const otherId of this.selectedIds) {
+                    if (otherId === id) continue;
+                    const other = this.nodeById(otherId);
+                    if (other === undefined) continue;
+                    partners.push({id: otherId, origX: other.x, origY: other.y});
+                }
+            }
 
             this.dragState = {
                 id,
@@ -1276,7 +1430,8 @@ export class CanvasRenderer {
                 origH: node.height,
                 startClientX: event.clientX,
                 startClientY: event.clientY,
-                moved: false
+                moved: false,
+                partners
             };
             // Belt-and-suspenders alongside `user-select: none` on the card:
             // suppresses the native text-selection that would otherwise start
@@ -1294,25 +1449,44 @@ export class CanvasRenderer {
         if (groupEl !== null && this.editable) {
             const id = groupEl.dataset.nodeId;
             if (id !== undefined) {
-                this.selectNode(id);
+                if (event.shiftKey) {
+                    this.toggleNodeSelection(id);
+                    event.preventDefault();
+                } else {
+                    this.selectNode(id);
+                }
                 return;
             }
         }
 
-        // Empty background — deselect + either group-band-select (Shift)
-        // or pan (default).
-        this.selectNode(null);
-        this.selectEdge(null);
+        // Empty background — decide between three drag modes:
+        // - Shift-drag  → group-band (unchanged legacy behaviour)
+        // - Ctrl/Cmd-drag → multi-select rubber-band
+        // - no-modifier → pan
+        // Empty click (no modifier) always clears selection first.
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+            this.selectNode(null);
+            this.selectEdge(null);
+        }
 
-        if (this.editable && event.shiftKey) {
+        if (this.editable && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+            const isMulti = event.ctrlKey || event.metaKey;
             const {x, y} = this.toWorld(event.clientX, event.clientY);
             this.bandSelect = {
+                mode: isMulti ? 'multi-select' : 'group',
                 startWorldX: x,
                 startWorldY: y,
                 currentWorldX: x,
-                currentWorldY: y
+                currentWorldY: y,
+                // Ctrl/Cmd+Shift → add to the existing selection instead
+                // of replacing it. Shift alone still means "group mode".
+                additive: isMulti && event.shiftKey
             };
-            this.bandRectEl = el('div', {class: 'canvas-band-rect'});
+            this.bandRectEl = el('div', {
+                class: isMulti
+                    ? 'canvas-band-rect canvas-band-rect-multi'
+                    : 'canvas-band-rect'
+            });
             this.stage.appendChild(this.bandRectEl);
             this.updateBandRect();
             this.element.setPointerCapture(event.pointerId);
@@ -1378,6 +1552,21 @@ export class CanvasRenderer {
                 node.y = align(this.dragState.origY + dy);
                 card.style.left = `${node.x}px`;
                 card.style.top = `${node.y}px`;
+
+                // Multi-drag — apply the identical delta to every partner
+                // so they move in lockstep. Each partner snaps on its own
+                // grid slot so an already-aligned group stays aligned.
+                for (const partner of this.dragState.partners) {
+                    const other = this.nodeById(partner.id);
+                    if (other === undefined) continue;
+                    other.x = align(partner.origX + dx);
+                    other.y = align(partner.origY + dy);
+                    const partnerEl = this.nodeElement(partner.id);
+                    if (partnerEl !== undefined) {
+                        partnerEl.style.left = `${other.x}px`;
+                        partnerEl.style.top = `${other.y}px`;
+                    }
+                }
             } else {
                 node.width = Math.max(MIN_CARD_W, align(this.dragState.origW + dx));
                 node.height = Math.max(MIN_CARD_H, align(this.dragState.origH + dy));
@@ -1410,8 +1599,30 @@ export class CanvasRenderer {
 
             const minX = Math.min(band.startWorldX, band.currentWorldX);
             const minY = Math.min(band.startWorldY, band.currentWorldY);
-            const width = Math.abs(band.currentWorldX - band.startWorldX);
-            const height = Math.abs(band.currentWorldY - band.startWorldY);
+            const maxX = Math.max(band.startWorldX, band.currentWorldX);
+            const maxY = Math.max(band.startWorldY, band.currentWorldY);
+            const width = maxX - minX;
+            const height = maxY - minY;
+
+            if (band.mode === 'multi-select') {
+                // Any node whose bbox overlaps the rect goes into the
+                // selection. Overlap (not full-containment) so a partial
+                // sweep captures nodes the user visibly touched. Small
+                // bands are treated as accidental clicks, not selections.
+                const MIN_MULTI_BAND = 4;
+                if (width >= MIN_MULTI_BAND || height >= MIN_MULTI_BAND) {
+                    const hits: string[] = [];
+                    for (const node of this.doc.nodes) {
+                        const nx2 = node.x + node.width;
+                        const ny2 = node.y + node.height;
+                        if (node.x < maxX && nx2 > minX && node.y < maxY && ny2 > minY) {
+                            hits.push(node.id);
+                        }
+                    }
+                    this.setMultiSelection(hits, band.additive);
+                }
+                return;
+            }
 
             // Rubber-bands smaller than this are usually accidental Shift-clicks;
             // dropping them avoids spawning zero-size group nodes.
