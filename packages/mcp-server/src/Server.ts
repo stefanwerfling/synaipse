@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {randomUUID} from 'node:crypto';
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -134,6 +135,19 @@ const buildMcpServer = (
  *     enforced per tool inside `buildMcpServer` (read vs write, tool
  *     whitelist, path-prefix restriction).
  */
+interface McpSessionEntry {
+    transport: StreamableHTTPServerTransport;
+    server: Server;
+    tokenLabel: string;
+}
+
+const readSessionIdHeader = (req: http.IncomingMessage): string | undefined => {
+    const raw = req.headers['mcp-session-id'];
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw) && raw.length > 0) return raw[0];
+    return undefined;
+};
+
 export const buildMcpHttpHandler = (
     config: Config,
     service: SynaipseService,
@@ -143,6 +157,14 @@ export const buildMcpHttpHandler = (
     const tools = buildTools(service);
     const userStore = options.userStore ?? null;
     const authConfigured = isAuthConfigured(config, userStore);
+
+    // Streamable-HTTP is stateful: the SDK generates a session ID on
+    // the client's `initialize` call and rejects subsequent tool calls
+    // that either lack the `Mcp-Session-Id` header (400) or reference
+    // an unknown session (404). We must therefore keep one transport +
+    // Server per session across HTTP requests — a fresh transport per
+    // request would always report "Server not initialized".
+    const sessions = new Map<string, McpSessionEntry>();
 
     if (!authConfigured) {
         process.stderr.write(
@@ -210,25 +232,72 @@ export const buildMcpHttpHandler = (
                 return;
             }
 
-            const transport = new StreamableHTTPServerTransport({} as never);
+            const sessionId = readSessionIdHeader(req);
+            const existing = sessionId !== undefined ? sessions.get(sessionId) : undefined;
+
+            const runHandle = async (transport: StreamableHTTPServerTransport): Promise<void> => {
+                try {
+                    await transport.handleRequest(req, res);
+                } catch (error: unknown) {
+                    process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+                    if (!res.headersSent) {
+                        res.statusCode = 500;
+                        res.end('internal error');
+                    }
+                }
+            };
+
+            if (existing !== undefined) {
+                // Bind the session to the token label that opened it —
+                // otherwise a leaked session ID could be reused by any
+                // other authenticated caller.
+                if (existing.tokenLabel !== scope.label) {
+                    res.statusCode = 403;
+                    res.end('session bound to a different token');
+                    return;
+                }
+                await runHandle(existing.transport);
+                return;
+            }
+
+            if (sessionId !== undefined) {
+                // Client presented a session ID we don't know about — the
+                // SDK's own 404 semantics for "Session not found".
+                res.statusCode = 404;
+                res.end('session not found');
+                return;
+            }
+
+            // No session ID header → must be an `initialize` request.
+            // Build a fresh Server + transport pair, register it in the
+            // session map when the SDK generates the ID, and tear it
+            // down when the transport signals close.
             const ctx: ToolContext = resolveContextFromRequest({
                 url: req.url ?? '/',
                 headers: req.headers,
                 basePath: options.basePath
             });
             const server = buildMcpServer(config, tools, publisher, ctx, scope);
+            const tokenLabel = scope.label;
 
-            res.on('close', () => {
-                void transport.close();
-                void server.close();
+            const transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: () => randomUUID(),
+                onsessioninitialized: (id: string) => {
+                    sessions.set(id, {transport, server, tokenLabel});
+                }
             });
+
+            transport.onclose = () => {
+                const id = transport.sessionId;
+                if (id !== undefined) sessions.delete(id);
+                void server.close();
+            };
 
             try {
                 await server.connect(transport as unknown as Transport);
-                await transport.handleRequest(req, res);
+                await runHandle(transport);
             } catch (error: unknown) {
                 process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-
                 if (!res.headersSent) {
                     res.statusCode = 500;
                     res.end('internal error');
