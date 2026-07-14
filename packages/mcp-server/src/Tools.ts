@@ -201,6 +201,7 @@ export interface ToolHandler {
 const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
     synaipse_write_note:   {mode: 'write', pathArg: 'path'},
     synaipse_update_note:  {mode: 'write', pathArg: 'path'},
+    synaipse_edit_note:    {mode: 'write', pathArg: 'id'},
     synaipse_delete_note:  {mode: 'write', pathArg: 'id'},
     synaipse_write_asset:  {mode: 'write', pathArg: 'noteId'},
     synaipse_link_note:    {mode: 'write', pathArg: 'source'},
@@ -780,6 +781,80 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             }
 
             const note = await service.updateNote(id, patch, ctx);
+            return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_edit_note',
+            description: 'Find/replace inside a note body without resending the whole content — the point of this tool over update_note is to avoid transferring an unchanged 400-line note back through MCP just to change three lines. Each edit fails loudly (Error) if oldString isn\'t found or matches more than once; use replaceAll:true to opt into multi-match. Edits are applied in the given order against the intermediate body, so a later edit sees the earlier ones. Frontmatter is not touched — use update_note for that.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    id: {type: 'string', description: 'Note id (relative path)'},
+                    edits: {
+                        type: 'array',
+                        description: 'Ordered list of body edits',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                oldString: {type: 'string', description: 'Literal text to find in the current body. Must match exactly once (or set replaceAll).'},
+                                newString: {type: 'string', description: 'Replacement text. May be empty to delete.'},
+                                replaceAll: {type: 'boolean', description: 'Replace every occurrence instead of requiring uniqueness. Default false.'}
+                            },
+                            required: ['oldString', 'newString']
+                        },
+                        minItems: 1
+                    }
+                },
+                required: ['id', 'edits']
+            }
+        },
+        handle: async (args, ctx) => {
+            const id = asString(args.id, 'id');
+            const rawEdits = args.edits;
+
+            if (!Array.isArray(rawEdits) || rawEdits.length === 0) {
+                throw new Error('edits must be a non-empty array');
+            }
+
+            const existing = service.readNote(id);
+            let body = existing.content;
+
+            for (let i = 0; i < rawEdits.length; i++) {
+                const edit = rawEdits[i] as Record<string, unknown>;
+                const oldString = asString(edit.oldString, `edits[${i}].oldString`);
+                const newString = asString(edit.newString, `edits[${i}].newString`);
+                const replaceAll = edit.replaceAll === true;
+
+                if (oldString.length === 0) {
+                    throw new Error(`edits[${i}]: oldString is empty`);
+                }
+                if (oldString === newString) {
+                    throw new Error(`edits[${i}]: oldString equals newString — no-op edit`);
+                }
+
+                const first = body.indexOf(oldString);
+                if (first === -1) {
+                    throw new Error(`edits[${i}]: oldString not found in note body`);
+                }
+
+                if (replaceAll) {
+                    body = body.split(oldString).join(newString);
+                    continue;
+                }
+
+                const second = body.indexOf(oldString, first + 1);
+                if (second !== -1) {
+                    throw new Error(
+                        `edits[${i}]: oldString matches multiple times — add surrounding context to make it unique, or set replaceAll:true`
+                    );
+                }
+
+                body = body.slice(0, first) + newString + body.slice(first + oldString.length);
+            }
+
+            const note = await service.updateNote(id, {content: body}, ctx);
             return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
         }
     },
