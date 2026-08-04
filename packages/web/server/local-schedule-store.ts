@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {readFile, rename, writeFile, mkdir} from 'node:fs/promises';
 import path from 'node:path';
-import type {Schedule, ScheduleInput, ScheduleStore} from '@synaipse/core';
+import type {Schedule, ScheduleInput, SchedulePatch, ScheduleStore} from '@synaipse/core';
 
 /**
  * File-backed ScheduleStore for local-mode. Persists to a single JSON
@@ -102,14 +102,14 @@ export class LocalScheduleStore implements ScheduleStore {
 
     public async update(
         id: string,
-        patch: Partial<Omit<Schedule, 'id' | 'createdAt'>>
+        patch: SchedulePatch
     ): Promise<Schedule | null> {
         await this.ensureLoaded();
 
         const current = this.data.get(id);
         if (current === undefined) return null;
 
-        const updated: Schedule = {
+        const merged: Record<string, unknown> = {
             ...current,
             ...patch,
             // id + createdAt are locked; patch cannot override them via the type,
@@ -118,6 +118,14 @@ export class LocalScheduleStore implements ScheduleStore {
             createdAt: current.createdAt
         };
 
+        // A patch key set to `undefined` means "clear this field" (e.g.
+        // nextRun on a manual job). Delete it so the stored record keeps the
+        // optional-absent shape instead of carrying an explicit undefined.
+        for (const key of Object.keys(patch)) {
+            if ((patch as Record<string, unknown>)[key] === undefined) delete merged[key];
+        }
+
+        const updated = merged as unknown as Schedule;
         this.data.set(id, updated);
         await this.persist();
         return updated;

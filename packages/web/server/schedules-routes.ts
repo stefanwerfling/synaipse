@@ -1,8 +1,9 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
-import type {Schedule, ScheduleInput, ScheduleStore} from '@synaipse/core';
+import type {ScheduleInput, SchedulePatch, ScheduleStore} from '@synaipse/core';
 import type {JobType} from './jobs.js';
 import type {Scheduler} from './scheduler.js';
 import {parseCron, nextFireTime} from './cron.js';
+import {ALLOWED_JOB_TYPES, validateJobParams} from './job-validation.js';
 
 const json = (res: ServerResponse, status: number, body: unknown): void => {
     res.writeHead(status, {'Content-Type': 'application/json'});
@@ -29,8 +30,6 @@ interface Result {
 const done: Result = {handled: true};
 const skip: Result = {handled: false};
 
-const ALLOWED_JOB_TYPES: readonly JobType[] = ['relink', 'compile', 'crawl-gitea'];
-
 const validateCreateBody = (body: unknown): {ok: true; input: ScheduleInput} | {ok: false; message: string} => {
     if (typeof body !== 'object' || body === null) {
         return {ok: false, message: 'body must be an object'};
@@ -43,16 +42,26 @@ const validateCreateBody = (body: unknown): {ok: true; input: ScheduleInput} | {
     if (typeof b.jobType !== 'string' || !ALLOWED_JOB_TYPES.includes(b.jobType as JobType)) {
         return {ok: false, message: `field 'jobType' must be one of ${ALLOWED_JOB_TYPES.join(', ')}`};
     }
-    if (typeof b.cron !== 'string' || b.cron.trim().length === 0) {
-        return {ok: false, message: "field 'cron' must be a non-empty string"};
+    // An empty cron is legal: it marks a MANUAL job — it never auto-fires,
+    // only "Run now" triggers it. A non-empty cron must parse.
+    if (typeof b.cron !== 'string') {
+        return {ok: false, message: "field 'cron' must be a string ('' = manual)"};
     }
     if (typeof b.jobParams !== 'object' || b.jobParams === null) {
         return {ok: false, message: "field 'jobParams' must be an object"};
     }
 
-    const cronResult = parseCron(b.cron);
-    if (!cronResult.ok) {
-        return {ok: false, message: cronResult.message};
+    const cron = b.cron.trim();
+    if (cron.length > 0) {
+        const cronResult = parseCron(cron);
+        if (!cronResult.ok) {
+            return {ok: false, message: cronResult.message};
+        }
+    }
+
+    const paramError = validateJobParams(b.jobType as JobType, b.jobParams as Record<string, unknown>);
+    if (paramError !== null) {
+        return {ok: false, message: paramError};
     }
 
     return {
@@ -61,7 +70,7 @@ const validateCreateBody = (body: unknown): {ok: true; input: ScheduleInput} | {
             name: b.name.trim(),
             jobType: b.jobType,
             jobParams: JSON.stringify(b.jobParams),
-            cron: b.cron.trim(),
+            cron,
             ...(b.enabled === false ? {enabled: false} : {})
         }
     };
@@ -108,14 +117,14 @@ export const handleSchedulesRoute = async (
             }
 
             const created = await store.create(validation.input);
-            const cronResult = parseCron(created.cron);
-            if (cronResult.ok) {
+            // Manual jobs (empty cron) get no nextRun — they never auto-fire.
+            const cronResult = created.cron.length > 0 ? parseCron(created.cron) : null;
+            if (cronResult !== null && cronResult.ok) {
                 const withNextRun = await store.update(created.id, {
                     nextRun: nextFireTime(cronResult.parsed, Date.now())
                 });
                 json(res, 201, {schedule: withNextRun ?? created});
             } else {
-                // shouldn't happen — validated above — but be defensive
                 json(res, 201, {schedule: created});
             }
             return done;
@@ -160,7 +169,7 @@ export const handleSchedulesRoute = async (
             if (current === null) { notFound(res); return done; }
 
             const body = await readJsonBody<Record<string, unknown>>(req);
-            const patch: Partial<Omit<Schedule, 'id' | 'createdAt'>> = {};
+            const patch: SchedulePatch = {};
 
             if (typeof body.name === 'string' && body.name.trim().length > 0) {
                 patch.name = body.name.trim();
@@ -168,11 +177,18 @@ export const handleSchedulesRoute = async (
             if (typeof body.enabled === 'boolean') {
                 patch.enabled = body.enabled;
             }
-            if (typeof body.cron === 'string' && body.cron.trim().length > 0) {
-                const cronResult = parseCron(body.cron);
-                if (!cronResult.ok) { badRequest(res, cronResult.message); return done; }
-                patch.cron = body.cron.trim();
-                patch.nextRun = nextFireTime(cronResult.parsed, Date.now());
+            if (typeof body.cron === 'string') {
+                const cron = body.cron.trim();
+                if (cron.length === 0) {
+                    // Switch to a manual job — clears the auto-fire schedule.
+                    patch.cron = '';
+                    patch.nextRun = undefined;
+                } else {
+                    const cronResult = parseCron(cron);
+                    if (!cronResult.ok) { badRequest(res, cronResult.message); return done; }
+                    patch.cron = cron;
+                    patch.nextRun = nextFireTime(cronResult.parsed, Date.now());
+                }
             }
 
             const updated = await store.update(id, patch);

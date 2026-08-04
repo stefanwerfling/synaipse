@@ -7,7 +7,8 @@ import type {Config, Frontmatter, ScheduleStore} from '@synaipse/core';
 import {parseCanvas} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
- import type {JobManager, JobParams, JobType} from './jobs.js';
+ import type {JobManager, JobParams} from './jobs.js';
+import {ALLOWED_JOB_TYPES, isJobType, validateJobParams} from './job-validation.js';
 import type {UserStore} from '@synaipse/core';
 import {resolveTokenScope, checkScope} from '@synaipse/mcp-server';
 import {resolveAssetPath} from './asset-route.js';
@@ -672,8 +673,8 @@ export const routes = (
         if (method === 'POST') {
             const body = await readJson<{type?: unknown; params?: unknown}>(req);
 
-            if (body.type !== 'relink' && body.type !== 'compile' && body.type !== 'crawl-gitea') {
-                json(res, 400, {error: "field 'type' must be 'relink', 'compile' or 'crawl-gitea'"});
+            if (!isJobType(body.type)) {
+                json(res, 400, {error: `field 'type' must be one of ${ALLOWED_JOB_TYPES.join(', ')}`});
                 return;
             }
 
@@ -682,21 +683,13 @@ export const routes = (
                 return;
             }
 
-            const params = body.params as Record<string, unknown>;
-
-            if (body.type === 'crawl-gitea') {
-                for (const key of ['baseUrl', 'owner', 'repo', 'project'] as const) {
-                    if (typeof params[key] !== 'string' || (params[key] as string).length === 0) {
-                        json(res, 400, {error: `params.${key} must be a non-empty string`});
-                        return;
-                    }
-                }
-            } else if (typeof params.prefix !== 'string') {
-                json(res, 400, {error: "params.prefix must be a string (empty = all notes)"});
+            const paramError = validateJobParams(body.type, body.params as Record<string, unknown>);
+            if (paramError !== null) {
+                json(res, 400, {error: paramError});
                 return;
             }
 
-            const record = jobs.startJob(body.type as JobType, body.params as JobParams);
+            const record = jobs.startJob(body.type, body.params as JobParams);
             json(res, 200, record);
             return;
         }

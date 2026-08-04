@@ -1,6 +1,13 @@
 import {randomUUID} from 'node:crypto';
 import type {SynaipseService} from '@synaipse/service';
-import {GiteaIssuesCrawler, type GiteaIssueState} from '@synaipse/crawler';
+import {
+    CodeCrawler,
+    DevToCrawler,
+    GiteaIssuesCrawler,
+    GitHubStarsCrawler,
+    type CrawlerReport,
+    type GiteaIssueState
+} from '@synaipse/crawler';
 
 /**
  * In-process job manager. Wraps the service's bulk methods (relink, compile,
@@ -12,7 +19,13 @@ import {GiteaIssuesCrawler, type GiteaIssueState} from '@synaipse/crawler';
  * already persisted via vault commits.
  */
 
-export type JobType = 'relink' | 'compile' | 'crawl-gitea';
+export type JobType =
+    | 'relink'
+    | 'compile'
+    | 'crawl-gitea'
+    | 'crawl-devto'
+    | 'crawl-github-stars'
+    | 'crawl-code';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
 
@@ -46,7 +59,46 @@ export interface CrawlGiteaJobParams {
     since?: string;
 }
 
-export type JobParams = RelinkJobParams | CompileJobParams | CrawlGiteaJobParams;
+export interface CrawlDevtoJobParams {
+    /** dev.to API key. If omitted, the server falls back to DEVTO_API_KEY. */
+    apiKey?: string;
+    /** Articles per page (default 100). */
+    perPage?: number;
+    /** Max body chars fetched per article; 0 skips the per-article fetch. */
+    bodyMax?: number;
+    /** Target vault folder (default Crawler/devto/articles). */
+    pathPrefix?: string;
+    /** Download inline images to the vault (default true). */
+    downloadImages?: boolean;
+}
+
+export interface CrawlGithubStarsJobParams {
+    /** GitHub token. If omitted, the server falls back to GITHUB_TOKEN. */
+    token?: string;
+    /** GitHub username; if omitted the token's own user is used. */
+    username?: string;
+    /** Max README chars per repo (default 3000). */
+    readmeMax?: number;
+    /** Target vault folder (default Crawler/github/starred). */
+    pathPrefix?: string;
+}
+
+export interface CrawlCodeJobParams {
+    /** Absolute path to a repository ON THE SERVER host. */
+    repoPath: string;
+    /** Display/folder name; defaults to the repoPath basename. */
+    repoName?: string;
+    /** Include full source in each note body. */
+    withSource?: boolean;
+}
+
+export type JobParams =
+    | RelinkJobParams
+    | CompileJobParams
+    | CrawlGiteaJobParams
+    | CrawlDevtoJobParams
+    | CrawlGithubStarsJobParams
+    | CrawlCodeJobParams;
 
 export interface JobRecord {
     id: string;
@@ -58,6 +110,12 @@ export interface JobRecord {
     finishedAt?: number;
     error?: string;
     summary?: string;
+    /**
+     * Set when this run was launched from a persistent schedule (scheduled
+     * tick or a manual "run now"). Lets the frontend attach a running job's
+     * live progress/log stream to the matching row in the job list.
+     */
+    scheduleId?: string;
     /** Last 50 log lines. */
     logs: string[];
 }
@@ -81,7 +139,7 @@ export class JobManager {
 
     public constructor(private readonly service: SynaipseService) {}
 
-    public startJob(type: JobType, params: JobParams): JobRecord {
+    public startJob(type: JobType, params: JobParams, opts?: {scheduleId?: string}): JobRecord {
         const id = randomUUID();
         const job: JobRecord = {
             id,
@@ -90,6 +148,7 @@ export class JobManager {
             status: 'running',
             progress: {done: 0, total: 0, failed: 0},
             startedAt: Date.now(),
+            ...(opts?.scheduleId !== undefined ? {scheduleId: opts.scheduleId} : {}),
             logs: []
         };
 
@@ -240,6 +299,21 @@ export class JobManager {
 
         if (job.type === 'crawl-gitea') {
             await this.runGiteaCrawl(job, signal);
+            return;
+        }
+
+        if (job.type === 'crawl-devto') {
+            await this.runDevtoCrawl(job);
+            return;
+        }
+
+        if (job.type === 'crawl-github-stars') {
+            await this.runGithubStarsCrawl(job);
+            return;
+        }
+
+        if (job.type === 'crawl-code') {
+            await this.runCodeCrawl(job);
             return;
         }
     }
@@ -424,6 +498,107 @@ export class JobManager {
         this.finish(
             job.id,
             `gitea: fetched ${report.fetched}, wrote ${report.written}, unchanged ${report.unchanged}, `
+            + `${report.errors.length} errors in ${Math.round(report.elapsedMs / 100) / 10}s`
+        );
+    }
+
+    /**
+     * dev.to / github-stars / code crawlers use the `{vault, log}` context
+     * pattern and write STRAIGHT THROUGH the Vault — not the service write
+     * path — so, unlike crawl-gitea, they do NOT update the live indices;
+     * imported notes surface after the next reindex/prime. They also take
+     * no AbortSignal, so "stop" only lands once run() returns. Both are
+     * accepted v1 limitations (see plan).
+     */
+    private async runDevtoCrawl(job: JobRecord): Promise<void> {
+        const params = job.params as CrawlDevtoJobParams;
+        const apiKey = (params.apiKey ?? process.env.DEVTO_API_KEY ?? '').trim();
+        if (apiKey === '') {
+            this.fail(job.id, 'dev.to API key missing — set DEVTO_API_KEY or provide one in the job');
+            return;
+        }
+
+        const crawler = new DevToCrawler({
+            apiKey,
+            ...(params.perPage !== undefined ? {perPage: params.perPage} : {}),
+            ...(params.bodyMax !== undefined ? {bodyMax: params.bodyMax} : {}),
+            ...(params.pathPrefix !== undefined && params.pathPrefix !== '' ? {pathPrefix: params.pathPrefix} : {}),
+            ...(params.downloadImages !== undefined ? {downloadImages: params.downloadImages} : {})
+        });
+
+        this.log(job.id, '[devto] crawling latest articles');
+        const report = await crawler.run({
+            vault: this.service.getVault(),
+            log: (line) => this.log(job.id, line)
+        });
+        this.applyCrawlerReport(job, 'devto', report);
+    }
+
+    private async runGithubStarsCrawl(job: JobRecord): Promise<void> {
+        const params = job.params as CrawlGithubStarsJobParams;
+        const token = (params.token ?? process.env.GITHUB_TOKEN ?? '').trim();
+        if (token === '') {
+            this.fail(job.id, 'GitHub token missing — set GITHUB_TOKEN or provide one in the job');
+            return;
+        }
+
+        const crawler = new GitHubStarsCrawler({
+            token,
+            ...(params.username !== undefined && params.username !== '' ? {username: params.username} : {}),
+            ...(params.readmeMax !== undefined ? {readmeMax: params.readmeMax} : {}),
+            ...(params.pathPrefix !== undefined && params.pathPrefix !== '' ? {pathPrefix: params.pathPrefix} : {})
+        });
+
+        this.log(job.id, '[github-stars] crawling starred repos');
+        const report = await crawler.run({
+            vault: this.service.getVault(),
+            log: (line) => this.log(job.id, line)
+        });
+        this.applyCrawlerReport(job, 'github-stars', report);
+    }
+
+    private async runCodeCrawl(job: JobRecord): Promise<void> {
+        const params = job.params as CrawlCodeJobParams;
+        const repoPath = (params.repoPath ?? '').trim();
+        if (repoPath === '') {
+            this.fail(job.id, 'repoPath is required for the code crawler');
+            return;
+        }
+
+        const crawler = new CodeCrawler({
+            repoPath,
+            ...(params.repoName !== undefined && params.repoName !== '' ? {repoName: params.repoName} : {}),
+            ...(params.withSource !== undefined ? {withSource: params.withSource} : {})
+        });
+
+        this.log(job.id, `[code] walking ${repoPath}`);
+        const report = await crawler.run({
+            vault: this.service.getVault(),
+            log: (line) => this.log(job.id, line)
+        });
+
+        job.progress.total = report.walked;
+        job.progress.done = report.written + report.unchanged;
+        job.progress.failed = report.errors.length;
+        this.updateProgress(job.id);
+        for (const err of report.errors) this.log(job.id, `! ${err.item}: ${err.error}`);
+        this.finish(
+            job.id,
+            `code: walked ${report.walked}, wrote ${report.written}, unchanged ${report.unchanged}, `
+            + `skipped ${report.skipped}, ${report.errors.length} errors in ${Math.round(report.elapsedMs / 100) / 10}s`
+        );
+    }
+
+    /** Shared tail for the two CrawlerReport-shaped crawlers (devto, github-stars). */
+    private applyCrawlerReport(job: JobRecord, label: string, report: CrawlerReport): void {
+        job.progress.total = report.fetched;
+        job.progress.done = report.written + report.unchanged;
+        job.progress.failed = report.errors.length;
+        this.updateProgress(job.id);
+        for (const err of report.errors) this.log(job.id, `! ${err.item}: ${err.error}`);
+        this.finish(
+            job.id,
+            `${label}: fetched ${report.fetched}, wrote ${report.written}, unchanged ${report.unchanged}, `
             + `${report.errors.length} errors in ${Math.round(report.elapsedMs / 100) / 10}s`
         );
     }

@@ -232,6 +232,17 @@ export interface ScheduleInput {
 }
 
 /**
+ * Patch shape for `ScheduleStore.update`. Every field is optional AND may
+ * be set to `undefined` explicitly — under `exactOptionalPropertyTypes`
+ * that distinction matters, because clearing `nextRun` (e.g. turning a
+ * scheduled job into a manual one) means writing `undefined`, not merely
+ * omitting the key.
+ */
+export type SchedulePatch = {
+    [K in keyof Omit<Schedule, 'id' | 'createdAt'>]?: Schedule[K] | undefined;
+};
+
+/**
  * Storage port for scheduled jobs. Implementations:
  * - LocalScheduleStore (packages/web/server/local-schedule-store.ts)
  *   — JSON sidecar under `${vaultPath}/.synaipse-schedules.json`
@@ -243,7 +254,7 @@ export interface ScheduleStore {
     get(id: string): Promise<Schedule | null>;
     create(input: ScheduleInput): Promise<Schedule>;
     /** Patch a subset of fields. Returns null if no row with that id. */
-    update(id: string, patch: Partial<Omit<Schedule, 'id' | 'createdAt'>>): Promise<Schedule | null>;
+    update(id: string, patch: SchedulePatch): Promise<Schedule | null>;
     delete(id: string): Promise<boolean>;
     close(): Promise<void>;
 }

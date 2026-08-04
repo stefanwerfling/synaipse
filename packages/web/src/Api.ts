@@ -434,7 +434,13 @@ export const activityApi = {
     }
 };
 
-export type JobType = 'relink' | 'compile' | 'crawl-gitea';
+export type JobType =
+    | 'relink'
+    | 'compile'
+    | 'crawl-gitea'
+    | 'crawl-devto'
+    | 'crawl-github-stars'
+    | 'crawl-code';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
 
@@ -463,7 +469,37 @@ export interface CrawlGiteaJobParams {
     since?: string;
 }
 
-export type JobParams = RelinkJobParams | CompileJobParams | CrawlGiteaJobParams;
+export interface CrawlDevtoJobParams {
+    /** dev.to API key; server falls back to DEVTO_API_KEY when omitted. */
+    apiKey?: string;
+    perPage?: number;
+    bodyMax?: number;
+    pathPrefix?: string;
+    downloadImages?: boolean;
+}
+
+export interface CrawlGithubStarsJobParams {
+    /** GitHub token; server falls back to GITHUB_TOKEN when omitted. */
+    token?: string;
+    username?: string;
+    readmeMax?: number;
+    pathPrefix?: string;
+}
+
+export interface CrawlCodeJobParams {
+    /** Absolute path to a repository ON THE SERVER host. */
+    repoPath: string;
+    repoName?: string;
+    withSource?: boolean;
+}
+
+export type JobParams =
+    | RelinkJobParams
+    | CompileJobParams
+    | CrawlGiteaJobParams
+    | CrawlDevtoJobParams
+    | CrawlGithubStarsJobParams
+    | CrawlCodeJobParams;
 
 export interface JobRecord {
     id: string;
@@ -475,6 +511,8 @@ export interface JobRecord {
     finishedAt?: number;
     error?: string;
     summary?: string;
+    /** Set when this run was launched from a schedule (tick or run-now). */
+    scheduleId?: string;
     logs: string[];
 }
 
