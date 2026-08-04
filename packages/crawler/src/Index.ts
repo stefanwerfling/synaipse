@@ -3,6 +3,8 @@ export {GitHubStarsCrawler} from './GitHubStars.js';
 export type {GitHubStarsOptions} from './GitHubStars.js';
 export {DevToCrawler} from './DevTo.js';
 export type {DevToOptions} from './DevTo.js';
+export {CodeCrawler} from './Code.js';
+export type {CodeCrawlerOptions} from './Code.js';
 export {GiteaIssuesCrawler} from './GiteaIssues.js';
 export type {GiteaCrawlerDeps, GiteaCrawlerReport, GiteaIssuesOptions} from './GiteaIssues.js';
 export {apiBase, listIssues, getRepo} from './GiteaApi.js';

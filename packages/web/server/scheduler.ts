@@ -80,10 +80,16 @@ export class Scheduler {
             for (const s of schedules) {
                 if (!s.enabled) continue;
 
+                // Manual jobs (empty cron) never auto-fire. They only run
+                // when "run now" explicitly stamps nextRun to the present,
+                // so leave a missing nextRun untouched here.
+                const manual = s.cron.trim() === '';
+
                 // First-load safety: if nextRun is missing entirely
                 // (e.g. schedule created by an older version of the
                 // code), compute one and skip firing this tick.
                 if (s.nextRun === undefined) {
+                    if (manual) continue;
                     try {
                         await this.store.update(s.id, {nextRun: nextFireForCron(s.cron, now)});
                     } catch (cause) {
@@ -108,11 +114,22 @@ export class Scheduler {
 
         try {
             const params = JSON.parse(s.jobParams) as JobParams;
-            this.jobs.startJob(s.jobType as JobType, params);
+            // Tag the run with its schedule id so the frontend can attach
+            // this row's live progress/log stream.
+            this.jobs.startJob(s.jobType as JobType, params, {scheduleId: s.id});
             this.log(`${this.logTag} → fired '${s.name}' (${s.jobType})\n`);
         } catch (cause) {
             result = 'error';
             this.log(`${this.logTag} ! failed to fire '${s.name}': ${String(cause)}\n`);
+        }
+
+        // Manual job (empty cron): it only ran because "run now" stamped
+        // nextRun. Record the outcome and clear nextRun so it stays idle
+        // until the next manual trigger — never parse the empty cron,
+        // never disable it.
+        if (s.cron.trim() === '') {
+            await this.store.update(s.id, {lastRun: now, lastResult: result, nextRun: undefined});
+            return;
         }
 
         // Always advance nextRun, even on error — otherwise a broken

@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import type {Pool} from 'mariadb';
-import type {Schedule, ScheduleInput, ScheduleStore} from '@synaipse/core';
+import type {Schedule, ScheduleInput, SchedulePatch, ScheduleStore} from '@synaipse/core';
 import type {ResolvedMariaDBConfig} from './Pool.js';
 
 interface ScheduleRow {
@@ -140,7 +140,7 @@ export class MariaDBScheduleStore implements ScheduleStore {
 
     public async update(
         id: string,
-        patch: Partial<Omit<Schedule, 'id' | 'createdAt'>>
+        patch: SchedulePatch
     ): Promise<Schedule | null> {
         // Read-modify-write against a single row keeps the LocalScheduleStore
         // semantics ("update returns null for unknown id" + "preserves id +
@@ -160,12 +160,19 @@ export class MariaDBScheduleStore implements ScheduleStore {
             if (row === undefined) return null;
 
             const current = rowToSchedule(row);
-            const merged: Schedule = {
+            const mergedRaw: Record<string, unknown> = {
                 ...current,
                 ...patch,
                 id: current.id,
                 createdAt: current.createdAt
             };
+            // A patch value of `undefined` clears the field (e.g. nextRun on
+            // a manual job); strip it so the merged record keeps the
+            // optional-absent shape (columns fall back to NULL below).
+            for (const key of Object.keys(patch)) {
+                if ((patch as Record<string, unknown>)[key] === undefined) delete mergedRaw[key];
+            }
+            const merged = mergedRaw as unknown as Schedule;
 
             await conn.query(
                 `UPDATE schedules

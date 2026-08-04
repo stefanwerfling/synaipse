@@ -3247,6 +3247,139 @@ body.sidebar-resizing {
     text-overflow: ellipsis;
 }
 
+/* ── Jobs redesign: header actions, provider badge, per-row progress ── */
+
+.jobs-head-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.jobs-new-btn {
+    font-weight: 600;
+}
+
+.jobs-empty {
+    color: var(--text-3);
+    font-size: 13px;
+    line-height: 1.5;
+    padding: var(--space-5);
+    border: 1px dashed var(--border-soft);
+    border-radius: var(--r-3);
+    background: var(--bg-1);
+    text-align: center;
+}
+
+/* Provider badge on a job row — tinted pill, calmer than the old TYPE tag. */
+.schedule-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    padding: 2px 8px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+}
+
+.schedule-row-actions .btn {
+    font-size: 12px;
+    padding: 5px 10px;
+}
+
+/* Inline live progress, revealed on a row while a linked run is active. */
+.schedule-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+}
+
+.schedule-progress[hidden] {
+    display: none;
+}
+
+.job-field-hint {
+    font-size: 11px;
+    color: var(--text-3);
+    font-style: italic;
+}
+
+/* ── New-job / edit-job modal ── */
+
+.jobs-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 2000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh var(--space-4) var(--space-4);
+    overflow-y: auto;
+    animation: canvas-backdrop-in 140ms ease-out;
+}
+
+.jobs-modal {
+    width: 100%;
+    max-width: 520px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-4);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    animation: canvas-card-modal-in 160ms ease-out;
+}
+
+.jobs-modal-title {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-0);
+}
+
+.jobs-modal-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-2);
+}
+
+.jobs-modal-hint {
+    margin: 0 0 2px;
+    font-size: 12px;
+    color: var(--text-3);
+    line-height: 1.4;
+}
+
+.jobs-modal-note {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: var(--text-3);
+    font-style: italic;
+}
+
+.jobs-modal-error {
+    color: var(--red);
+    font-size: 12px;
+}
+
+.jobs-modal-error[hidden] {
+    display: none;
+}
+
+.jobs-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+}
+
 .activity-panel {
     flex: 1 1 auto;
     overflow-y: auto;

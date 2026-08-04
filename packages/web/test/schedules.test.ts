@@ -285,4 +285,61 @@ describe('Scheduler', () => {
         expect(after?.enabled).toBe(false);
         expect(after?.lastResult).toBe('error');
     });
+
+    // ── manual jobs (empty cron) ──────────────────────────────────────
+
+    it('never auto-fires a manual (empty-cron) schedule and leaves nextRun unset', async () => {
+        await store.create({name: 'manual', jobType: 'relink', jobParams: '{}', cron: ''});
+
+        const scheduler = new Scheduler(store, jobs, {log: () => undefined});
+        await scheduler.tickOnce();
+
+        expect(firedJobs).toHaveLength(0);
+        const list = await store.list();
+        // No backfill for manual jobs → nextRun stays absent.
+        expect(list[0]?.nextRun).toBeUndefined();
+    });
+
+    it('run-now fires a manual schedule, then clears nextRun without disabling it', async () => {
+        const s = await store.create({
+            name: 'manual', jobType: 'relink', jobParams: '{"prefix":"m"}', cron: ''
+        });
+        // Simulate the run-now route: stamp nextRun to the past, then tick.
+        await store.update(s.id, {nextRun: Date.now() - 1});
+
+        const scheduler = new Scheduler(store, jobs, {log: () => undefined});
+        await scheduler.tickOnce();
+
+        expect(firedJobs).toHaveLength(1);
+        expect(firedJobs[0]).toMatchObject({type: 'relink', params: {prefix: 'm'}});
+
+        const after = await store.get(s.id);
+        expect(after?.enabled).toBe(true);          // manual run must NOT disable
+        expect(after?.lastResult).toBe('ok');
+        expect(after?.nextRun).toBeUndefined();     // cleared → no re-fire
+
+        // A second tick does nothing — it stays idle until the next run-now.
+        await scheduler.tickOnce();
+        expect(firedJobs).toHaveLength(1);
+    });
+
+    it('tags the fired job with its schedule id', async () => {
+        const seen: Array<{scheduleId?: string}> = [];
+        const capturingJobs = {
+            startJob: (_t: string, _p: unknown, opts?: {scheduleId?: string}) => {
+                seen.push({scheduleId: opts?.scheduleId});
+                return {id: 'stub'};
+            }
+        } as unknown as JobManager;
+
+        const s = await store.create({
+            name: 'due', jobType: 'relink', jobParams: '{}', cron: 'every 2h'
+        });
+        await store.update(s.id, {nextRun: Date.now() - 1000});
+
+        const scheduler = new Scheduler(store, capturingJobs, {log: () => undefined});
+        await scheduler.tickOnce();
+
+        expect(seen[0]?.scheduleId).toBe(s.id);
+    });
 });
