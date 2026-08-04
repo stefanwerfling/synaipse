@@ -1602,8 +1602,11 @@ export class CanvasRenderer {
             const node = this.nodeById(this.dragState.id);
             if (node === undefined) return;
 
-            const card = this.cardEls.get(this.dragState.id);
-            if (card === undefined) return;
+            // The dragged node may be a card OR a group frame — resolve
+            // against both maps. (Using cardEls alone silently aborted every
+            // group-container drag, since groups live in groupEls.)
+            const primaryEl = this.nodeElement(this.dragState.id);
+            if (primaryEl === undefined) return;
 
             // Alt (option) held → freeform (pixel-precise), otherwise
             // snap to GRID_STEP. Read on every move so users can toggle
@@ -1614,8 +1617,8 @@ export class CanvasRenderer {
             if (this.dragState.mode === 'move') {
                 node.x = align(this.dragState.origX + dx);
                 node.y = align(this.dragState.origY + dy);
-                card.style.left = `${node.x}px`;
-                card.style.top = `${node.y}px`;
+                primaryEl.style.left = `${node.x}px`;
+                primaryEl.style.top = `${node.y}px`;
 
                 // Multi-drag — apply the identical delta to every partner
                 // so they move in lockstep. Each partner snaps on its own
@@ -1634,8 +1637,8 @@ export class CanvasRenderer {
             } else {
                 node.width = Math.max(MIN_CARD_W, align(this.dragState.origW + dx));
                 node.height = Math.max(MIN_CARD_H, align(this.dragState.origH + dy));
-                card.style.width = `${node.width}px`;
-                card.style.height = `${node.height}px`;
+                primaryEl.style.width = `${node.width}px`;
+                primaryEl.style.height = `${node.height}px`;
             }
 
             this.renderEdges();

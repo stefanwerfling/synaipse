@@ -6603,18 +6603,20 @@ button.typed-link-badge:hover {
 }
 
 .canvas-groups > *,
-.canvas-cards > *,
-.canvas-edges {
+.canvas-cards > * {
     pointer-events: auto;
 }
 
 .canvas-edges {
-    /* SVG root itself catches nothing (empty regions have no geometry to
-       hit, so clicks pass through to cards behind). Individual child
-       elements opt in via pointer-events="stroke" (edge hitboxes) or
-       default (endpoint handles). Visible edge lines / arrow / label /
-       draft line stay pointer-events="none" so they don't hijack the
-       hitbox click area. */
+    /* SVG ROOT MUST STAY pointer-events:none. It is sized to cover the
+       whole diagram and painted on top of the group layer, so if the root
+       were `auto` its bounding box would swallow every pointerdown over
+       empty space — including empty group interiors — before it could
+       reach the group frame beneath (that exact bug turned group-drag
+       into a canvas-pan). Interactive children opt back in individually:
+       edge hitboxes via pointer-events="stroke", endpoint handles via
+       `.canvas-edge-handle { pointer-events: all }`. Visible line / arrow
+       / label / draft line stay none so they don't hijack the hitbox. */
     overflow: visible;
 }
 
@@ -6948,6 +6950,9 @@ button.typed-link-badge:hover {
     stroke: var(--bg-0);
     stroke-width: 2;
     cursor: grab;
+    /* Root svg is pointer-events:none; re-enable on the handle so the
+       endpoint stays grabbable for reroute drags. */
+    pointer-events: all;
 }
 
 .canvas-edge-handle:active {
