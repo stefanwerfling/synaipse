@@ -22,13 +22,17 @@ const GRID_STEP = 20;
 
 const snap = (v: number): number => Math.round(v / GRID_STEP) * GRID_STEP;
 
+// Muted, desaturated take on Obsidian's 1..6 palette. The stored value is
+// still the preset id ("1".."6"), so files round-trip to Obsidian fine —
+// only our rendered hue changes. Saturated primaries read like a crayon
+// drawing; these dusty tones read like a design tool.
 const COLOR_PRESETS: Readonly<Record<string, string>> = {
-    '1': '#e56565',
-    '2': '#e78e4f',
-    '3': '#e7c34f',
-    '4': '#5dbb63',
-    '5': '#5aa9d4',
-    '6': '#a06fc1'
+    '1': '#cf8080', // rose
+    '2': '#cf9a6a', // clay
+    '3': '#c4b06a', // gold
+    '4': '#7fae83', // sage
+    '5': '#6f9fc4', // steel blue
+    '6': '#a189c2'  // lavender
 };
 
 /**
@@ -66,7 +70,72 @@ const genId = (): string => {
 interface AnchorPoint {
     x: number;
     y: number;
+    /**
+     * The card side this anchor sits on. Edges leave/enter perpendicular
+     * to it, so the bezier router uses it to place control points and get
+     * that clean "pipe out of the box" look instead of a raw diagonal.
+     * `undefined` for free-floating points (a drag ghost at the cursor).
+     */
+    side?: CanvasSide;
 }
+
+/** Unit outward normal for a card side — the direction an edge exits. */
+const sideDir = (side: CanvasSide | undefined): {x: number; y: number} => {
+    if (side === 'top') return {x: 0, y: -1};
+    if (side === 'bottom') return {x: 0, y: 1};
+    if (side === 'left') return {x: -1, y: 0};
+    if (side === 'right') return {x: 1, y: 0};
+    return {x: 0, y: 0};
+};
+
+/**
+ * Cubic-bezier control points for an edge from `a` to `b`. Each control
+ * point is pushed out along its endpoint's side normal by a fraction of
+ * the span (clamped), so short edges stay tight and long ones bow gently
+ * — the difference between a schoolbook straight line and a routed diagram.
+ * When a side is unknown (drag ghost) the tangent falls back to the
+ * straight direction between the two points.
+ */
+const bezierControls = (
+    a: AnchorPoint,
+    b: AnchorPoint
+): {c1: {x: number; y: number}; c2: {x: number; y: number}} => {
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const k = Math.min(Math.max(dist * 0.4, 32), 160);
+
+    const da = sideDir(a.side);
+    const db = sideDir(b.side);
+
+    // Fallback tangents point the two ends at each other when no side is
+    // known, so a cursor-anchored ghost still curves instead of kinking.
+    const ux = dist === 0 ? 0 : (b.x - a.x) / dist;
+    const uy = dist === 0 ? 0 : (b.y - a.y) / dist;
+    const a1x = da.x === 0 && da.y === 0 ? ux : da.x;
+    const a1y = da.x === 0 && da.y === 0 ? uy : da.y;
+    const b1x = db.x === 0 && db.y === 0 ? -ux : db.x;
+    const b1y = db.x === 0 && db.y === 0 ? -uy : db.y;
+
+    return {
+        c1: {x: a.x + a1x * k, y: a.y + a1y * k},
+        c2: {x: b.x + b1x * k, y: b.y + b1y * k}
+    };
+};
+
+/** SVG path `d` for the routed edge between two anchors. */
+const bezierPathD = (a: AnchorPoint, b: AnchorPoint): string => {
+    const {c1, c2} = bezierControls(a, b);
+    return `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`;
+};
+
+/** Point on the routed edge at t=0.5 — where the label sits. */
+const bezierMidpoint = (a: AnchorPoint, b: AnchorPoint): {x: number; y: number} => {
+    const {c1, c2} = bezierControls(a, b);
+    // De Casteljau at t=0.5 collapses to this weighted average.
+    return {
+        x: 0.125 * a.x + 0.375 * c1.x + 0.375 * c2.x + 0.125 * b.x,
+        y: 0.125 * a.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * b.y
+    };
+};
 
 interface Rect {
     id: string;
@@ -98,10 +167,10 @@ const anchorFor = (node: CanvasNode, side: CanvasSide | undefined, other: Canvas
     const cx = node.x + node.width / 2;
     const cy = node.y + node.height / 2;
 
-    if (side === 'top') return {x: cx, y: node.y};
-    if (side === 'bottom') return {x: cx, y: node.y + node.height};
-    if (side === 'left') return {x: node.x, y: cy};
-    if (side === 'right') return {x: node.x + node.width, y: cy};
+    if (side === 'top') return {x: cx, y: node.y, side: 'top'};
+    if (side === 'bottom') return {x: cx, y: node.y + node.height, side: 'bottom'};
+    if (side === 'left') return {x: node.x, y: cy, side: 'left'};
+    if (side === 'right') return {x: node.x + node.width, y: cy, side: 'right'};
 
     const ox = other.x + other.width / 2;
     const oy = other.y + other.height / 2;
@@ -110,12 +179,12 @@ const anchorFor = (node: CanvasNode, side: CanvasSide | undefined, other: Canvas
 
     if (Math.abs(dx) > Math.abs(dy)) {
         return dx > 0
-            ? {x: node.x + node.width, y: cy}
-            : {x: node.x, y: cy};
+            ? {x: node.x + node.width, y: cy, side: 'right'}
+            : {x: node.x, y: cy, side: 'left'};
     }
     return dy > 0
-        ? {x: cx, y: node.y + node.height}
-        : {x: cx, y: node.y};
+        ? {x: cx, y: node.y + node.height, side: 'bottom'}
+        : {x: cx, y: node.y, side: 'top'};
 };
 
 export interface CanvasRendererOptions {
@@ -555,26 +624,25 @@ export class CanvasRenderer {
             if (isSelected) group.classList.add('selected');
             group.dataset.edgeId = edge.id;
 
-            // Invisible thick line sits under the visible one so the click
-            // hitbox is easy to hit even at ~2px stroke widths.
-            const hitbox = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            hitbox.setAttribute('x1', String(a.x));
-            hitbox.setAttribute('y1', String(a.y));
-            hitbox.setAttribute('x2', String(b.x));
-            hitbox.setAttribute('y2', String(b.y));
+            const pathD = bezierPathD(a, b);
+
+            // Invisible thick curve sits under the visible one so the click
+            // hitbox is easy to hit even at ~1.5px stroke widths.
+            const hitbox = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            hitbox.setAttribute('d', pathD);
+            hitbox.setAttribute('fill', 'none');
             hitbox.setAttribute('stroke', 'transparent');
             hitbox.setAttribute('stroke-width', '16');
             hitbox.setAttribute('pointer-events', 'stroke');
             hitbox.classList.add('canvas-edge-hitbox');
             group.appendChild(hitbox);
 
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', String(a.x));
-            line.setAttribute('y1', String(a.y));
-            line.setAttribute('x2', String(b.x));
-            line.setAttribute('y2', String(b.y));
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            line.setAttribute('d', pathD);
+            line.setAttribute('fill', 'none');
             line.setAttribute('stroke', color);
-            line.setAttribute('stroke-width', isSelected ? '3' : '2');
+            line.setAttribute('stroke-width', isSelected ? '2.5' : '1.75');
+            line.setAttribute('stroke-linecap', 'round');
             line.setAttribute('pointer-events', 'none');
             line.style.color = color;
             if (edge.toEnd !== 'none') {
@@ -587,15 +655,35 @@ export class CanvasRenderer {
             group.appendChild(line);
 
             if (edge.label !== undefined && edge.label.length > 0) {
-                const midX = (a.x + b.x) / 2;
-                const midY = (a.y + b.y) / 2;
+                const mid = bezierMidpoint(a, b);
+                // Pill sits behind the text so the label reads cleanly where
+                // it crosses the edge line instead of floating raw over it.
+                // Width is estimated from the character count (SVG has no
+                // cheap synchronous text-metrics before layout).
+                const padX = 7;
+                const charW = 6.6;
+                const w = edge.label.length * charW + padX * 2;
+                const h = 18;
+                const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                pill.setAttribute('x', String(mid.x - w / 2));
+                pill.setAttribute('y', String(mid.y - h / 2));
+                pill.setAttribute('width', String(w));
+                pill.setAttribute('height', String(h));
+                pill.setAttribute('rx', '9');
+                pill.setAttribute('pointer-events', 'none');
+                pill.classList.add('canvas-edge-label-bg');
+                group.appendChild(pill);
+
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('x', String(midX));
-                text.setAttribute('y', String(midY - 6));
+                text.setAttribute('x', String(mid.x));
+                text.setAttribute('y', String(mid.y));
                 text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('dominant-baseline', 'central');
                 text.setAttribute('fill', color);
-                text.setAttribute('font-size', '12');
+                text.setAttribute('font-size', '11');
+                text.setAttribute('font-weight', '600');
                 text.setAttribute('pointer-events', 'none');
+                text.classList.add('canvas-edge-label');
                 text.textContent = edge.label;
                 group.appendChild(text);
             }
@@ -1906,16 +1994,15 @@ export class CanvasRenderer {
 
         const a = anchorFor(from, edge.fromSide, to);
         const b = anchorFor(to, edge.toSide, from);
-        const midX = (a.x + b.x) / 2;
-        const midY = (a.y + b.y) / 2;
+        const mid = bezierMidpoint(a, b);
 
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'canvas-edge-label-edit';
         input.value = edge.label ?? '';
         input.placeholder = 'label';
-        input.style.left = `${midX}px`;
-        input.style.top = `${midY - 12}px`;
+        input.style.left = `${mid.x}px`;
+        input.style.top = `${mid.y - 12}px`;
 
         this.stage.appendChild(input);
         input.focus();
