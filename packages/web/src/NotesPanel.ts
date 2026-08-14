@@ -8,6 +8,7 @@ import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
 import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
+import {exportNoteToPdf} from './PdfExport.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {extractToc, TocPanel} from './Toc.js';
 import {buildWikilinkResolver, slugify, WikilinkResolver} from './Wikilinks.js';
@@ -1358,10 +1359,24 @@ export class NotesPanel {
         }
 
         overflowItems.push({
+            label: 'Export PDF',
+            title: 'Download this note as a nicely formatted PDF',
+            onSelect: () => void this.exportPdf()
+        });
+
+        overflowItems.push({
             label: 'Delete',
             title: 'Delete this note',
             danger: true,
             onSelect: () => void this.handleDelete()
+        });
+
+        const exportBtn = el('button', {
+            class: 'btn',
+            attrs: {type: 'button'},
+            text: 'Export PDF',
+            title: 'Download this note as a nicely formatted PDF',
+            on: {click: () => void this.exportPdf()}
         });
 
         const editBtn = el('button', {
@@ -1371,7 +1386,7 @@ export class NotesPanel {
             on: {click: () => this.startEditing()}
         });
 
-        const actions: HTMLElement[] = [editBtn, this.buildOverflowMenu(overflowItems)];
+        const actions: HTMLElement[] = [exportBtn, editBtn, this.buildOverflowMenu(overflowItems)];
 
         const info = el('div', {class: 'viewer-head-info'},
             this.buildBreadcrumb(this.active.id),
@@ -1418,6 +1433,20 @@ export class NotesPanel {
         this.renderLinks();
         this.attachSelectionListener();
         this.updateToc();
+    }
+
+    private async exportPdf(): Promise<void> {
+        if (this.active === null) return;
+        try {
+            await exportNoteToPdf({
+                id: this.active.id,
+                title: this.active.title,
+                content: this.active.content,
+                tags: this.active.tags
+            });
+        } catch (e) {
+            console.error('PDF export failed', e);
+        }
     }
 
     private attachSelectionListener(): void {

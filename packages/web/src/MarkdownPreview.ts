@@ -118,6 +118,25 @@ export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: 
 };
 
 /**
+ * Like {@link renderMarkdownInto} but AWAITS the async infographic /
+ * floorplan hydration passes so the caller ends up with finished SVG in
+ * `host` — needed for PDF export, where we serialize/adopt the subtree
+ * and there is no later frame to catch the async result. antv sizes off
+ * `host.clientWidth`, so the caller must attach `host` to the document
+ * (offscreen is fine) BEFORE awaiting this.
+ */
+export const hydrateMarkdownForExport = async (
+    host: HTMLElement,
+    content: string,
+    noteId?: string
+): Promise<void> => {
+    host.innerHTML = renderMarkdown(content);
+    rewriteAssetImages(host, noteId);
+    await applyAntvInfographicsTo(host);
+    await applyMdFloorTo(host);
+};
+
+/**
  * Count top-level items in an `::: infographic` body. Every item starts
  * with `- id ` (dagre/relation flows) or `- label ` (charts, timelines) —
  * both under an `items` key. Robust enough for a height heuristic; not a
