@@ -2,6 +2,7 @@ import type {Graph} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
 import {CanvasPanel} from './CanvasPanel.js';
+import {RoadmapPanel} from './RoadmapPanel.js';
 import {ChatPanel} from './ChatPanel.js';
 import {CommandPalette} from './CommandPalette.js';
 import {clear, el} from './Dom.js';
@@ -42,7 +43,7 @@ const HEAT_TICK_MS = 15_000;
 const HUGE_GRAPH_FORCE_ATLAS = 20_000;
 const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
 
-type Tab = 'notes' | 'graph' | 'canvas' | 'chat' | 'jobs' | 'activity' | 'audit' | 'consent';
+type Tab = 'notes' | 'graph' | 'canvas' | 'roadmap' | 'chat' | 'jobs' | 'activity' | 'audit' | 'consent';
 
 export class App {
     public readonly element: HTMLElement;
@@ -65,6 +66,7 @@ export class App {
     private notesTabBtn!: HTMLButtonElement;
     private graphTabBtn!: HTMLButtonElement;
     private canvasTabBtn!: HTMLButtonElement;
+    private roadmapTabBtn!: HTMLButtonElement;
     private chatTabBtn!: HTMLButtonElement;
     private jobsTabBtn!: HTMLButtonElement;
     private activityTabBtn!: HTMLButtonElement;
@@ -72,6 +74,7 @@ export class App {
     private consentTabBtn!: HTMLButtonElement;
     private consentBadge!: HTMLElement;
     private canvasPanel!: CanvasPanel;
+    private roadmapPanel!: RoadmapPanel;
     private chatPanel!: ChatPanel;
     private jobsPanel!: JobsPanel;
     private activityPanel!: ActivityPanel;
@@ -158,6 +161,13 @@ export class App {
             }
         });
 
+        this.roadmapPanel = new RoadmapPanel({
+            onOpenNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            }
+        });
+
         this.jobsPanel = new JobsPanel({
             onChange: () => {
                 this.graph = null;
@@ -201,6 +211,7 @@ export class App {
 
         this.events = new EventStream();
         this.events.subscribe((event) => this.handleMcpEvent(event));
+        this.events.subscribe((event) => this.roadmapPanel.onVaultEvent(event.touched));
 
         this.element = el('div', {class: 'root'}, this.topbar, this.body, this.activityLog.element);
 
@@ -430,6 +441,13 @@ export class App {
             on: {click: () => void this.switchTab('canvas')}
         }) as HTMLButtonElement;
 
+        this.roadmapTabBtn = el('button', {
+            class: 'tab',
+            attrs: {type: 'button', title: 'Per-Projekt Roadmap — KI-geplante Umsetzungsschritte'},
+            text: 'Roadmap',
+            on: {click: () => void this.switchTab('roadmap')}
+        }) as HTMLButtonElement;
+
         this.chatTabBtn = el('button', {
             class: 'tab',
             attrs: {type: 'button'},
@@ -525,7 +543,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn, this.consentTabBtn),
+            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.roadmapTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn, this.consentTabBtn),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             ...trailing
@@ -580,6 +598,7 @@ export class App {
         this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
         this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
         this.canvasTabBtn.className = tab === 'canvas' ? 'tab active' : 'tab';
+        this.roadmapTabBtn.className = tab === 'roadmap' ? 'tab active' : 'tab';
         this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
         this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
         this.activityTabBtn.className = tab === 'activity' ? 'tab active' : 'tab';
@@ -593,6 +612,11 @@ export class App {
 
         if (tab === 'canvas') {
             void this.showCanvas();
+            return;
+        }
+
+        if (tab === 'roadmap') {
+            void this.showRoadmap();
             return;
         }
 
@@ -634,6 +658,12 @@ export class App {
         clear(this.body);
         this.body.appendChild(this.canvasPanel.element);
         await this.canvasPanel.onShow();
+    }
+
+    private async showRoadmap(): Promise<void> {
+        clear(this.body);
+        this.body.appendChild(this.roadmapPanel.element);
+        await this.roadmapPanel.onShow();
     }
 
     private async showActivity(): Promise<void> {

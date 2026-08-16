@@ -32,5 +32,6 @@ export type {
 } from './Service.js';
 export {findDecayCandidates, archivePathFor} from './MemoryDecay.js';
 export type {DecayCandidate, DecayOptions} from './MemoryDecay.js';
+export {roadmapPathFor, projectFromRoadmapPath, roadmapFromNote, emptyRoadmap, ROADMAP_FILENAME} from './Roadmap.js';
 export {ConsentStore} from './ConsentStore.js';
 export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';

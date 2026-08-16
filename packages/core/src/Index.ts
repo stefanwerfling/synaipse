@@ -6,6 +6,7 @@ export * from './Adapter.js';
 export * from './Canvas.js';
 export * from './Chat.js';
 export * from './TypedLinks.js';
+export * from './Roadmap.js';
 
 // TokenHash and PasswordHash are deliberately NOT in the barrel: they
 // import node:crypto, and pulling them into the browser bundle (web

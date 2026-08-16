@@ -1,7 +1,8 @@
-import type {CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
+import type {CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError} from '@synaipse/core';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
+import {listRoadmapSummaries, normalizeRoadmap, roadmapFromNote, roadmapPathFor, roadmapWriteInput} from './Roadmap.js';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource, type SummarizeEvent} from './Chat.js';
 import {type WriteAssetResult} from './Assets.js';
@@ -2151,6 +2152,36 @@ export class SynaipseService {
 
     public async deleteCanvas(id: string): Promise<void> {
         await deleteCanvasFromVault(this.vault.root, id);
+    }
+
+    // --- Roadmap (per-project, vault-native markdown) -----------------------
+
+    /** Summaries of every project's roadmap in the vault (for the list view). */
+    public listRoadmaps(): RoadmapSummary[] {
+        return listRoadmapSummaries(this.notes.list());
+    }
+
+    /**
+     * Read a project's roadmap. Returns an empty roadmap (no steps) when the
+     * `Memory/<project>/_roadmap.md` note does not exist yet.
+     */
+    public readRoadmap(project: string): Roadmap {
+        const note = this.notes.tryGet(roadmapPathFor(project));
+        return roadmapFromNote(project, note, new Date().toISOString());
+    }
+
+    /**
+     * Persist a roadmap: normalize it (dependency gating + hour/progress
+     * roll-up + timestamp), then write `Memory/<project>/_roadmap.md` through
+     * the unscoped note path so it is indexed, versioned and searchable. The
+     * frontmatter carries the step tree; the body is auto-rendered. Returns the
+     * normalized roadmap so callers reflect roll-up values back to the client.
+     */
+    public async writeRoadmap(roadmap: Roadmap): Promise<Roadmap> {
+        const normalized = normalizeRoadmap(roadmap, new Date().toISOString());
+        const input = roadmapWriteInput(normalized);
+        await this.writeNoteUnscoped(input as NoteWriteInput, 'roadmap');
+        return normalized;
     }
 
     public tags(): Map<string, NoteId[]> {

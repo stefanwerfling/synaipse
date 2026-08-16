@@ -1,4 +1,4 @@
-import type {CanvasDocument, Frontmatter, Graph, Note, SearchHit, SearchMode} from '@synaipse/core';
+import type {CanvasDocument, Frontmatter, Graph, Note, Roadmap, RoadmapSummary, SearchHit, SearchMode} from '@synaipse/core';
 
 const json = async <T>(response: Response): Promise<T> => {
     if (!response.ok) {
@@ -93,6 +93,25 @@ export const api = {
         const url = new URL('/api/canvas', window.location.origin);
         url.searchParams.set('path', id);
         await noContent(await fetch(url, {method: 'DELETE'}));
+    },
+    listRoadmaps: async (): Promise<RoadmapSummary[]> => {
+        const {roadmaps} = await json<{roadmaps: RoadmapSummary[]}>(await fetch('/api/roadmaps'));
+        return roadmaps;
+    },
+    getRoadmap: async (project: string): Promise<Roadmap> => {
+        const url = new URL('/api/roadmap', window.location.origin);
+        url.searchParams.set('project', project);
+        return json(await fetch(url));
+    },
+    putRoadmap: async (project: string, roadmap: Roadmap): Promise<Roadmap> => {
+        const url = new URL('/api/roadmap', window.location.origin);
+        url.searchParams.set('project', project);
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(roadmap)
+        });
+        return json(response);
     },
     getNote: async (id: string): Promise<Note> => {
         return json(await fetch(`/api/notes/${encodeURIComponent(id)}`));

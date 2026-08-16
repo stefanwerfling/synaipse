@@ -392,6 +392,59 @@ Use this for lightweight captures that sit between `log_session` (narrative reca
 
 ---
 
+## Roadmap tools
+
+A per-project roadmap is an arbitrarily nested tree of implementation steps stored vault-natively at `Memory/<project>/_roadmap.md` — the step tree lives in the note's frontmatter (`roadmap:`), the body is an auto-rendered table + mermaid diagram. All roadmap tools scope on the **active project context** (set via the `/mcp/<project>` URL segment or the `x-synaipse-project` header) — they take no path argument. Hours and progress roll up from leaf steps to their parents; a step with an unsatisfied `dependsOn` is automatically flipped to `blocked`.
+
+A step object: `{id, title, status, plannedHours?, actualHours?, owner?, priority?, progress?, noteLinks?, dependsOn?, acceptance?, evaluation?, children?}`. `status` is one of `backlog | planned | in_progress | ai_active | review | blocked | done | cancelled`. Ids are hierarchical strings (`"1"`, `"1.1"`, `"2.3.1"`).
+
+### `synaipse_roadmap_get`
+
+| Arg      | Type    | Notes                                              |
+|---|---|---|
+| `stepId` | string? | Return only this step and its subtree.             |
+
+Returns the step tree, the live cursor (`active`), and a rolled-up `summary` (progress %, planned vs actual hours, done/blocked counts). Read before planning. Returns an empty roadmap if none exists.
+
+### `synaipse_roadmap_plan`
+
+| Arg        | Type     | Notes                                                             |
+|---|---|---|
+| `steps`    | object[]? | Full step tree to **replace** the roadmap (initial plan / restructure). |
+| `step`     | object?  | Single step to upsert (alternative to `steps`).                   |
+| `parentId` | string?  | Parent id to append the single `step` under (omit for top-level). |
+
+Writes `Memory/<project>/_roadmap.md`. Malformed steps are dropped defensively.
+
+### `synaipse_roadmap_update_step`
+
+| Arg | Type | Notes |
+|---|---|---|
+| `stepId` | string | Required. The step to patch. |
+| `status`, `title`, `plannedHours`, `actualHours`, `progress`, `owner`, `priority`, `acceptance`, `evaluation`, `dependsOn` | — | Only fields you pass change. |
+| `note` | string? | Activity-log message (defaults to a summary of changed fields). |
+
+Patches one step and appends an activity-log entry. Use `evaluation` to record your assessment / rationale / remaining-estimate ("auswerten").
+
+### `synaipse_roadmap_set_active`
+
+| Arg | Type | Notes |
+|---|---|---|
+| `stepId` | string? | Step to mark `ai_active`. Omit / empty clears the cursor. |
+
+Sets the live "AI is working here" cursor: the step becomes `ai_active`, any previously-active step drops to `in_progress`. At most one step is active. Call when you start on a step so the UI shows a live indicator.
+
+### `synaipse_roadmap_link_note`
+
+| Arg | Type | Notes |
+|---|---|---|
+| `stepId` | string | Required. |
+| `notes` | string[] | Note titles or paths — stored on the step, rendered as `[[wikilinks]]` so backlinks/graph work. |
+
+Idempotent: already-linked notes are skipped.
+
+---
+
 ## Related
 
 - [claude-code-setup.md](claude-code-setup.md) — how to actually use these from a Claude Code session

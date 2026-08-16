@@ -1,6 +1,15 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
-import type {Note, SearchMode} from '@synaipse/core';
-import {extractTypedLinks} from '@synaipse/core';
+import type {Note, Roadmap, RoadmapStatus, RoadmapStep, SearchMode} from '@synaipse/core';
+import {
+    ROADMAP_STATUSES,
+    appendActivity,
+    extractTypedLinks,
+    findStep,
+    parseRoadmap,
+    setActive,
+    summarize,
+    upsertStep
+} from '@synaipse/core';
 import {SynaipseService, getAuditTokenLabel, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
 
@@ -207,6 +216,13 @@ const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
     synaipse_link_note:    {mode: 'write', pathArg: 'source'},
     synaipse_log_session:  {mode: 'write'},
     synaipse_remember:     {mode: 'write'},
+    // Roadmap tools scope on ctx.project (no pathArg — the note path is derived
+    // from the project, never taken from the caller), like remember/log_session.
+    synaipse_roadmap_plan:        {mode: 'write'},
+    synaipse_roadmap_update_step: {mode: 'write'},
+    synaipse_roadmap_set_active:  {mode: 'write'},
+    synaipse_roadmap_link_note:   {mode: 'write'},
+    synaipse_roadmap_get:         {mode: 'read'},
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
     synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
     synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
@@ -223,6 +239,56 @@ const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t)
 });
 
 export {EMPTY_CTX};
+
+// --- Roadmap helpers -------------------------------------------------------
+
+/** Who is mutating the roadmap — the auth token label, or "claude" in dev. */
+const roadmapActor = (): string => getAuditTokenLabel() ?? 'claude';
+
+/** Resolve the active project or throw a helpful error for roadmap tools. */
+const requireRoadmapProject = (service: SynaipseService, ctx?: ToolContext): string => {
+    const project = service.getProject(ctx?.project);
+    if (project === null) {
+        throw new Error(
+            'No project context set. Roadmap tools operate per project — set one via the /mcp/<project> URL segment or the x-synaipse-project header.'
+        );
+    }
+    return project;
+};
+
+const isRoadmapStatus = (value: unknown): value is RoadmapStatus =>
+    typeof value === 'string' && (ROADMAP_STATUSES as readonly string[]).includes(value);
+
+/** Apply an update_step field patch to a step, returning a new step. */
+const patchStep = (step: RoadmapStep, args: Record<string, unknown>): RoadmapStep => {
+    const next: RoadmapStep = {...step};
+    if (typeof args.title === 'string' && args.title.length > 0) next.title = args.title;
+    if (isRoadmapStatus(args.status)) next.status = args.status;
+    if (typeof args.plannedHours === 'number') next.plannedHours = args.plannedHours;
+    if (typeof args.actualHours === 'number') next.actualHours = args.actualHours;
+    if (args.owner === 'ai' || args.owner === 'human') next.owner = args.owner;
+    if (args.priority === 'low' || args.priority === 'med' || args.priority === 'high') next.priority = args.priority;
+    if (typeof args.progress === 'number') next.progress = Math.max(0, Math.min(100, args.progress));
+    if (typeof args.acceptance === 'string') next.acceptance = args.acceptance;
+    if (typeof args.evaluation === 'string') next.evaluation = args.evaluation;
+    if (Array.isArray(args.dependsOn)) {
+        next.dependsOn = args.dependsOn.filter((d): d is string => typeof d === 'string');
+    }
+    return next;
+};
+
+/** Sanitize a caller-supplied step tree through the defensive core parser. */
+const sanitizeSteps = (project: string, steps: unknown): RoadmapStep[] => {
+    const parsed = parseRoadmap(project, {roadmap: {steps}});
+    return parsed?.steps ?? [];
+};
+
+const roadmapResult = (roadmap: Roadmap): unknown => ({
+    project: roadmap.project,
+    summary: summarize(roadmap),
+    active: roadmap.active,
+    steps: roadmap.steps
+});
 
 export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl([
     {
@@ -916,6 +982,183 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             return {
                 response: ok(primed),
                 event: {kind: 'list', touched: primed.context.slice(0, 5).map((e) => e.id)}
+            };
+        }
+    },
+    // ─── Roadmap (per-project planning) ─────────────────────────────────────
+    {
+        definition: {
+            name: 'synaipse_roadmap_get',
+            description: 'Read the active project\'s roadmap: the full step tree (arbitrarily nested), the live "AI is working here" cursor, and a rolled-up summary (progress %, planned vs actual hours, done/blocked counts). Pass stepId to return only that step and its subtree. Returns an empty roadmap if none exists yet. Read this before planning or updating so you build on the current state.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    stepId: {type: 'string', description: 'Optional: return only this step and its children.'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const roadmap = service.readRoadmap(project);
+            const stepId = typeof args.stepId === 'string' ? args.stepId : null;
+            if (stepId !== null) {
+                const step = findStep(roadmap.steps, stepId);
+                return {
+                    response: ok({project, step, summary: summarize(roadmap)}),
+                    event: {kind: 'list', touched: []}
+                };
+            }
+            return {response: ok(roadmapResult(roadmap)), event: {kind: 'list', touched: []}};
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_plan',
+            description: 'Plan the roadmap for the active project. Two modes: (1) pass `steps` — an array of step objects — to REPLACE the whole tree (use for initial planning or restructuring); (2) pass a single `step` plus optional `parentId` to add or replace one step (append under a parent, or at root when parentId is omitted). Steps nest arbitrarily via each step\'s `children` array. Hours and progress roll up to parents automatically; open dependencies flip a step to "blocked". Writes Memory/<project>/_roadmap.md.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    steps: {
+                        type: 'array',
+                        description: 'Full step tree to replace the roadmap with. Each step: {id, title, status, plannedHours?, actualHours?, owner?("ai"|"human"), priority?("low"|"med"|"high"), noteLinks?, dependsOn?, acceptance?, evaluation?, children?}. Status one of: backlog, planned, in_progress, ai_active, review, blocked, done, cancelled. Use hierarchical ids like "1", "1.1", "2.3.1".',
+                        items: {type: 'object'}
+                    },
+                    step: {type: 'object', description: 'Single step to upsert (alternative to steps).'},
+                    parentId: {type: 'string', description: 'When upserting a single step, the parent step id to append under. Omit for a top-level step.'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const current = service.readRoadmap(project);
+
+            let nextSteps: RoadmapStep[];
+            if (Array.isArray(args.steps)) {
+                nextSteps = sanitizeSteps(project, args.steps);
+            } else if (args.step !== undefined && args.step !== null) {
+                const [sanitized] = sanitizeSteps(project, [args.step]);
+                if (sanitized === undefined) {
+                    throw new Error('step is missing a valid id/title.');
+                }
+                const parentId = typeof args.parentId === 'string' ? args.parentId : null;
+                nextSteps = upsertStep(current.steps, sanitized, parentId);
+            } else {
+                throw new Error('Provide either `steps` (full tree) or `step` (single upsert).');
+            }
+
+            const saved = await service.writeRoadmap({...current, steps: nextSteps});
+            const noteId = `Memory/${project}/_roadmap.md`;
+            return {
+                response: ok(roadmapResult(saved)),
+                event: {kind: 'write', touched: [noteId]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_update_step',
+            description: 'Patch a single roadmap step by id: change status, book time (actualHours), adjust the estimate (plannedHours), set progress (0-100), owner, priority, acceptance criteria, or write your evaluation/rationale. Only the fields you pass change. Appends an activity-log entry to the step. Use this as you work — e.g. mark a step "review" and record what you did in `evaluation`.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    stepId: {type: 'string', description: 'Id of the step to update.'},
+                    status: {type: 'string', description: 'New status: backlog|planned|in_progress|ai_active|review|blocked|done|cancelled'},
+                    title: {type: 'string'},
+                    plannedHours: {type: 'number', description: 'Planned implementation time in hours.'},
+                    actualHours: {type: 'number', description: 'Actual time spent in hours.'},
+                    progress: {type: 'number', description: '0-100.'},
+                    owner: {type: 'string', description: '"ai" or "human".'},
+                    priority: {type: 'string', description: '"low", "med" or "high".'},
+                    acceptance: {type: 'string', description: 'Definition of done.'},
+                    evaluation: {type: 'string', description: 'Your assessment / rationale / remaining-estimate for this step.'},
+                    dependsOn: {type: 'array', items: {type: 'string'}, description: 'Step ids this step depends on.'},
+                    note: {type: 'string', description: 'Optional activity-log message (defaults to a summary of changed fields).'}
+                },
+                required: ['stepId']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const stepId = asString(args.stepId, 'stepId');
+            const current = service.readRoadmap(project);
+            const existing = findStep(current.steps, stepId);
+            if (existing === null) {
+                throw new Error(`Step "${stepId}" not found in the ${project} roadmap.`);
+            }
+            const patched = patchStep(existing, args);
+            const changed = Object.keys(args).filter((k) => k !== 'stepId' && k !== 'note');
+            const message = typeof args.note === 'string' && args.note.length > 0
+                ? args.note
+                : `updated ${changed.join(', ') || 'step'}`;
+            const logged = appendActivity(patched, {at: new Date().toISOString(), who: roadmapActor(), what: message});
+            const saved = await service.writeRoadmap({...current, steps: upsertStep(current.steps, logged)});
+            return {
+                response: ok({project, step: findStep(saved.steps, stepId), summary: summarize(saved)}),
+                event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_set_active',
+            description: 'Set the live "AI is working here" cursor to a step: it becomes status "ai_active" and any previously-active step drops back to "in_progress". Pass stepId=null (or omit) to clear the cursor. At most one step is active at a time. Call this when you start working on a step so the UI shows a live indicator; call update_step to record progress and clear when you move on.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    stepId: {type: 'string', description: 'Step to mark active. Omit or pass empty to clear the cursor.'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const current = service.readRoadmap(project);
+            const stepId = typeof args.stepId === 'string' && args.stepId.length > 0 ? args.stepId : null;
+            if (stepId !== null && findStep(current.steps, stepId) === null) {
+                throw new Error(`Step "${stepId}" not found in the ${project} roadmap.`);
+            }
+            const actor = roadmapActor();
+            const updated = setActive(current, stepId, new Date().toISOString(), actor);
+            const saved = await service.writeRoadmap(updated);
+            return {
+                response: ok({project, active: saved.active, summary: summarize(saved)}),
+                event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_link_note',
+            description: 'Attach note links to a roadmap step. Pass note titles or vault paths — they are stored on the step and rendered as [[wikilinks]] in the roadmap body, so backlinks and graph edges work. Idempotent: already-linked notes are skipped.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    stepId: {type: 'string', description: 'Step to link notes to.'},
+                    notes: {type: 'array', items: {type: 'string'}, description: 'Note titles or paths to link (become [[Title]]).'}
+                },
+                required: ['stepId', 'notes']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const stepId = asString(args.stepId, 'stepId');
+            const notes = Array.isArray(args.notes)
+                ? args.notes.filter((n): n is string => typeof n === 'string' && n.length > 0)
+                : [];
+            const current = service.readRoadmap(project);
+            const existing = findStep(current.steps, stepId);
+            if (existing === null) {
+                throw new Error(`Step "${stepId}" not found in the ${project} roadmap.`);
+            }
+            const have = new Set(existing.noteLinks ?? []);
+            const added = notes.filter((n) => !have.has(n));
+            const merged: RoadmapStep = {...existing, noteLinks: [...(existing.noteLinks ?? []), ...added]};
+            const logged = added.length > 0
+                ? appendActivity(merged, {at: new Date().toISOString(), who: roadmapActor(), what: `linked ${added.join(', ')}`})
+                : merged;
+            await service.writeRoadmap({...current, steps: upsertStep(current.steps, logged)});
+            return {
+                response: ok({project, stepId, added, skipped: notes.filter((n) => have.has(n))}),
+                event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }
     }
