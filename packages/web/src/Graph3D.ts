@@ -40,6 +40,8 @@ interface NodeRecord {
     baseColor?: THREE.Color;
     pulseUntil?: number;
     pulseColor?: THREE.Color;
+    // Instance slot in the lean-mode InstancedMesh (== index in `nodes`).
+    index?: number;
 }
 
 interface Trail3DRecord {
@@ -79,6 +81,17 @@ const ROOM_GRID_COLOR = 0x3a4358;
 const ROOM_GRID_OPACITY = 0.32;
 const CLUSTER_ANCHOR_RADIUS = 220;
 const CLUSTER_STRENGTH = 0.18;
+
+// Above this visible-node count the per-frame cost of the full-fat look
+// (fullscreen UnrealBloom, link particles, high-poly *transparent* spheres)
+// collapses the frame rate to ~6 FPS on a multi-thousand-node vault — the
+// transparent flag alone forces three.js to depth-sort every sphere each
+// frame and disables z-culling. Above the threshold we switch to a lean
+// path: opaque low-poly spheres, no bloom, no particles. Below it the graph
+// is small enough that the rich look stays smooth.
+const HEAVY_EFFECTS_MAX_NODES = 1200;
+const SPHERE_SEGMENTS_RICH = 18;
+const SPHERE_SEGMENTS_LEAN = 8;
 
 interface SimNode {
     id: string;
@@ -135,7 +148,7 @@ export class GraphView3D implements GraphRenderer {
     private orbitStartTimer: number | null = null;
     private pointerDownHandler: ((ev: PointerEvent) => void) | null = null;
     private pointerMoveHandler: ((ev: PointerEvent) => void) | null = null;
-    private pointerUpHandler: (() => void) | null = null;
+    private pointerUpHandler: ((ev: PointerEvent) => void) | null = null;
     private pointerDownPos: {x: number; y: number} | null = null;
     private hoverNodeId: string | null = null;
     private adjacency = new Map<string, Set<string>>();
@@ -144,6 +157,40 @@ export class GraphView3D implements GraphRenderer {
     private roomGridGroup: THREE.Group | null = null;
     private clusterForceAttached = false;
     private tagAnchors = new Map<string, {x: number; y: number; z: number}>();
+    // Set once on first build from the node count; gates bloom/particles and
+    // the low-poly sphere path. See HEAVY_EFFECTS_MAX_NODES.
+    private lightweight = false;
+    // Sphere geometry is identical for every node of the same radius, so we
+    // share one instance per (radius, segments) instead of allocating a fresh
+    // ~650-triangle geometry per node — 2646 allocations became a handful.
+    private sphereGeoCache = new Map<string, THREE.SphereGeometry>();
+
+    // ---- Lean-mode instanced node rendering -------------------------------
+    // In lean mode all node spheres collapse into a single InstancedMesh (one
+    // draw call for the whole graph instead of one per node). The library's
+    // built-in per-node meshes are what it raycasts for hover/click, so with
+    // them gone we do our own picking (pickNodeAt) and tooltip.
+    private instanced: THREE.InstancedMesh | null = null;
+    private instanceGeom: THREE.SphereGeometry | null = null;
+    private instanceMat: THREE.MeshLambertMaterial | null = null;
+    // All links share one LineSegments buffer in lean mode. The library draws
+    // every link as its own THREE.Line (one draw call each — 5000+ on a big
+    // vault); batching them collapses that to a single draw call.
+    private linkLines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
+    private linkPositions: Float32Array | null = null;
+    private instancesDirty = false;
+    private syncRaf: number | null = null;
+    private highlightSet: Set<string> | null = null;
+    private heatById: ReadonlyMap<string, number> | null = null;
+    private tooltip: HTMLElement | null = null;
+    private raycaster = new THREE.Raycaster();
+    private readonly hotColor = new THREE.Color('#ffd166');
+    private readonly identityQuat = new THREE.Quaternion();
+    private readonly tmpMatrix = new THREE.Matrix4();
+    private readonly tmpColor = new THREE.Color();
+    private readonly tmpPos = new THREE.Vector3();
+    private readonly tmpScale = new THREE.Vector3();
+    private readonly tmpNdc = new THREE.Vector2();
 
     public constructor(initial: GraphRendererState, private readonly cb: GraphRendererCallbacks) {
         this.state = initial;
@@ -172,20 +219,45 @@ export class GraphView3D implements GraphRenderer {
             this.pointerDownPos = {x: ev.clientX, y: ev.clientY};
         };
         this.pointerMoveHandler = (ev) => {
-            if (this.pointerDownPos === null) {
-                return;
+            if (this.pointerDownPos !== null) {
+                const dx = ev.clientX - this.pointerDownPos.x;
+                const dy = ev.clientY - this.pointerDownPos.y;
+
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+                    this.stopOrbit();
+                    this.pointerDownPos = null;
+                }
             }
 
-            const dx = ev.clientX - this.pointerDownPos.x;
-            const dy = ev.clientY - this.pointerDownPos.y;
+            // Lean mode owns its own hover picking (the library has no per-node
+            // mesh to raycast). Skip while a drag is in progress.
+            if (this.instanced !== null && this.pointerDownPos === null) {
+                const picked = this.pickNodeAt(ev);
+                const id = picked === null ? null : picked.id;
 
-            if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
-                this.stopOrbit();
-                this.pointerDownPos = null;
+                if (id !== this.hoverNodeId) {
+                    this.hoverNodeId = id;
+                    this.applyHoverHighlight();
+                }
+
+                this.updateTooltip(picked, ev);
             }
         };
-        this.pointerUpHandler = () => {
+        this.pointerUpHandler = (ev) => {
+            // A pointerup that never crossed the drag threshold (pointerDownPos
+            // still set) is a click — pick the node under it and open it.
+            const wasClick = this.pointerDownPos !== null;
             this.pointerDownPos = null;
+
+            if (wasClick && this.instanced !== null) {
+                const picked = this.pickNodeAt(ev);
+
+                if (picked !== null) {
+                    this.focusOnNode(picked);
+                    this.focus(picked.id);
+                    window.setTimeout(() => this.cb.onSelectNote(picked.id), FOCUS_DURATION_MS);
+                }
+            }
         };
 
         this.canvas.addEventListener('pointerdown', this.pointerDownHandler);
@@ -266,6 +338,12 @@ export class GraphView3D implements GraphRenderer {
 
         this.disposeHulls();
         this.disposeRoomGrid();
+        this.disposeInstances();
+
+        if (this.tooltip !== null) {
+            this.tooltip.remove();
+            this.tooltip = null;
+        }
 
         this.resizeObserver?.disconnect();
         this.resizeObserver = null;
@@ -274,9 +352,21 @@ export class GraphView3D implements GraphRenderer {
             this.graph._destructor();
             this.graph = null;
         }
+
+        for (const geom of this.sphereGeoCache.values()) {
+            geom.dispose();
+        }
+        this.sphereGeoCache.clear();
     }
 
     public applyHeat(heatById: ReadonlyMap<string, number>): void {
+        if (this.instanced !== null) {
+            // Lean mode: heat is folded into the per-instance color/scale pass.
+            this.heatById = heatById;
+            this.markInstancesDirty();
+            return;
+        }
+
         for (const node of this.nodes) {
             if (node.sphere === undefined || node.baseColor === undefined) {
                 continue;
@@ -398,7 +488,8 @@ export class GraphView3D implements GraphRenderer {
         for (const id of noteIds) {
             const node = this.nodeById.get(id);
 
-            if (node === undefined || node.sphere === undefined) {
+            // Rich mode animates node.sphere; lean mode animates the instance.
+            if (node === undefined || (this.instanced === null && node.sphere === undefined)) {
                 continue;
             }
 
@@ -408,7 +499,11 @@ export class GraphView3D implements GraphRenderer {
         }
 
         if (any) {
-            this.startAnimating();
+            if (this.instanced !== null) {
+                this.markInstancesDirty();
+            } else {
+                this.startAnimating();
+            }
         }
     }
 
@@ -584,17 +679,38 @@ export class GraphView3D implements GraphRenderer {
         }
 
         if (this.graph === null) {
+            // Freeze the render tier on first build from the whole-graph size;
+            // it must not flip mid-session (the node three-objects and the
+            // instanced mesh are built to match it). makeSphere/installBloom/
+            // installParticles/nodeThreeObject all read this below.
+            this.lightweight = this.nodes.length >= HEAVY_EFFECTS_MAX_NODES;
+
+            // A positive linkWidth makes 3d-force-graph render every link as a
+            // cylinder *mesh*, and a positive arrow length adds a cone mesh per
+            // link — on a 5000+ edge graph that is >10k extra draw calls, far
+            // more than the nodes themselves. In the lean tier links fall back
+            // to batched THREE.Line segments (width 0) and arrows are dropped.
+            const linkWidth = this.lightweight ? 0 : 0.4;
+            const arrowLength = this.lightweight ? 0 : 2;
+
             this.graph = new ForceGraph3D(this.canvas)
                 .backgroundColor('#000000')
                 .showNavInfo(false)
                 .nodeRelSize(4)
                 .cooldownTicks(COOLDOWN_TICKS)
                 .nodeLabel((node: object) => (node as NodeRecord).title)
-                .nodeThreeObject((node: object) => this.makeSphere(node as NodeRecord))
+                // Lean mode renders nodes through a single InstancedMesh, so the
+                // library gets an empty placeholder per node (it still tracks
+                // x/y/z on it) and we own the visuals + picking.
+                .nodeThreeObject((node: object) =>
+                    this.lightweight ? new THREE.Object3D() : this.makeSphere(node as NodeRecord))
+                // Lean mode draws links itself as one batched LineSegments, so
+                // the library's per-link Line objects are switched off.
+                .linkVisibility(!this.lightweight)
                 .linkColor((link: object) => this.linkColorForHover(link))
                 .linkOpacity(0.7)
-                .linkWidth(0.4)
-                .linkDirectionalArrowLength(2)
+                .linkWidth(linkWidth)
+                .linkDirectionalArrowLength(arrowLength)
                 .linkDirectionalArrowRelPos(0.92)
                 .linkDirectionalArrowColor(() => 'rgba(180, 190, 210, 0.55)')
                 .onNodeClick((node: object) => {
@@ -610,10 +726,16 @@ export class GraphView3D implements GraphRenderer {
                 .onNodeDragEnd(() => {
                     this.snapshotPositions();
                 })
+                .onEngineTick(() => {
+                    // Keep instances glued to the force-updated node positions
+                    // while the simulation (or a drag) is running.
+                    this.markInstancesDirty();
+                })
                 .onEngineStop(() => {
                     this.hullsDirty = true;
                     this.refreshHulls();
                     this.snapshotPositions();
+                    this.markInstancesDirty();
                 });
 
             this.installParticles();
@@ -628,6 +750,11 @@ export class GraphView3D implements GraphRenderer {
             .width(this.canvas.clientWidth || 800)
             .height(this.canvas.clientHeight || 600)
             .graphData({nodes: this.nodes, links: this.links});
+
+        if (this.lightweight) {
+            this.buildInstances();
+            this.buildLinkBatch();
+        }
     }
 
     /**
@@ -737,7 +864,7 @@ export class GraphView3D implements GraphRenderer {
     }
 
     private installParticles(): void {
-        if (this.graph === null) {
+        if (this.graph === null || this.lightweight) {
             return;
         }
 
@@ -781,6 +908,17 @@ export class GraphView3D implements GraphRenderer {
 
     private applyHoverHighlight(): void {
         const highlight = this.computeHighlightSet();
+        this.highlightSet = highlight;
+
+        if (this.graph !== null) {
+            this.graph.linkColor((link: object) => this.linkColorForHover(link));
+        }
+
+        if (this.instanced !== null) {
+            // Lean mode: dimming is a per-instance color multiply.
+            this.markInstancesDirty();
+            return;
+        }
 
         for (const node of this.nodes) {
             if (node.sphere === undefined) {
@@ -788,11 +926,25 @@ export class GraphView3D implements GraphRenderer {
             }
 
             const dimmed = highlight !== null && !highlight.has(node.id);
-            node.sphere.material.opacity = dimmed ? NODE_OPACITY_DIM : NODE_OPACITY_NORMAL;
-        }
+            const mat = node.sphere.material;
 
-        if (this.graph !== null) {
-            this.graph.linkColor((link: object) => this.linkColorForHover(link));
+            // Only dimmed spheres need blending; keep the rest opaque so the
+            // common (no-hover) case never pays the transparent-sort cost.
+            // Toggling `transparent` requires a shader recompile flag, but this
+            // fires only on hover so the cost is negligible.
+            if (dimmed) {
+                if (!mat.transparent) {
+                    mat.transparent = true;
+                    mat.needsUpdate = true;
+                }
+                mat.opacity = NODE_OPACITY_DIM;
+            } else {
+                if (mat.transparent) {
+                    mat.transparent = false;
+                    mat.needsUpdate = true;
+                }
+                mat.opacity = NODE_OPACITY_NORMAL;
+            }
         }
     }
 
@@ -1122,7 +1274,7 @@ export class GraphView3D implements GraphRenderer {
     }
 
     private installBloom(): void {
-        if (this.graph === null) {
+        if (this.graph === null || this.lightweight) {
             return;
         }
 
@@ -1157,19 +1309,346 @@ export class GraphView3D implements GraphRenderer {
         );
     }
 
+    private sphereGeometry(radius: number): THREE.SphereGeometry {
+        const segments = this.lightweight ? SPHERE_SEGMENTS_LEAN : SPHERE_SEGMENTS_RICH;
+        const key = `${radius}:${segments}`;
+        let geom = this.sphereGeoCache.get(key);
+
+        if (geom === undefined) {
+            geom = new THREE.SphereGeometry(radius, segments, segments);
+            this.sphereGeoCache.set(key, geom);
+        }
+
+        return geom;
+    }
+
     private makeSphere(record: NodeRecord): THREE.Object3D {
-        const geom = new THREE.SphereGeometry(record.radius, 18, 18);
+        const geom = this.sphereGeometry(record.radius);
         const baseColor = new THREE.Color(record.color);
+        // Opaque by default: transparent:true would make three.js depth-sort
+        // every sphere each frame and skip early-z. Hover dimming re-enables
+        // transparency only on the dimmed subset (see applyHoverHighlight).
         const mat = new THREE.MeshLambertMaterial({
             color: baseColor.clone(),
             emissive: baseColor.clone().multiplyScalar(0.25),
-            transparent: true,
-            opacity: 0.95
+            transparent: false,
+            opacity: 1
         });
         const sphere = new THREE.Mesh(geom, mat);
         record.sphere = sphere;
         record.baseColor = baseColor;
         return sphere;
+    }
+
+    // ---- Lean-mode instanced rendering ------------------------------------
+
+    /**
+     * (Re)build the single InstancedMesh that draws every node in lean mode.
+     * One unit sphere geometry, one material, N instances — the whole graph
+     * is a single draw call instead of one per node.
+     */
+    private buildInstances(): void {
+        this.disposeInstances();
+
+        const scene = this.graph?.scene();
+
+        if (scene === undefined || this.nodes.length === 0) {
+            return;
+        }
+
+        const geom = new THREE.SphereGeometry(1, SPHERE_SEGMENTS_LEAN, SPHERE_SEGMENTS_LEAN);
+        // A little baked emissive keeps nodes vivid without bloom; per-instance
+        // color still carries the actual hue via instanceColor.
+        const mat = new THREE.MeshLambertMaterial({color: 0xffffff, emissive: 0x111111});
+        const mesh = new THREE.InstancedMesh(geom, mat, this.nodes.length);
+        mesh.frustumCulled = false;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+        for (let i = 0; i < this.nodes.length; i += 1) {
+            const node = this.nodes[i];
+
+            if (node === undefined) {
+                continue;
+            }
+
+            node.index = i;
+            node.baseColor = new THREE.Color(node.color);
+        }
+
+        this.instanced = mesh;
+        this.instanceGeom = geom;
+        this.instanceMat = mat;
+        scene.add(mesh);
+
+        this.refreshInstances();
+    }
+
+    private disposeInstances(): void {
+        if (this.syncRaf !== null) {
+            cancelAnimationFrame(this.syncRaf);
+            this.syncRaf = null;
+        }
+        if (this.instanced !== null) {
+            this.instanced.parent?.remove(this.instanced);
+            this.instanced.dispose();
+            this.instanced = null;
+        }
+        this.instanceGeom?.dispose();
+        this.instanceGeom = null;
+        this.instanceMat?.dispose();
+        this.instanceMat = null;
+        this.disposeLinkBatch();
+    }
+
+    /** Build the single LineSegments buffer that draws every link. */
+    private buildLinkBatch(): void {
+        this.disposeLinkBatch();
+
+        const scene = this.graph?.scene();
+
+        if (scene === undefined || this.links.length === 0) {
+            return;
+        }
+
+        const positions = new Float32Array(this.links.length * 6);
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute(
+            'position',
+            new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage)
+        );
+        const mat = new THREE.LineBasicMaterial({color: 0x9aa4b8, transparent: true, opacity: 0.32});
+        const lines = new THREE.LineSegments(geom, mat);
+        lines.frustumCulled = false;
+
+        this.linkLines = lines;
+        this.linkPositions = positions;
+        scene.add(lines);
+
+        this.refreshLinkPositions();
+    }
+
+    private refreshLinkPositions(): void {
+        const positions = this.linkPositions;
+        const lines = this.linkLines;
+
+        if (positions === null || lines === null) {
+            return;
+        }
+
+        for (let i = 0; i < this.links.length; i += 1) {
+            const link = this.links[i];
+
+            if (link === undefined) {
+                continue;
+            }
+
+            // graphData() mutates each link, swapping the source/target string
+            // ids for the live node objects — resolve either form.
+            const from = this.resolveEndpoint(link.source);
+            const to = this.resolveEndpoint(link.target);
+            const o = i * 6;
+
+            positions[o] = from?.x ?? 0;
+            positions[o + 1] = from?.y ?? 0;
+            positions[o + 2] = from?.z ?? 0;
+            positions[o + 3] = to?.x ?? 0;
+            positions[o + 4] = to?.y ?? 0;
+            positions[o + 5] = to?.z ?? 0;
+        }
+
+        (lines.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    }
+
+    private resolveEndpoint(ref: string | NodeRecord): {x?: number; y?: number; z?: number} | undefined {
+        if (typeof ref === 'string') {
+            return this.nodeById.get(ref);
+        }
+
+        // Already a live node object (library-mutated link endpoint).
+        return ref;
+    }
+
+    private disposeLinkBatch(): void {
+        if (this.linkLines !== null) {
+            this.linkLines.parent?.remove(this.linkLines);
+            this.linkLines.geometry.dispose();
+            this.linkLines.material.dispose();
+            this.linkLines = null;
+        }
+        this.linkPositions = null;
+    }
+
+    /** Write current position/scale/color for every instance in one pass. */
+    private refreshInstances(): void {
+        const mesh = this.instanced;
+
+        if (mesh === null) {
+            return;
+        }
+
+        const now = Date.now();
+        let stillAnimating = false;
+
+        for (let i = 0; i < this.nodes.length; i += 1) {
+            const node = this.nodes[i];
+
+            if (node === undefined) {
+                continue;
+            }
+
+            const base = node.baseColor ?? this.tmpColor.set(node.color);
+
+            this.tmpPos.set(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+            this.tmpColor.copy(base);
+            let scale = 1;
+
+            if (node.pulseUntil !== undefined) {
+                const remaining = node.pulseUntil - now;
+
+                if (remaining > 0) {
+                    const t = 1 - remaining / PULSE_DURATION_MS;
+                    const intensity = 1 - easeOutCubic(t);
+                    this.tmpColor.copy(base).lerp(node.pulseColor ?? base, intensity);
+                    scale = 1 + intensity * 0.9;
+                    stillAnimating = true;
+                } else {
+                    delete node.pulseUntil;
+                    delete node.pulseColor;
+                }
+            }
+
+            if (node.pulseUntil === undefined) {
+                const raw = this.heatById?.get(node.id) ?? 0;
+                const heat = Math.min(1, Math.max(0, raw / 5));
+
+                if (this.state.showHeat && heat > 0) {
+                    this.tmpColor.copy(base).lerp(this.hotColor, 0.3 + heat * 0.5);
+                    scale = 1 + heat * 0.4;
+                }
+            }
+
+            if (this.highlightSet !== null && !this.highlightSet.has(node.id)) {
+                this.tmpColor.multiplyScalar(0.22);
+            }
+
+            const r = node.radius * scale;
+            this.tmpScale.set(r, r, r);
+            this.tmpMatrix.compose(this.tmpPos, this.identityQuat, this.tmpScale);
+            mesh.setMatrixAt(i, this.tmpMatrix);
+            mesh.setColorAt(i, this.tmpColor);
+        }
+
+        mesh.instanceMatrix.needsUpdate = true;
+
+        if (mesh.instanceColor !== null) {
+            mesh.instanceColor.needsUpdate = true;
+        }
+
+        // Links share the same position source, so refresh them in lock-step.
+        this.refreshLinkPositions();
+
+        // A live pulse means the next frame is different — keep the loop going.
+        if (stillAnimating) {
+            this.instancesDirty = true;
+        }
+    }
+
+    private markInstancesDirty(): void {
+        if (this.instanced === null) {
+            return;
+        }
+
+        this.instancesDirty = true;
+        this.ensureInstanceSync();
+    }
+
+    /**
+     * Self-stopping rAF: repaints instances whenever they are dirty, then
+     * winds down after a few idle frames so a settled graph costs nothing.
+     */
+    private ensureInstanceSync(): void {
+        if (this.syncRaf !== null) {
+            return;
+        }
+
+        let idle = 0;
+        const tick = (): void => {
+            if (this.instanced === null) {
+                this.syncRaf = null;
+                return;
+            }
+
+            if (this.instancesDirty) {
+                this.instancesDirty = false;
+                this.refreshInstances();
+                idle = 0;
+            } else {
+                idle += 1;
+
+                if (idle > 3) {
+                    this.syncRaf = null;
+                    return;
+                }
+            }
+
+            this.syncRaf = requestAnimationFrame(tick);
+        };
+
+        this.syncRaf = requestAnimationFrame(tick);
+    }
+
+    /** Raycast the instanced mesh under the pointer; map hit → node. */
+    private pickNodeAt(ev: PointerEvent): NodeRecord | null {
+        if (this.instanced === null || this.graph === null) {
+            return null;
+        }
+
+        const rect = this.canvas.getBoundingClientRect();
+
+        if (rect.width === 0 || rect.height === 0) {
+            return null;
+        }
+
+        this.tmpNdc.set(
+            ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+            -((ev.clientY - rect.top) / rect.height) * 2 + 1
+        );
+
+        const camera = this.graph.camera() as THREE.Camera;
+        this.raycaster.setFromCamera(this.tmpNdc, camera);
+
+        const hit = this.raycaster.intersectObject(this.instanced, false)[0];
+
+        if (hit === undefined || hit.instanceId === undefined || hit.instanceId === null) {
+            return null;
+        }
+
+        return this.nodes[hit.instanceId] ?? null;
+    }
+
+    private updateTooltip(node: NodeRecord | null, ev: PointerEvent): void {
+        if (this.tooltip === null) {
+            this.element.style.position = 'relative';
+            this.tooltip = el('div', {class: 'graph-3d-tooltip'});
+            this.tooltip.style.cssText =
+                'position:absolute;pointer-events:none;z-index:20;padding:2px 8px;border-radius:6px;'
+                + 'background:rgba(15,18,28,0.92);color:#e8ecf4;font-size:12px;line-height:1.4;'
+                + 'white-space:nowrap;transform:translate(-50%,calc(-100% - 12px));display:none;';
+            this.element.appendChild(this.tooltip);
+        }
+
+        if (node === null) {
+            this.tooltip.style.display = 'none';
+            this.canvas.style.cursor = '';
+            return;
+        }
+
+        const rect = this.canvas.getBoundingClientRect();
+        this.tooltip.textContent = node.title;
+        this.tooltip.style.left = `${ev.clientX - rect.left}px`;
+        this.tooltip.style.top = `${ev.clientY - rect.top}px`;
+        this.tooltip.style.display = 'block';
+        this.canvas.style.cursor = 'pointer';
     }
 
     private startAnimating(): void {
