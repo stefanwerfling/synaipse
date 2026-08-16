@@ -16,6 +16,7 @@ import {ImportDialog} from './ImportDialog.js';
 import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
+import {buildWikilinkResolver} from './Wikilinks.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {Search} from './Search.js';
 import {Settings} from './Settings.js';
@@ -162,8 +163,13 @@ export class App {
         });
 
         this.roadmapPanel = new RoadmapPanel({
-            onOpenNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
+            onOpenNote: (ref) => {
+                const id = this.resolveNoteRef(ref);
+                if (id === null) {
+                    window.alert(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`);
+                    return;
+                }
+                this.notesPanel.openNote(id);
                 void this.switchTab('notes');
             }
         });
@@ -664,6 +670,28 @@ export class App {
         clear(this.body);
         this.body.appendChild(this.roadmapPanel.element);
         await this.roadmapPanel.onShow();
+    }
+
+    /**
+     * Resolve a roadmap note-link string — which may be a full note id/path, a
+     * path missing its `.md` suffix, or a note title/alias — to a concrete note
+     * id. Returns null when nothing matches. Mirrors wikilink resolution so a
+     * step linked by `[[Title]]` opens the same note the graph/backlinks use.
+     */
+    private resolveNoteRef(ref: string): string | null {
+        const trimmed = ref.trim();
+        if (trimmed.length === 0) {
+            return null;
+        }
+        if (this.notes.some((n) => n.id === trimmed)) {
+            return trimmed;
+        }
+        const withMd = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+        const byPath = this.notes.find((n) => n.id === withMd || n.id.endsWith(`/${withMd}`));
+        if (byPath !== undefined) {
+            return byPath.id;
+        }
+        return buildWikilinkResolver(this.notes)(trimmed) ?? null;
     }
 
     private async showActivity(): Promise<void> {
