@@ -7573,7 +7573,16 @@ button.typed-link-badge:hover {
 .rm-table-head { display: flex; align-items: center; gap: 10px; padding: 4px 2px 12px; }
 .rm-table-head h2 { font-size: 14px; margin: 0; }
 .rm-table-hint { color: var(--text-2); font-size: 12px; }
+.rm-deleted-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
+.rm-deleted-toggle input { cursor: pointer; }
+.rm-deleted-toggle + .rm-btn { margin-left: 0; }
 .rm-table-head .rm-btn { margin-left: auto; }
+
+/* Soft-deleted step rows: dimmed + struck-through, still visible when toggled on. */
+.rm-table tbody tr.rm-deleted td { opacity: 0.5; }
+.rm-table tbody tr.rm-deleted .rm-name,
+.rm-table tbody tr.rm-deleted .rm-id { text-decoration: line-through; }
+.rm-table tbody tr.rm-deleted .rm-row-actions { opacity: 1; }
 
 .rm-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--bg-1); }
 .rm-table { width: 100%; border-collapse: collapse; min-width: 940px; }

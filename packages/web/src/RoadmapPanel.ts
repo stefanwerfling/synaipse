@@ -1,4 +1,5 @@
 import type {Roadmap, RoadmapStatus, RoadmapStep, RoadmapSummary} from '@synaipse/core';
+import {setStepDeleted, withoutDeleted} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 
@@ -105,6 +106,8 @@ export class RoadmapPanel {
     private roadmap: Roadmap | null = null;
     private readonly expanded = new Set<string>();
     private saving = false;
+    /** When false (default), soft-deleted steps are hidden from the table. */
+    private showDeleted = false;
 
     public constructor(opts: RoadmapPanelOptions = {}) {
         this.opts = opts;
@@ -256,7 +259,8 @@ export class RoadmapPanel {
     private renderKpis(rm: Roadmap | null): void {
         clear(this.kpis);
         if (rm === null) return;
-        const rows = flatten(rm.steps);
+        // KPIs always ignore soft-deleted steps.
+        const rows = flatten(withoutDeleted(rm.steps));
         const total = rows.length;
         const blocked = rows.filter((r) => r.step.status === 'blocked').length;
         const leaves = rows.filter((r) => !r.step.children || r.step.children.length === 0);
@@ -320,14 +324,32 @@ export class RoadmapPanel {
             text: '＋ Schritt',
             on: {click: () => void this.addStep(null)}
         });
-        this.tableWrap.appendChild(el('div', {class: 'rm-table-head'},
+        const deletedCount = flatten(rm.steps).length - flatten(withoutDeleted(rm.steps)).length;
+        const headChildren: (HTMLElement | null)[] = [
             el('h2', {text: 'Umsetzungsschritte'}),
-            el('span', {class: 'rm-table-hint', text: 'verschachtelbar · Zeiten rollen auf Phasen auf'}),
-            addRootBtn
-        ));
+            el('span', {class: 'rm-table-hint', text: 'verschachtelbar · Zeiten rollen auf Phasen auf'})
+        ];
+        if (deletedCount > 0) {
+            const toggle = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
+            toggle.checked = this.showDeleted;
+            toggle.addEventListener('change', () => {
+                this.showDeleted = toggle.checked;
+                this.render();
+            });
+            headChildren.push(el('label', {class: 'rm-deleted-toggle', attrs: {title: 'Gelöschte Schritte bleiben im Vault erhalten und lassen sich wiederherstellen.'}},
+                toggle,
+                el('span', {text: `🗑 Gelöschte anzeigen (${deletedCount})`})
+            ));
+        }
+        headChildren.push(addRootBtn);
+        this.tableWrap.appendChild(el('div', {class: 'rm-table-head'}, ...headChildren));
 
-        if (rm.steps.length === 0) {
-            this.tableWrap.appendChild(el('p', {class: 'rm-empty-inline', text: 'Noch keine Schritte. „＋ Schritt" oben — oder die KI plant per MCP.'}));
+        const visibleSteps = this.showDeleted ? rm.steps : withoutDeleted(rm.steps);
+        if (visibleSteps.length === 0) {
+            const msg = rm.steps.length === 0
+                ? 'Noch keine Schritte. „＋ Schritt" oben — oder die KI plant per MCP.'
+                : 'Alle Schritte sind gelöscht (ausgeblendet). Schalte „Gelöschte anzeigen" ein.';
+            this.tableWrap.appendChild(el('p', {class: 'rm-empty-inline', text: msg}));
             return;
         }
 
@@ -346,7 +368,7 @@ export class RoadmapPanel {
             )
         ));
         const tbody = el('tbody');
-        for (const {step, depth} of flatten(rm.steps)) {
+        for (const {step, depth} of flatten(visibleSteps)) {
             tbody.appendChild(this.renderRow(step, depth, rm));
             if (this.expanded.has(step.id)) {
                 tbody.appendChild(this.renderDetail(step));
@@ -397,13 +419,17 @@ export class RoadmapPanel {
             }));
         }
 
-        const actions = el('div', {class: 'rm-row-actions'},
-            el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'KI-Cursor hier setzen'}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
-            el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Zeit buchen'}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
-            el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Notiz verlinken'}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
-            el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Unterschritt hinzufügen'}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
-            el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Schritt löschen'}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
-        );
+        const actions = step.deleted
+            ? el('div', {class: 'rm-row-actions'},
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreStep(step.id)}})
+            )
+            : el('div', {class: 'rm-row-actions'},
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'KI-Cursor hier setzen'}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Zeit buchen'}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Notiz verlinken'}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Unterschritt hinzufügen'}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
+                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
+            );
 
         const indent = el('span', {class: 'rm-indent', style: {width: `${depth * 20}px`}});
         const stepCell = el('td', {},
@@ -415,7 +441,8 @@ export class RoadmapPanel {
             )
         );
 
-        return el('tr', {class: isActive ? 'rm-row ai-row' : 'rm-row'},
+        const rowCls = ['rm-row', isActive ? 'ai-row' : '', step.deleted ? 'rm-deleted' : ''].filter(Boolean).join(' ');
+        return el('tr', {class: rowCls},
             stepCell,
             el('td', {}, statusSel),
             el('td', {}, owner),
@@ -538,11 +565,22 @@ export class RoadmapPanel {
         });
     }
 
+    /**
+     * Soft-delete a step: it is marked `deleted` (cascading to sub-steps) and
+     * hidden, but kept in the vault so it stays reversible. Steps are never
+     * hard-removed from the roadmap.
+     */
     private async deleteStep(id: string): Promise<void> {
+        if (!window.confirm('Schritt als gelöscht markieren? Er wird ausgeblendet, bleibt aber im Vault erhalten und lässt sich wiederherstellen.')) return;
         await this.mutate((rm) => {
-            const prune = (steps: RoadmapStep[]): RoadmapStep[] =>
-                steps.filter((s) => s.id !== id).map((s) => s.children ? {...s, children: prune(s.children)} : s);
-            rm.steps = prune(rm.steps);
+            rm.steps = setStepDeleted(rm.steps, id, true);
+        });
+    }
+
+    /** Restore a soft-deleted step (and its sub-steps). */
+    private async restoreStep(id: string): Promise<void> {
+        await this.mutate((rm) => {
+            rm.steps = setStepDeleted(rm.steps, id, false);
         });
     }
 }

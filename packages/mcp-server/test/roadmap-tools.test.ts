@@ -83,6 +83,31 @@ describe('synaipse_roadmap_plan', () => {
         const got = parse(await call('synaipse_roadmap_get', {}));
         expect(got.steps[0].children[0].id).toBe('1.1');
     });
+
+    it('full-tree replace preserves activity logs and soft-deletes omitted steps', async () => {
+        // Seed two steps, record activity on step 1 via update_step.
+        await call('synaipse_roadmap_plan', {
+            steps: [
+                {id: '1', title: 'Keep', status: 'planned'},
+                {id: '2', title: 'Vanishes', status: 'planned'}
+            ]
+        });
+        await call('synaipse_roadmap_update_step', {stepId: '1', status: 'in_progress', note: 'kicked off'});
+
+        // A "stale" full replace that omits step 1's activity AND drops step 2.
+        await call('synaipse_roadmap_plan', {steps: [{id: '1', title: 'Keep', status: 'in_progress'}]});
+
+        const got = parse(await call('synaipse_roadmap_get', {}));
+        const one = got.steps.find((s: any) => s.id === '1');
+        const two = got.steps.find((s: any) => s.id === '2');
+        // Activity survived the replace.
+        expect(one.activity.some((e: any) => e.what === 'kicked off')).toBe(true);
+        // Omitted step is kept, just soft-deleted.
+        expect(two).toBeDefined();
+        expect(two.deleted).toBe(true);
+        // KPIs ignore the soft-deleted step.
+        expect(got.summary.totalSteps).toBe(1);
+    });
 });
 
 describe('synaipse_roadmap_update_step', () => {
@@ -104,6 +129,24 @@ describe('synaipse_roadmap_update_step', () => {
     it('errors on unknown step', async () => {
         await call('synaipse_roadmap_plan', {steps: [{id: '1', title: 'A', status: 'planned'}]});
         await expect(call('synaipse_roadmap_update_step', {stepId: 'nope', status: 'done'})).rejects.toThrow();
+    });
+
+    it('soft-deletes (cascading) and restores via the deleted flag', async () => {
+        await call('synaipse_roadmap_plan', {
+            steps: [{id: '1', title: 'A', status: 'planned', children: [{id: '1.1', title: 'A1', status: 'planned'}]}]
+        });
+
+        await call('synaipse_roadmap_update_step', {stepId: '1', deleted: true});
+        let got = parse(await call('synaipse_roadmap_get', {}));
+        expect(got.steps[0].deleted).toBe(true);
+        expect(got.steps[0].children[0].deleted).toBe(true); // cascaded
+        expect(got.summary.totalSteps).toBe(0); // excluded from KPIs
+
+        await call('synaipse_roadmap_update_step', {stepId: '1', deleted: false});
+        got = parse(await call('synaipse_roadmap_get', {}));
+        expect(got.steps[0].deleted).toBeUndefined();
+        expect(got.steps[0].children[0].deleted).toBeUndefined();
+        expect(got.summary.totalSteps).toBe(2);
     });
 });
 

@@ -6,7 +6,9 @@ import {
     extractTypedLinks,
     findStep,
     parseRoadmap,
+    reconcilePlan,
     setActive,
+    setStepDeleted,
     summarize,
     upsertStep
 } from '@synaipse/core';
@@ -1014,7 +1016,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
     {
         definition: {
             name: 'synaipse_roadmap_plan',
-            description: 'Plan the roadmap for the active project. Two modes: (1) pass `steps` — an array of step objects — to REPLACE the whole tree (use for initial planning or restructuring); (2) pass a single `step` plus optional `parentId` to add or replace one step (append under a parent, or at root when parentId is omitted). Steps nest arbitrarily via each step\'s `children` array. Hours and progress roll up to parents automatically; open dependencies flip a step to "blocked". Writes Memory/<project>/_roadmap.md.',
+            description: 'Plan the roadmap for the active project. Two modes: (1) pass `steps` — an array of step objects — to REPLACE the whole tree (use for initial planning or restructuring); (2) pass a single `step` plus optional `parentId` to add or replace one step (append under a parent, or at root when parentId is omitted). Steps nest arbitrarily via each step\'s `children` array. Hours and progress roll up to parents automatically; open dependencies flip a step to "blocked". Writes Memory/<project>/_roadmap.md. SAFETY: the full-tree replace is non-destructive — per-step activity/audit logs are merged by id (an omitted activity list keeps existing history) and any step you leave out is kept as soft-deleted (hidden), never dropped. Prefer mode (2) for incremental edits.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -1034,7 +1036,11 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
 
             let nextSteps: RoadmapStep[];
             if (Array.isArray(args.steps)) {
-                nextSteps = sanitizeSteps(project, args.steps);
+                // Full-tree replace is reconciled against the current tree: activity
+                // logs are merged by id and steps the incoming tree omits are kept as
+                // soft-deleted (hidden) rather than dropped. Guards against a stale
+                // replace silently wiping history — see reconcilePlan.
+                nextSteps = reconcilePlan(current.steps, sanitizeSteps(project, args.steps));
             } else if (args.step !== undefined && args.step !== null) {
                 const [sanitized] = sanitizeSteps(project, [args.step]);
                 if (sanitized === undefined) {
@@ -1072,6 +1078,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
                     acceptance: {type: 'string', description: 'Definition of done.'},
                     evaluation: {type: 'string', description: 'Your assessment / rationale / remaining-estimate for this step.'},
                     dependsOn: {type: 'array', items: {type: 'string'}, description: 'Step ids this step depends on.'},
+                    deleted: {type: 'boolean', description: 'Soft-delete (true) or restore (false) this step. Deleting cascades to sub-steps and hides them from KPIs/table/body, but the step is kept in the vault and stays reversible — steps are never hard-deleted.'},
                     note: {type: 'string', description: 'Optional activity-log message (defaults to a summary of changed fields).'}
                 },
                 required: ['stepId']
@@ -1091,7 +1098,12 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
                 ? args.note
                 : `updated ${changed.join(', ') || 'step'}`;
             const logged = appendActivity(patched, {at: new Date().toISOString(), who: roadmapActor(), what: message});
-            const saved = await service.writeRoadmap({...current, steps: upsertStep(current.steps, logged)});
+            let nextSteps = upsertStep(current.steps, logged);
+            // Soft-delete/restore cascades to sub-steps; steps are never hard-removed.
+            if (typeof args.deleted === 'boolean') {
+                nextSteps = setStepDeleted(nextSteps, stepId, args.deleted);
+            }
+            const saved = await service.writeRoadmap({...current, steps: nextSteps});
             return {
                 response: ok({project, step: findStep(saved.steps, stepId), summary: summarize(saved)}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}

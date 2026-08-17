@@ -68,6 +68,13 @@ export interface RoadmapStep {
     evaluation?: string;
     /** Per-step activity log, newest last, capped by {@link ACTIVITY_CAP}. */
     activity?: RoadmapEvent[];
+    /**
+     * Soft-delete marker. A deleted step is never removed from the tree: it is
+     * kept in the frontmatter (so nothing is lost), excluded from roll-up /
+     * summary / rendered body, and hidden in the UI unless "show deleted" is on.
+     * Deleting/restoring cascades to descendants (see {@link setStepDeleted}).
+     */
+    deleted?: boolean;
     children?: RoadmapStep[];
 }
 
@@ -209,7 +216,13 @@ export const upsertStep = (
     });
 };
 
-/** Remove a step (and its subtree) by id. Returns a new step array. */
+/**
+ * Remove a step (and its subtree) by id. Returns a new step array.
+ *
+ * NOTE: this is a HARD delete — the step vanishes from the frontmatter and is
+ * only recoverable from ngit history. Prefer {@link setStepDeleted} for the
+ * user-facing "delete" path, which is a reversible soft-delete.
+ */
 export const removeStep = (steps: readonly RoadmapStep[], id: string): RoadmapStep[] => {
     const out: RoadmapStep[] = [];
     for (const step of steps) {
@@ -219,6 +232,123 @@ export const removeStep = (steps: readonly RoadmapStep[], id: string): RoadmapSt
         out.push(step.children ? {...step, children: removeStep(step.children, id)} : step);
     }
     return out;
+};
+
+// ---------------------------------------------------------------------------
+// Soft-delete
+// ---------------------------------------------------------------------------
+
+/** Set/clear `deleted` on a step and its entire subtree. Returns a new tree. */
+const markSubtreeDeleted = (step: RoadmapStep, deleted: boolean): RoadmapStep => {
+    const next: RoadmapStep = {...step};
+    if (deleted) next.deleted = true;
+    else delete next.deleted;
+    if (step.children) next.children = step.children.map((c) => markSubtreeDeleted(c, deleted));
+    return next;
+};
+
+/**
+ * Soft-delete (or restore) a step by id. The step is never removed from the
+ * tree — only its `deleted` flag flips, cascading to all descendants so a
+ * hidden parent never leaves visible orphans. Returns a new step array; a
+ * missing id is a no-op.
+ */
+export const setStepDeleted = (
+    steps: readonly RoadmapStep[],
+    id: string,
+    deleted: boolean
+): RoadmapStep[] =>
+    steps.map((step) => {
+        if (step.id === id) {
+            return markSubtreeDeleted(step, deleted);
+        }
+        return step.children ? {...step, children: setStepDeleted(step.children, id, deleted)} : step;
+    });
+
+/** New tree with every soft-deleted step (and its subtree) pruned. For display/roll-up. */
+export const withoutDeleted = (steps: readonly RoadmapStep[]): RoadmapStep[] =>
+    steps
+        .filter((s) => s.deleted !== true)
+        .map((s) => (s.children ? {...s, children: withoutDeleted(s.children)} : s));
+
+/** True when any step in the tree is soft-deleted. */
+export const hasDeleted = (steps: readonly RoadmapStep[]): boolean => {
+    let found = false;
+    walkSteps(steps, (s) => {
+        if (s.deleted === true) found = true;
+    });
+    return found;
+};
+
+/** Union two activity logs, dedupe by (at|who|what), sort ascending, cap. */
+const mergeActivity = (a: readonly RoadmapEvent[], b?: readonly RoadmapEvent[]): RoadmapEvent[] => {
+    const seen = new Set<string>();
+    const out: RoadmapEvent[] = [];
+    for (const e of [...a, ...(b ?? [])]) {
+        const key = `${e.at}|${e.who}|${e.what}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(e);
+    }
+    out.sort((x, y) => x.at.localeCompare(y.at));
+    return out.slice(-ACTIVITY_CAP);
+};
+
+/**
+ * Reconcile a full-tree roadmap replacement against the current tree so a
+ * replace can never silently lose data — the incident this guards against was a
+ * stale full-tree `synaipse_roadmap_plan` call that wiped every step's activity
+ * history and dropped steps it happened to omit. Two guarantees:
+ *
+ *  1. **Activity is merged by id.** An incoming step that omits (or has a
+ *     shorter) `activity` log keeps the audit history the current tree recorded.
+ *  2. **Missing steps are soft-deleted, not dropped.** Any step present in the
+ *     current tree but absent from the incoming tree is carried over with
+ *     `deleted: true` (hidden, reversible) under its original parent when that
+ *     parent survives, else at the root.
+ *
+ * Returns the reconciled step array to persist.
+ */
+export const reconcilePlan = (
+    current: readonly RoadmapStep[],
+    next: readonly RoadmapStep[]
+): RoadmapStep[] => {
+    const currentById = new Map<string, RoadmapStep>();
+    const parentOf = new Map<string, string | null>();
+    const indexCurrent = (steps: readonly RoadmapStep[], parentId: string | null): void => {
+        for (const s of steps) {
+            currentById.set(s.id, s);
+            parentOf.set(s.id, parentId);
+            if (s.children) indexCurrent(s.children, s.id);
+        }
+    };
+    indexCurrent(current, null);
+
+    const nextIds = new Set(allStepIds(next));
+
+    // 1. Merge activity logs by id into the incoming tree.
+    const mergeActivityInto = (steps: readonly RoadmapStep[]): RoadmapStep[] =>
+        steps.map((s) => {
+            const prev = currentById.get(s.id);
+            const merged: RoadmapStep = prev?.activity
+                ? {...s, activity: mergeActivity(prev.activity, s.activity)}
+                : {...s};
+            if (s.children) merged.children = mergeActivityInto(s.children);
+            return merged;
+        });
+    let result = mergeActivityInto(next);
+
+    // 2. Carry over vanished steps as soft-deleted subtrees. Iterating the DFS
+    //    parent-before-child map, we graft only the top-most missing node of
+    //    each vanished subtree; its descendants ride along via markSubtreeDeleted.
+    for (const [id, step] of currentById) {
+        if (nextIds.has(id)) continue;
+        const parentId = parentOf.get(id) ?? null;
+        if (parentId !== null && !nextIds.has(parentId)) continue; // rides along with a carried ancestor
+        const graftParent = parentId !== null && nextIds.has(parentId) ? parentId : null;
+        result = upsertStep(result, markSubtreeDeleted(step, true), graftParent);
+    }
+    return result;
 };
 
 // ---------------------------------------------------------------------------
@@ -246,7 +376,9 @@ export const rollup = (steps: readonly RoadmapStep[]): RoadmapStep[] =>
         let progressSum = 0;
         let leafCount = 0;
 
-        walkSteps(children, (child) => {
+        // Soft-deleted steps are kept in the tree but never contribute to a
+        // parent's rolled-up hours/progress.
+        walkSteps(withoutDeleted(children), (child) => {
             if (!isLeaf(child)) {
                 return;
             }
@@ -358,7 +490,8 @@ export interface RoadmapSummary {
 }
 
 export const summarize = (roadmap: Roadmap): RoadmapSummary => {
-    const rolled = rollup(roadmap.steps);
+    // Soft-deleted steps are excluded from every KPI.
+    const rolled = withoutDeleted(rollup(roadmap.steps));
     let total = 0;
     let done = 0;
     let blocked = 0;
@@ -443,6 +576,7 @@ const parseStep = (raw: unknown): RoadmapStep | null => {
     if (evaluation) step.evaluation = evaluation;
     const activity = parseActivity(c.activity);
     if (activity) step.activity = activity;
+    if (c.deleted === true) step.deleted = true;
 
     if (Array.isArray(c.children)) {
         const children = c.children.map(parseStep).filter((s): s is RoadmapStep => s !== null);
@@ -521,7 +655,9 @@ const AUTOGEN_MARKER =
  * mermaid flow of the top-level phases. Regenerated on every write.
  */
 export const renderRoadmapMarkdown = (roadmap: Roadmap): string => {
-    const rolled = rollup(roadmap.steps);
+    // Soft-deleted steps stay in the frontmatter but are hidden from the body.
+    const rolled = withoutDeleted(rollup(roadmap.steps));
+    const deletedCount = allStepIds(roadmap.steps).length - allStepIds(rolled).length;
     const s = summarize(roadmap);
 
     const lines: string[] = [];
@@ -532,7 +668,8 @@ export const renderRoadmapMarkdown = (roadmap: Roadmap): string => {
     lines.push(
         `> **${s.progress}%** fertig · ${s.doneSteps}/${s.totalSteps} Schritte · ` +
             `geplant ${hours(s.plannedHours)} · umgesetzt ${hours(s.actualHours)}` +
-            (s.blockedSteps > 0 ? ` · ⛔ ${s.blockedSteps} blockiert` : '')
+            (s.blockedSteps > 0 ? ` · ⛔ ${s.blockedSteps} blockiert` : '') +
+            (deletedCount > 0 ? ` · 🗑 ${deletedCount} gelöscht (ausgeblendet)` : '')
     );
     if (roadmap.active) {
         const step = findStep(rolled, roadmap.active.stepId);

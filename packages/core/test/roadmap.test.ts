@@ -6,14 +6,18 @@ import {
     appendActivity,
     applyDependencies,
     findStep,
+    hasDeleted,
     parseRoadmap,
+    reconcilePlan,
     removeStep,
     renderRoadmapMarkdown,
     rollup,
     serializeRoadmap,
     setActive,
+    setStepDeleted,
     summarize,
-    upsertStep
+    upsertStep,
+    withoutDeleted
 } from '../src/Index.js';
 
 const step = (id: string, over: Partial<RoadmapStep> = {}): RoadmapStep => ({
@@ -222,5 +226,115 @@ describe('renderRoadmapMarkdown', () => {
         expect(md).toContain('KI arbeitet gerade an:');
         expect(md).toContain('| # | Schritt | Status |');
         expect(md).toContain('```mermaid');
+    });
+});
+
+describe('setStepDeleted (soft-delete)', () => {
+    it('marks a step and its whole subtree deleted, cascading', () => {
+        const rm = roadmap([step('1', {children: [step('1.1'), step('1.2', {children: [step('1.2.1')]})]})]);
+        const next = setStepDeleted(rm.steps, '1', true);
+        const ids: string[] = [];
+        const walk = (s: RoadmapStep[]): void => s.forEach((x) => {
+            expect(x.deleted).toBe(true);
+            ids.push(x.id);
+            if (x.children) walk(x.children);
+        });
+        walk(next);
+        expect(ids).toEqual(['1', '1.1', '1.2', '1.2.1']);
+    });
+
+    it('restores cascading and never removes the node', () => {
+        const deleted = setStepDeleted([step('1', {children: [step('1.1')]})], '1', true);
+        const restored = setStepDeleted(deleted, '1', false);
+        expect(hasDeleted(restored)).toBe(false);
+        expect(findStep(restored, '1.1')?.deleted).toBeUndefined();
+    });
+
+    it('is a no-op for a missing id', () => {
+        const rm = [step('1')];
+        expect(setStepDeleted(rm, 'nope', true)).toEqual(rm);
+    });
+
+    it('round-trips deleted through parse/serialize', () => {
+        const rm = roadmap([step('1', {deleted: true})]);
+        const parsed = parseRoadmap('synaipse', {roadmap: serializeRoadmap(rm)});
+        expect(parsed?.steps[0]?.deleted).toBe(true);
+    });
+});
+
+describe('deleted steps are excluded from aggregates + body', () => {
+    it('withoutDeleted prunes deleted subtrees but keeps the rest', () => {
+        const rm = [step('1', {deleted: true}), step('2', {children: [step('2.1'), step('2.2', {deleted: true})]})];
+        const pruned = withoutDeleted(rm);
+        expect(pruned.map((s) => s.id)).toEqual(['2']);
+        expect(pruned[0]?.children?.map((s) => s.id)).toEqual(['2.1']);
+    });
+
+    it('summarize ignores deleted steps', () => {
+        const rm = roadmap([
+            step('1', {status: 'done'}),
+            step('2', {status: 'done', deleted: true})
+        ]);
+        const s = summarize(rm);
+        expect(s.totalSteps).toBe(1);
+        expect(s.doneSteps).toBe(1);
+    });
+
+    it('rollup does not count deleted leaves into a parent', () => {
+        const rm = [step('1', {children: [
+            step('1.1', {plannedHours: 4, actualHours: 3, progress: 100}),
+            step('1.2', {plannedHours: 10, actualHours: 10, deleted: true})
+        ]})];
+        const rolled = rollup(rm);
+        expect(rolled[0]?.plannedHours).toBe(4);
+        expect(rolled[0]?.actualHours).toBe(3);
+        // deleted leaf stays present in the tree
+        expect(rolled[0]?.children?.some((c) => c.id === '1.2')).toBe(true);
+    });
+
+    it('renderRoadmapMarkdown hides deleted rows but notes the count', () => {
+        const rm = roadmap([step('1'), step('2', {deleted: true, title: 'Weg damit'})]);
+        const md = renderRoadmapMarkdown(rm);
+        expect(md).not.toContain('Weg damit');
+        expect(md).toContain('1 gelöscht (ausgeblendet)');
+    });
+});
+
+describe('reconcilePlan (non-destructive full-tree replace)', () => {
+    const ev = (at: string, what: string) => ({at, who: 'claude', what});
+
+    it('merges per-step activity by id when the incoming step omits it', () => {
+        const current = [step('1', {activity: [ev('2026-08-01T00:00:00.000Z', 'started')]})];
+        const incoming = [step('1', {title: 'Renamed'})]; // no activity
+        const merged = reconcilePlan(current, incoming);
+        expect(merged[0]?.title).toBe('Renamed');
+        expect(merged[0]?.activity?.map((e) => e.what)).toEqual(['started']);
+    });
+
+    it('unions and dedupes activity from both sides', () => {
+        const current = [step('1', {activity: [ev('2026-08-01T00:00:00.000Z', 'a'), ev('2026-08-02T00:00:00.000Z', 'b')]})];
+        const incoming = [step('1', {activity: [ev('2026-08-02T00:00:00.000Z', 'b'), ev('2026-08-03T00:00:00.000Z', 'c')]})];
+        const merged = reconcilePlan(current, incoming);
+        expect(merged[0]?.activity?.map((e) => e.what)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('soft-deletes steps missing from the incoming tree instead of dropping them', () => {
+        const current = [step('1'), step('2', {children: [step('2.1')]})];
+        const incoming = [step('1')]; // 2 + 2.1 vanished
+        const merged = reconcilePlan(current, incoming);
+        expect(findStep(merged, '2')?.deleted).toBe(true);
+        expect(findStep(merged, '2.1')?.deleted).toBe(true);
+        // and summary ignores them
+        expect(summarize(roadmap(merged)).totalSteps).toBe(1);
+    });
+
+    it('carries a vanished child back under its surviving parent', () => {
+        const current = [step('1', {children: [step('1.1'), step('1.2')]})];
+        const incoming = [step('1', {children: [step('1.1')]})]; // 1.2 vanished, parent survives
+        const merged = reconcilePlan(current, incoming);
+        const parent = findStep(merged, '1');
+        expect(parent?.children?.map((c) => c.id).sort()).toEqual(['1.1', '1.2']);
+        expect(findStep(merged, '1.2')?.deleted).toBe(true);
+        expect(findStep(merged, '1.1')?.deleted).toBeUndefined();
     });
 });
