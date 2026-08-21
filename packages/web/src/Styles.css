@@ -7585,7 +7585,21 @@ button.typed-link-badge:hover {
 .rm-table tbody tr.rm-deleted .rm-row-actions { opacity: 1; }
 
 .rm-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--bg-1); }
-.rm-table { width: 100%; border-collapse: collapse; min-width: 940px; }
+/* Fixed layout + column widths so the table always fits its container and long
+   titles truncate instead of forcing a sideways scroll. min-width only kicks in
+   on genuinely narrow viewports. */
+.rm-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 760px; }
+.rm-table thead th:nth-child(1) { width: auto; }   /* Schritt — takes the rest */
+.rm-table thead th:nth-child(2) { width: 116px; }  /* Status */
+.rm-table thead th:nth-child(3) { width: 92px; }   /* Owner */
+.rm-table thead th:nth-child(4) { width: 82px; }   /* Geplant */
+.rm-table thead th:nth-child(5) { width: 96px; }   /* Umgesetzt */
+.rm-table thead th:nth-child(6) { width: 52px; }   /* Δ */
+.rm-table thead th:nth-child(7) { width: 122px; }  /* Fortschritt */
+.rm-table thead th:nth-child(8) { width: 140px; }  /* Notizen */
+.rm-table thead th:nth-child(9) { width: 146px; }  /* Aktionen — fits 5 icon buttons */
+/* Tighter gutters on the actions column so its icons don't spill. */
+.rm-table thead th:last-child, .rm-table tbody td:last-child { padding-left: 6px; padding-right: 8px; }
 .rm-table thead th {
     text-align: left; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase;
     color: var(--text-2); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--border);
@@ -7597,16 +7611,35 @@ button.typed-link-badge:hover {
 .rm-table tbody tr.ai-row td { background: color-mix(in srgb, var(--rm-ai) 12%, transparent); }
 .rm-table td.num { font-variant-numeric: tabular-nums; }
 
-.rm-step { display: flex; align-items: center; gap: 8px; }
+.rm-step { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rm-indent { display: inline-block; flex: none; }
-.rm-twist { color: var(--text-2); font-size: 11px; width: 12px; cursor: pointer; user-select: none; }
-.rm-id { font-size: 12px; color: var(--text-1); background: var(--bg-2); border-radius: var(--r-1); padding: 1px 5px; }
-.rm-name { font-weight: 500; }
+.rm-id { flex: none; font-size: 12px; color: var(--text-1); background: var(--bg-2); border-radius: var(--r-1); padding: 1px 5px; }
+/* Truncate long titles so the Schritt column can't blow the table width. */
+.rm-name { flex: 0 1 auto; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rm-name.lvl1 { font-weight: 660; }
+.rm-name.has-detail { cursor: pointer; }
+.rm-name.has-detail:hover { color: var(--accent); }
+
+/* Collapse caret (folds sub-steps) + count badge for what's hidden. */
+.rm-caret { flex: none; min-width: 14px; display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: 10px; user-select: none; }
+.rm-caret.open, .rm-caret.collapsed { cursor: pointer; }
+.rm-caret.empty { visibility: hidden; }
+.rm-caret:hover .rm-caret-tw { color: var(--text-0); }
+.rm-caret-badge { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: var(--r-pill); padding: 0 5px; line-height: 15px; }
+
+/* ⓘ detail affordance next to the title. */
+.rm-detail-dot { flex: none; margin-left: 2px; color: var(--text-2); font-size: 11px; cursor: pointer; opacity: 0.55; }
+.rm-detail-dot:hover, .rm-detail-dot.open { opacity: 1; color: var(--accent); }
+
+/* Fold controls in the table header. */
+.rm-fold-ctl { margin-left: auto; display: inline-flex; gap: 6px; }
+.rm-fold-ctl + .rm-btn { margin-left: 8px; }
+.rm-btn.sm { padding: 4px 9px; font-size: 12px; }
 
 .rm-status-select {
     font-size: 12px; font-weight: 600; border: 1px solid transparent; border-radius: var(--r-pill);
     padding: 3px 8px; cursor: pointer; background: var(--bg-2); color: var(--text-1);
+    max-width: 100%; box-sizing: border-box;
 }
 .rm-status-select.rm-done    { color: var(--rm-done);    background: color-mix(in srgb, var(--rm-done) 15%, transparent); }
 .rm-status-select.rm-prog    { color: var(--rm-prog);    background: color-mix(in srgb, var(--rm-prog) 15%, transparent); }
@@ -7631,17 +7664,38 @@ button.typed-link-badge:hover {
 .rm-pct { font-size: 12px; color: var(--text-2); min-width: 32px; }
 
 .rm-notes { display: flex; gap: 5px; flex-wrap: wrap; }
-.rm-nchip { font-size: 11.5px; color: var(--accent); background: var(--accent-soft); border-radius: var(--r-2); padding: 2px 7px; text-decoration: none; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.rm-nchip { font-size: 11.5px; color: var(--accent); background: var(--accent-soft); border-radius: var(--r-2); padding: 2px 7px; text-decoration: none; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .rm-nchip:hover { text-decoration: underline; }
 
-.rm-row-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.rm-row-actions { display: flex; gap: 1px; opacity: 0; transition: opacity 0.12s; justify-content: flex-end; }
 .rm-row:hover .rm-row-actions { opacity: 1; }
-.rm-icon { border: none; background: transparent; color: var(--text-2); cursor: pointer; font-size: 13px; padding: 3px 5px; border-radius: var(--r-2); }
+.rm-icon { border: none; background: transparent; color: var(--text-2); cursor: pointer; font-size: 12px; padding: 3px 4px; border-radius: var(--r-2); }
 .rm-icon:hover { background: var(--bg-3); color: var(--text-0); }
 .rm-icon.danger:hover { color: var(--red); }
 
 /* expanded detail row */
 .rm-detail td { background: var(--bg-2) !important; padding: 0; }
+.rm-detail-wrap { display: flex; flex-direction: column; }
+
+/* Full-title header + edit button atop the detail area. */
+.rm-detail-head { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--border); }
+.rm-detail-title { font-weight: 600; font-size: 13.5px; color: var(--text-0); }
+.rm-detail-title.muted { color: var(--text-2); font-weight: 500; }
+.rm-detail-edit-btn { margin-left: auto; }
+.rm-detail-empty { color: var(--text-2); font-style: italic; }
+
+/* Inline edit form. */
+.rm-detail-editform { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.rm-edit-field { display: flex; flex-direction: column; gap: 4px; }
+.rm-edit-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-2); font-weight: 600; }
+.rm-edit-input, .rm-edit-area {
+    width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
+    background: var(--bg-1); color: var(--text-0); border: 1px solid var(--border); border-radius: var(--r-2); padding: 7px 9px;
+}
+.rm-edit-input:focus, .rm-edit-area:focus { outline: none; border-color: var(--accent); }
+.rm-edit-area { resize: vertical; min-height: 40px; line-height: 1.5; }
+.rm-edit-actions { display: flex; gap: 8px; margin-top: 2px; }
+
 .rm-detail-inner { display: grid; grid-template-columns: 1.4fr 1fr; }
 .rm-detail-box { padding: 14px 16px; }
 .rm-detail-box + .rm-detail-box { border-left: 1px solid var(--border); }

@@ -1,5 +1,6 @@
 import type {CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
-import {ProjectScopeError} from '@synaipse/core';
+import {ProjectScopeError, parseRoadmap} from '@synaipse/core';
+import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
 import {listRoadmapSummaries, normalizeRoadmap, roadmapFromNote, roadmapPathFor, roadmapWriteInput} from './Roadmap.js';
@@ -2182,6 +2183,33 @@ export class SynaipseService {
         const input = roadmapWriteInput(normalized);
         await this.writeNoteUnscoped(input as NoteWriteInput, 'roadmap');
         return normalized;
+    }
+
+    /**
+     * Commit history of a project's roadmap note (newest first). Backs the MCP
+     * rollback picker so a caller can see which versions exist before restoring
+     * one. Empty when history is disabled or the roadmap was never written.
+     */
+    public async roadmapHistory(project: string, limit = 30): Promise<NoteHistoryEntry[]> {
+        return this.noteHistory(roadmapPathFor(project), limit);
+    }
+
+    /**
+     * Roll a project's roadmap back to a past commit. Reads the roadmap note as
+     * it stood at `commitSha`, parses its step tree, and writes it forward as a
+     * NEW commit. History is append-only, so the rollback is itself reversible —
+     * roll forward again to any later sha. Throws when history is disabled, the
+     * commit predates the note, or that version has no valid roadmap frontmatter.
+     */
+    public async rollbackRoadmap(project: string, commitSha: string): Promise<Roadmap> {
+        const id = roadmapPathFor(project);
+        const raw = await this.noteVersion(id, commitSha);
+        const parsed = matter(raw);
+        const roadmap = parseRoadmap(project, parsed.data as Record<string, unknown>);
+        if (roadmap === null) {
+            throw new Error(`commit ${commitSha.slice(0, 8)} has no valid roadmap for project "${project}"`);
+        }
+        return this.writeRoadmap({...roadmap, project});
     }
 
     public tags(): Map<string, NoteId[]> {

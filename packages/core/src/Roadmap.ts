@@ -234,6 +234,70 @@ export const removeStep = (steps: readonly RoadmapStep[], id: string): RoadmapSt
     return out;
 };
 
+/**
+ * Move a step (with its whole subtree) to a new parent, or to the root when
+ * `newParentId` is null. `position` places it among its new siblings (0-based;
+ * out-of-range or omitted → appended at the end). This is the reparent/reorder
+ * primitive the roadmap tool lacks otherwise — {@link upsertStep} replaces an
+ * existing id in place and never relocates it.
+ *
+ * Guards (each throws, leaving the tree untouched):
+ *  - unknown `id`
+ *  - unknown `newParentId`
+ *  - moving a step onto itself or onto one of its own descendants (would
+ *    detach the subtree from the tree — a cycle).
+ *
+ * Returns a new step array; the input is not mutated. The moved node keeps its
+ * id — ids are labels, not positions, so a "5.20" living under "5" is fine.
+ */
+export const moveStep = (
+    steps: readonly RoadmapStep[],
+    id: string,
+    newParentId: string | null,
+    position?: number
+): RoadmapStep[] => {
+    const node = findStep(steps, id);
+    if (node === null) {
+        throw new Error(`move: step "${id}" not found`);
+    }
+    if (newParentId !== null) {
+        if (newParentId === id) {
+            throw new Error(`move: cannot move step "${id}" under itself`);
+        }
+        if (findStep(steps, newParentId) === null) {
+            throw new Error(`move: parent "${newParentId}" not found`);
+        }
+        // Reject moving onto a descendant — that would orphan the subtree.
+        const descendantIds = new Set<string>();
+        walkSteps(node.children ?? [], (s) => descendantIds.add(s.id));
+        if (descendantIds.has(newParentId)) {
+            throw new Error(`move: cannot move step "${id}" under its own descendant "${newParentId}"`);
+        }
+    }
+
+    // Detach (subtree travels with the node), then splice into the target list.
+    const detached = removeStep(steps, id);
+
+    const insertInto = (list: readonly RoadmapStep[]): RoadmapStep[] => {
+        const next = [...list];
+        const at = position === undefined || !Number.isFinite(position)
+            ? next.length
+            : Math.max(0, Math.min(Math.trunc(position), next.length));
+        next.splice(at, 0, node);
+        return next;
+    };
+
+    if (newParentId === null) {
+        return insertInto(detached);
+    }
+    return detached.map(function relocate(step): RoadmapStep {
+        if (step.id === newParentId) {
+            return {...step, children: insertInto(step.children ?? [])};
+        }
+        return step.children ? {...step, children: step.children.map(relocate)} : step;
+    });
+};
+
 // ---------------------------------------------------------------------------
 // Soft-delete
 // ---------------------------------------------------------------------------

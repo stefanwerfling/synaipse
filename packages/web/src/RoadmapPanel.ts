@@ -66,6 +66,50 @@ const flatten = (steps: RoadmapStep[], depth = 0, out: Array<{step: RoadmapStep;
     return out;
 };
 
+/**
+ * Like {@link flatten}, but children of a collapsed step are skipped — this is
+ * what the table renders, so a huge roadmap can be folded down to its phases.
+ * `hidden` is filled with the count of rows a collapsed step is hiding, for the
+ * "▸ (12)" badge.
+ */
+const flattenCollapsed = (
+    steps: RoadmapStep[],
+    collapsed: ReadonlySet<string>,
+    depth = 0,
+    out: Array<{step: RoadmapStep; depth: number; hiddenCount: number}> = []
+): Array<{step: RoadmapStep; depth: number; hiddenCount: number}> => {
+    for (const step of steps) {
+        const kids = step.children ?? [];
+        const isCollapsed = kids.length > 0 && collapsed.has(step.id);
+        out.push({step, depth, hiddenCount: isCollapsed ? flatten(kids).length : 0});
+        if (kids.length > 0 && !isCollapsed) {
+            flattenCollapsed(kids, collapsed, depth + 1, out);
+        }
+    }
+    return out;
+};
+
+/** Ids of every step that has children (candidates for collapse). */
+const parentIds = (steps: RoadmapStep[]): string[] => {
+    const out: string[] = [];
+    for (const {step} of flatten(steps)) {
+        if (step.children && step.children.length > 0) out.push(step.id);
+    }
+    return out;
+};
+
+/** Ancestor ids of `id` (root → parent), empty when not found or top-level. */
+const ancestorsOf = (steps: RoadmapStep[], id: string, trail: string[] = []): string[] | null => {
+    for (const step of steps) {
+        if (step.id === id) return trail;
+        if (step.children) {
+            const hit = ancestorsOf(step.children, id, [...trail, step.id]);
+            if (hit) return hit;
+        }
+    }
+    return null;
+};
+
 /** Next free hierarchical id under a parent (or at root when parent is null). */
 const nextId = (steps: RoadmapStep[], parentId: string | null): string => {
     if (parentId === null) {
@@ -104,7 +148,12 @@ export class RoadmapPanel {
     private projects: string[] = [];
     private project: string | null = null;
     private roadmap: Roadmap | null = null;
+    /** Steps whose detail row (evaluation/activity) is open. */
     private readonly expanded = new Set<string>();
+    /** Steps whose detail row is currently in edit mode. */
+    private readonly editing = new Set<string>();
+    /** Parent steps whose sub-steps are folded away in the table. */
+    private collapsed = new Set<string>();
     private saving = false;
     /** When false (default), soft-deleted steps are hidden from the table. */
     private showDeleted = false;
@@ -226,7 +275,64 @@ export class RoadmapPanel {
             console.error('failed to load roadmap', e);
             this.roadmap = {project: this.project, updatedAt: '', active: null, steps: []};
         }
+        this.collapsed = this.loadCollapsed();
         this.render();
+    }
+
+    // --- collapse state (persisted per project) -----------------------------
+
+    private collapseKey(): string | null {
+        return this.project === null ? null : `synaipse.rm.collapsed.${this.project}`;
+    }
+
+    private loadCollapsed(): Set<string> {
+        const key = this.collapseKey();
+        if (key === null) return new Set();
+        try {
+            const raw = window.localStorage.getItem(key);
+            if (raw === null) return new Set();
+            const arr = JSON.parse(raw) as unknown;
+            return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    private saveCollapsed(): void {
+        const key = this.collapseKey();
+        if (key === null) return;
+        try {
+            window.localStorage.setItem(key, JSON.stringify([...this.collapsed]));
+        } catch {
+            /* storage full/blocked — collapse is a convenience, ignore. */
+        }
+    }
+
+    private toggleCollapse(id: string): void {
+        if (this.collapsed.has(id)) this.collapsed.delete(id);
+        else this.collapsed.add(id);
+        this.saveCollapsed();
+        this.render();
+    }
+
+    private collapseAll(collapse: boolean): void {
+        this.collapsed = collapse && this.roadmap !== null
+            ? new Set(parentIds(this.roadmap.steps))
+            : new Set();
+        this.saveCollapsed();
+        this.render();
+    }
+
+    /** Fold everything except the path down to the live AI cursor, then scroll to it. */
+    private focusActive(): void {
+        const active = this.roadmap?.active?.stepId;
+        if (this.roadmap === null || active === undefined || active === null) return;
+        const keepOpen = new Set(ancestorsOf(this.roadmap.steps, active) ?? []);
+        this.collapsed = new Set(parentIds(this.roadmap.steps).filter((id) => !keepOpen.has(id)));
+        this.saveCollapsed();
+        this.render();
+        const row = this.tableWrap.querySelector(`tr[data-step="${CSS.escape(active)}"]`);
+        row?.scrollIntoView({block: 'center', behavior: 'smooth'});
     }
 
     /** Clone → mutate → persist → adopt the server's rolled-up result. */
@@ -329,6 +435,18 @@ export class RoadmapPanel {
             el('h2', {text: 'Umsetzungsschritte'}),
             el('span', {class: 'rm-table-hint', text: 'verschachtelbar · Zeiten rollen auf Phasen auf'})
         ];
+
+        // Fold controls — only worth showing once there is nesting to fold.
+        if (parentIds(rm.steps).length > 0) {
+            const fold = el('div', {class: 'rm-fold-ctl'},
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Alle Unterschritte einklappen'}, text: '⊟ Einklappen', on: {click: () => this.collapseAll(true)}}),
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Alle Unterschritte ausklappen'}, text: '⊞ Ausklappen', on: {click: () => this.collapseAll(false)}})
+            );
+            if (rm.active?.stepId) {
+                fold.appendChild(el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Nur den Pfad zum KI-Cursor öffnen und hinscrollen'}, text: '◉ Zum KI-Cursor', on: {click: () => this.focusActive()}}));
+            }
+            headChildren.push(fold);
+        }
         if (deletedCount > 0) {
             const toggle = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
             toggle.checked = this.showDeleted;
@@ -356,7 +474,7 @@ export class RoadmapPanel {
         const table = el('table', {class: 'rm-table'});
         table.appendChild(el('thead', {},
             el('tr', {},
-                el('th', {text: 'Schritt', style: {minWidth: '260px'}}),
+                el('th', {text: 'Schritt'}),
                 el('th', {text: 'Status'}),
                 el('th', {text: 'Owner'}),
                 el('th', {class: 'r', text: 'Geplant'}),
@@ -368,8 +486,8 @@ export class RoadmapPanel {
             )
         ));
         const tbody = el('tbody');
-        for (const {step, depth} of flatten(visibleSteps)) {
-            tbody.appendChild(this.renderRow(step, depth, rm));
+        for (const {step, depth, hiddenCount} of flattenCollapsed(visibleSteps, this.collapsed)) {
+            tbody.appendChild(this.renderRow(step, depth, rm, hiddenCount));
             if (this.expanded.has(step.id)) {
                 tbody.appendChild(this.renderDetail(step));
             }
@@ -379,16 +497,25 @@ export class RoadmapPanel {
         this.tableWrap.appendChild(scroll);
     }
 
-    private renderRow(step: RoadmapStep, depth: number, rm: Roadmap): HTMLElement {
+    private renderRow(step: RoadmapStep, depth: number, rm: Roadmap, hiddenCount = 0): HTMLElement {
         const isActive = rm.active?.stepId === step.id;
         const v = variance(step);
-        const hasDetail = Boolean(step.evaluation || step.acceptance || (step.activity && step.activity.length > 0));
+        // Every live step is expandable now — the detail row shows the full
+        // (untruncated) title, the KI-Auswertung/Akzeptanz and an edit button.
+        const expandable = !step.deleted;
+        const hasChildren = Boolean(step.children && step.children.length > 0);
+        const isCollapsed = hasChildren && this.collapsed.has(step.id);
 
-        const twist = el('span', {
-            class: 'rm-twist',
-            text: hasDetail ? (this.expanded.has(step.id) ? '▾' : '▸') : '',
-            on: hasDetail ? {click: () => this.toggleExpand(step.id)} : {}
-        });
+        // First-column caret folds sub-steps (the navigation control for big
+        // roadmaps). Detail (evaluation/activity) is reached via the name/ⓘ.
+        const caret = el('span', {
+            class: `rm-caret${hasChildren ? (isCollapsed ? ' collapsed' : ' open') : ' empty'}`,
+            attrs: hasChildren ? {title: isCollapsed ? `Ausklappen (${hiddenCount} verborgen)` : 'Einklappen'} : {},
+            on: hasChildren ? {click: () => this.toggleCollapse(step.id)} : {}
+        },
+            hasChildren ? el('span', {class: 'rm-caret-tw', text: isCollapsed ? '▸' : '▾'}) : null,
+            isCollapsed && hiddenCount > 0 ? el('span', {class: 'rm-caret-badge', text: String(hiddenCount)}) : null
+        );
 
         const statusSel = el('select', {
             class: `rm-status-select ${STATUS_CLASS[step.status]}`,
@@ -432,17 +559,26 @@ export class RoadmapPanel {
             );
 
         const indent = el('span', {class: 'rm-indent', style: {width: `${depth * 20}px`}});
-        const stepCell = el('td', {},
+        const nameCls = `${depth === 0 ? 'rm-name lvl1' : 'rm-name'}${expandable ? ' has-detail' : ''}`;
+        const stepCell = el('td', {class: 'rm-step-cell'},
             el('div', {class: 'rm-step'},
                 indent,
-                twist,
+                caret,
                 el('code', {class: 'rm-id', text: step.id}),
-                el('span', {class: depth === 0 ? 'rm-name lvl1' : 'rm-name', text: step.title})
+                el('span', {
+                    class: nameCls,
+                    attrs: {title: expandable ? `${step.title} — klicken für Details` : step.title},
+                    text: step.title,
+                    on: expandable ? {click: () => this.toggleExpand(step.id)} : {}
+                }),
+                expandable
+                    ? el('span', {class: `rm-detail-dot${this.expanded.has(step.id) ? ' open' : ''}`, attrs: {title: 'Details / Bearbeiten'}, text: 'ⓘ', on: {click: () => this.toggleExpand(step.id)}})
+                    : null
             )
         );
 
         const rowCls = ['rm-row', isActive ? 'ai-row' : '', step.deleted ? 'rm-deleted' : ''].filter(Boolean).join(' ');
-        return el('tr', {class: rowCls},
+        return el('tr', {class: rowCls, attrs: {'data-step': step.id}},
             stepCell,
             el('td', {}, statusSel),
             el('td', {}, owner),
@@ -459,6 +595,26 @@ export class RoadmapPanel {
     }
 
     private renderDetail(step: RoadmapStep): HTMLElement {
+        const body = this.editing.has(step.id)
+            ? this.renderDetailEdit(step)
+            : this.renderDetailView(step);
+        return el('tr', {class: 'rm-detail'}, el('td', {attrs: {colspan: '9'}},
+            el('div', {class: 'rm-detail-wrap'}, ...body)
+        ));
+    }
+
+    /** Read-only detail: full title header (+ edit button), evaluation, activity. */
+    private renderDetailView(step: RoadmapStep): HTMLElement[] {
+        // Full (untruncated) title — the table cell clips long titles, so the
+        // detail area is where you read the whole thing.
+        const head = el('div', {class: 'rm-detail-head'},
+            el('code', {class: 'rm-id', text: step.id}),
+            el('span', {class: 'rm-detail-title', text: step.title}),
+            step.deleted
+                ? null
+                : el('button', {class: 'rm-btn ghost sm rm-detail-edit-btn', attrs: {type: 'button'}, text: '✎ Bearbeiten', on: {click: () => this.startEdit(step.id)}})
+        );
+
         const boxes: HTMLElement[] = [];
         if (step.evaluation || step.acceptance) {
             const box = el('div', {class: 'rm-detail-box'}, el('h4', {text: 'KI-Auswertung'}));
@@ -479,13 +635,77 @@ export class RoadmapPanel {
             box.appendChild(log);
             boxes.push(box);
         }
-        return el('tr', {class: 'rm-detail'}, el('td', {attrs: {colspan: '9'}}, el('div', {class: 'rm-detail-inner'}, ...boxes)));
+        if (boxes.length === 0) {
+            boxes.push(el('div', {class: 'rm-detail-box'}, el('p', {class: 'rm-detail-empty', text: 'Noch keine Auswertung/Akzeptanz. „✎ Bearbeiten" fügt sie hinzu.'})));
+        }
+        return [head, el('div', {class: 'rm-detail-inner'}, ...boxes)];
+    }
+
+    /** Edit form: title, evaluation, acceptance — persisted via mutate(). */
+    private renderDetailEdit(step: RoadmapStep): HTMLElement[] {
+        const titleInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', value: step.title, placeholder: 'Titel'}}) as HTMLInputElement;
+        const evalArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '4', placeholder: 'KI-Auswertung / Rationale …'}}) as HTMLTextAreaElement;
+        evalArea.value = step.evaluation ?? '';
+        const accArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '2', placeholder: 'Akzeptanzkriterien (Definition of Done) …'}}) as HTMLTextAreaElement;
+        accArea.value = step.acceptance ?? '';
+
+        const save = (): void => void this.saveEdit(step.id, {
+            title: titleInput.value.trim(),
+            evaluation: evalArea.value,
+            acceptance: accArea.value
+        });
+
+        const field = (label: string, control: HTMLElement): HTMLElement =>
+            el('label', {class: 'rm-edit-field'}, el('span', {class: 'rm-edit-lbl', text: label}), control);
+
+        const head = el('div', {class: 'rm-detail-head'},
+            el('code', {class: 'rm-id', text: step.id}),
+            el('span', {class: 'rm-detail-title muted', text: 'Bearbeiten'})
+        );
+        const form = el('div', {class: 'rm-detail-editform'},
+            field('Titel', titleInput),
+            field('KI-Auswertung', evalArea),
+            field('Akzeptanz', accArea),
+            el('div', {class: 'rm-edit-actions'},
+                el('button', {class: 'rm-btn sm', attrs: {type: 'button'}, text: 'Speichern', on: {click: save}}),
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button'}, text: 'Abbrechen', on: {click: () => this.cancelEdit(step.id)}})
+            )
+        );
+        return [head, form];
     }
 
     private toggleExpand(id: string): void {
-        if (this.expanded.has(id)) this.expanded.delete(id);
-        else this.expanded.add(id);
+        if (this.expanded.has(id)) {
+            this.expanded.delete(id);
+            this.editing.delete(id);
+        } else {
+            this.expanded.add(id);
+        }
         this.render();
+    }
+
+    private startEdit(id: string): void {
+        this.expanded.add(id);
+        this.editing.add(id);
+        this.render();
+    }
+
+    private cancelEdit(id: string): void {
+        this.editing.delete(id);
+        this.render();
+    }
+
+    private async saveEdit(id: string, fields: {title: string; evaluation: string; acceptance: string}): Promise<void> {
+        this.editing.delete(id);
+        await this.mutate((rm) => {
+            const s = findStepLocal(rm.steps, id);
+            if (!s) return;
+            if (fields.title.length > 0) s.title = fields.title;
+            if (fields.evaluation.trim().length > 0) s.evaluation = fields.evaluation.trim();
+            else delete s.evaluation;
+            if (fields.acceptance.trim().length > 0) s.acceptance = fields.acceptance.trim();
+            else delete s.acceptance;
+        });
     }
 
     // --- mutations ----------------------------------------------------------

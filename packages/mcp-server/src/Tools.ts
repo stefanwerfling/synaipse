@@ -5,6 +5,7 @@ import {
     appendActivity,
     extractTypedLinks,
     findStep,
+    moveStep,
     parseRoadmap,
     reconcilePlan,
     setActive,
@@ -222,9 +223,12 @@ const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
     // from the project, never taken from the caller), like remember/log_session.
     synaipse_roadmap_plan:        {mode: 'write'},
     synaipse_roadmap_update_step: {mode: 'write'},
+    synaipse_roadmap_move:        {mode: 'write'},
     synaipse_roadmap_set_active:  {mode: 'write'},
     synaipse_roadmap_link_note:   {mode: 'write'},
+    synaipse_roadmap_rollback:    {mode: 'write'},
     synaipse_roadmap_get:         {mode: 'read'},
+    synaipse_roadmap_history:     {mode: 'read'},
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
     synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
     synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
@@ -1062,6 +1066,45 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
     },
     {
         definition: {
+            name: 'synaipse_roadmap_move',
+            description: 'Move an existing roadmap step (with its whole subtree) to a new parent, or to the top level. This is the RE-PARENT / RE-ORDER tool: roadmap_plan replaces a step in place and never relocates it, so passing parentId there to an existing id does nothing. Pass stepId and newParentId (the id to nest it under; null/omit = top level). Optional position (0-based) places it among its new siblings; omit to append at the end. The step keeps its id — ids are labels, not positions, so "5.20" living under "5" is fine. Rejected: moving a step under itself or one of its own descendants (would detach the subtree). Non-destructive — nothing is dropped and it is versioned, so roadmap_rollback can undo it.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    stepId: {type: 'string', description: 'Id of the step to move.'},
+                    newParentId: {type: 'string', description: 'Id of the new parent to nest under. Omit or pass null/empty to move to the top level.'},
+                    position: {type: 'number', description: '0-based index among the new siblings. Omit to append at the end.'}
+                },
+                required: ['stepId']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const stepId = asString(args.stepId, 'stepId');
+            const newParentId = typeof args.newParentId === 'string' && args.newParentId.length > 0
+                ? args.newParentId
+                : null;
+            const position = typeof args.position === 'number' ? args.position : undefined;
+            const current = service.readRoadmap(project);
+            // moveStep throws on unknown ids / cycles — surfaced as a tool error.
+            const moved = moveStep(current.steps, stepId, newParentId, position);
+            const logged = upsertStep(
+                moved,
+                appendActivity(findStep(moved, stepId) as RoadmapStep, {
+                    at: new Date().toISOString(),
+                    who: roadmapActor(),
+                    what: `moved to ${newParentId === null ? 'top level' : `parent ${newParentId}`}`
+                })
+            );
+            const saved = await service.writeRoadmap({...current, steps: logged});
+            return {
+                response: ok(roadmapResult(saved)),
+                event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
+            };
+        }
+    },
+    {
+        definition: {
             name: 'synaipse_roadmap_update_step',
             description: 'Patch a single roadmap step by id: change status, book time (actualHours), adjust the estimate (plannedHours), set progress (0-100), owner, priority, acceptance criteria, or write your evaluation/rationale. Only the fields you pass change. Appends an activity-log entry to the step. Use this as you work — e.g. mark a step "review" and record what you did in `evaluation`.',
             inputSchema: {
@@ -1170,6 +1213,49 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             await service.writeRoadmap({...current, steps: upsertStep(current.steps, logged)});
             return {
                 response: ok({project, stepId, added, skipped: notes.filter((n) => have.has(n))}),
+                event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_history',
+            description: 'List past versions (ngit commits) of the active project\'s roadmap, newest first. Each entry has a sha, commit message, author and date. Use this to find a good version to restore with synaipse_roadmap_rollback when an edit went wrong. Empty when history is disabled or the roadmap was never written.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    limit: {type: 'number', description: 'Max commits to return (default 30).'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const limit = asNumber(args.limit, 30);
+            const history = await service.roadmapHistory(project, limit);
+            return {
+                response: ok({project, history}),
+                event: {kind: 'list', touched: []}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_roadmap_rollback',
+            description: 'Restore the active project\'s roadmap to a past version by commit sha (from synaipse_roadmap_history). Reads the roadmap as it stood at that commit and writes it forward as a NEW commit — nothing is lost and the rollback is itself reversible (roll forward again to any later sha). Use this as the escape hatch when a plan/replace or move went wrong. Throws if history is disabled or the sha has no valid roadmap.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    commitSha: {type: 'string', description: 'The commit sha to restore (full or the abbreviated sha from roadmap_history).'}
+                },
+                required: ['commitSha']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireRoadmapProject(service, ctx);
+            const commitSha = asString(args.commitSha, 'commitSha');
+            const saved = await service.rollbackRoadmap(project, commitSha);
+            return {
+                response: ok({project, restoredFrom: commitSha, ...(roadmapResult(saved) as object)}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }

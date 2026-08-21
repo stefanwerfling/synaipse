@@ -7,6 +7,7 @@ import {
     applyDependencies,
     findStep,
     hasDeleted,
+    moveStep,
     parseRoadmap,
     reconcilePlan,
     removeStep,
@@ -74,6 +75,61 @@ describe('removeStep', () => {
         const start = [step('1', {children: [step('1.1'), step('1.2')]})];
         const next = removeStep(start, '1.1');
         expect(next[0].children?.map((s) => s.id)).toEqual(['1.2']);
+    });
+});
+
+describe('moveStep (reparent / reorder)', () => {
+    it('reparents a top-level step (with its subtree) under another parent', () => {
+        const start = [
+            step('5', {children: [step('5.1'), step('5.2')]}),
+            step('9'),
+            step('5.20', {children: [step('5.20.1'), step('5.20.2')]})
+        ];
+        const next = moveStep(start, '5.20', '5');
+        // gone from the root...
+        expect(next.map((s) => s.id)).toEqual(['5', '9']);
+        // ...appended under 5, subtree intact
+        const five = findStep(next, '5');
+        expect(five?.children?.map((c) => c.id)).toEqual(['5.1', '5.2', '5.20']);
+        expect(findStep(next, '5.20')?.children?.map((c) => c.id)).toEqual(['5.20.1', '5.20.2']);
+    });
+
+    it('honours position among the new siblings', () => {
+        const start = [step('5', {children: [step('5.1'), step('5.2')]}), step('9')];
+        const next = moveStep(start, '9', '5', 1);
+        expect(findStep(next, '5')?.children?.map((c) => c.id)).toEqual(['5.1', '9', '5.2']);
+        expect(next.map((s) => s.id)).toEqual(['5']);
+    });
+
+    it('moves a nested step out to the root', () => {
+        const start = [step('5', {children: [step('5.1')]})];
+        const next = moveStep(start, '5.1', null);
+        expect(next.map((s) => s.id)).toEqual(['5', '5.1']);
+        expect(findStep(next, '5')?.children ?? []).toEqual([]);
+    });
+
+    it('reorders within the same parent', () => {
+        const start = [step('a'), step('b'), step('c')];
+        expect(moveStep(start, 'c', null, 0).map((s) => s.id)).toEqual(['c', 'a', 'b']);
+    });
+
+    it('rejects a move onto its own descendant', () => {
+        const start = [step('5', {children: [step('5.1', {children: [step('5.1.1')]})]})];
+        expect(() => moveStep(start, '5', '5.1.1')).toThrow(/descendant/);
+    });
+
+    it('rejects a move onto itself and unknown ids', () => {
+        const start = [step('5', {children: [step('5.1')]})];
+        expect(() => moveStep(start, '5', '5')).toThrow(/itself/);
+        expect(() => moveStep(start, 'nope', '5')).toThrow(/not found/);
+        expect(() => moveStep(start, '5.1', 'nope')).toThrow(/not found/);
+    });
+
+    it('does not mutate the input tree', () => {
+        const start = [step('5', {children: [step('5.1')]}), step('9')];
+        const snapshot = JSON.parse(JSON.stringify(start));
+        moveStep(start, '9', '5');
+        expect(start).toEqual(snapshot);
     });
 });
 

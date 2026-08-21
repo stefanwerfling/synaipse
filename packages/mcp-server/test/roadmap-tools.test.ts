@@ -43,12 +43,74 @@ afterEach(async () => {
 });
 
 describe('roadmap tools registration + ACL', () => {
-    it('registers all five tools with correct modes', () => {
+    it('registers all roadmap tools with correct modes', () => {
         expect(tools.get('synaipse_roadmap_get')?.mode).toBe('read');
+        expect(tools.get('synaipse_roadmap_history')?.mode).toBe('read');
         expect(tools.get('synaipse_roadmap_plan')?.mode).toBe('write');
         expect(tools.get('synaipse_roadmap_update_step')?.mode).toBe('write');
+        expect(tools.get('synaipse_roadmap_move')?.mode).toBe('write');
         expect(tools.get('synaipse_roadmap_set_active')?.mode).toBe('write');
         expect(tools.get('synaipse_roadmap_link_note')?.mode).toBe('write');
+        expect(tools.get('synaipse_roadmap_rollback')?.mode).toBe('write');
+    });
+});
+
+describe('synaipse_roadmap_move', () => {
+    it('reparents a top-level step (with subtree) under another step', async () => {
+        // Reproduces the "created without parentId → stuck at root" case.
+        await call('synaipse_roadmap_plan', {steps: [
+            {id: '5', title: 'Bragi', status: 'in_progress', children: [{id: '5.1', title: 'a', status: 'done'}]},
+            {id: '9', title: 'Phase 9', status: 'planned'}
+        ]});
+        await call('synaipse_roadmap_plan', {step: {
+            id: '5.20', title: 'Qwen loader', status: 'in_progress',
+            children: [{id: '5.20.1', title: 'parser', status: 'in_progress'}]
+        }}); // no parentId → lands at root, after 9
+
+        let got = parse(await call('synaipse_roadmap_get', {}));
+        expect(got.steps.map((s: any) => s.id)).toEqual(['5', '9', '5.20']);
+
+        const payload = parse(await call('synaipse_roadmap_move', {stepId: '5.20', newParentId: '5'}));
+        expect(payload.steps.map((s: any) => s.id)).toEqual(['5', '9']);
+
+        got = parse(await call('synaipse_roadmap_get', {}));
+        const five = got.steps.find((s: any) => s.id === '5');
+        expect(five.children.map((c: any) => c.id)).toEqual(['5.1', '5.20']);
+        expect(five.children.find((c: any) => c.id === '5.20').children[0].id).toBe('5.20.1');
+        // move was logged on the step's activity
+        expect(five.children.find((c: any) => c.id === '5.20').activity.some((e: any) => /moved/.test(e.what))).toBe(true);
+    });
+
+    it('rejects cycles and unknown ids', async () => {
+        await call('synaipse_roadmap_plan', {steps: [
+            {id: '1', title: 'A', status: 'planned', children: [{id: '1.1', title: 'B', status: 'planned'}]}
+        ]});
+        await expect(call('synaipse_roadmap_move', {stepId: '1', newParentId: '1.1'})).rejects.toThrow(/descendant/);
+        await expect(call('synaipse_roadmap_move', {stepId: 'nope', newParentId: '1'})).rejects.toThrow(/not found/);
+    });
+});
+
+describe('synaipse_roadmap_history + rollback', () => {
+    it('lists versions and rolls back to a past one', async () => {
+        // v1: one step. v2: two steps.
+        await call('synaipse_roadmap_plan', {steps: [{id: '1', title: 'One', status: 'planned'}]});
+        await call('synaipse_roadmap_plan', {steps: [
+            {id: '1', title: 'One', status: 'planned'},
+            {id: '2', title: 'Two', status: 'planned'}
+        ]});
+
+        const hist = parse(await call('synaipse_roadmap_history', {})).history;
+        expect(hist.length).toBeGreaterThanOrEqual(2);
+        // newest-first: hist[0] is v2, the last entry is v1.
+        const v1 = hist[hist.length - 1];
+        expect(v1.sha).toMatch(/^[0-9a-f]{7,}$/);
+
+        const rolled = parse(await call('synaipse_roadmap_rollback', {commitSha: v1.sha}));
+        expect(rolled.restoredFrom).toBe(v1.sha);
+        expect(rolled.steps.map((s: any) => s.id)).toEqual(['1']); // step 2 is gone in v1
+
+        const got = parse(await call('synaipse_roadmap_get', {}));
+        expect(got.steps.map((s: any) => s.id)).toEqual(['1']);
     });
 });
 
