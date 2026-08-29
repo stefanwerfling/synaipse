@@ -92,6 +92,28 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
         expect(fresh.getEntry('Notes/Gamma.md')?.accessCount).toBe(3);
     });
 
+    it('reference journal (referencedCount/lastReferenced) persists across adapter instances, independent of accessCount', async () => {
+        const a = new MariaDBNoteAdapter(pool, cfg);
+        await a.load();
+        await a.write({
+            path: 'Notes/Zeta.md',
+            content: '# Zeta',
+            frontmatter: {title: 'Zeta'}
+        });
+
+        a.recordAccess('Notes/Zeta.md');
+        a.recordReference('Notes/Zeta.md');
+        a.recordReference('Notes/Zeta.md');
+        await a.flushEntries();
+
+        const fresh = new MariaDBNoteAdapter(pool, cfg);
+        await fresh.load();
+        const entry = fresh.getEntry('Notes/Zeta.md');
+        expect(entry?.accessCount).toBe(1);
+        expect(entry?.referencedCount).toBe(2);
+        expect(entry?.lastReferenced).toBeDefined();
+    });
+
     it('delete() removes the row + clears in-memory indexes', async () => {
         const adapter = new MariaDBNoteAdapter(pool, cfg);
         await adapter.load();

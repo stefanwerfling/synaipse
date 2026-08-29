@@ -17,6 +17,13 @@ export interface NoteEntry {
     mtime: number;
     accessCount?: number;
     lastAccessed?: number;
+    /**
+     * Distinct from accessCount: bumped only when a note is named in a
+     * synaipse_log_session `references` list — an explicit "actually used
+     * this" signal, not merely "was retrieved".
+     */
+    referencedCount?: number;
+    lastReferenced?: number;
 }
 
 /**
@@ -45,6 +52,8 @@ export interface NoteAdapter {
     recordEntry(id: NoteId, hash: string, mtime: number): void;
     /** Bump accessCount/lastAccessed; optionally seed the entry if it does not yet exist. */
     recordAccess(id: NoteId, hashSeed?: string, mtimeSeed?: number): void;
+    /** Bump referencedCount/lastReferenced; optionally seed the entry if it does not yet exist. */
+    recordReference(id: NoteId, hashSeed?: string, mtimeSeed?: number): void;
     /** Drop an entry (used when a note is removed externally). */
     removeEntry(id: NoteId): void;
     /** Force a durable write of pending entry changes. */

@@ -768,7 +768,7 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             inputSchema: {
                 type: 'object',
                 properties: {
-                    olderThanDays: {type: 'number', description: 'Threshold in days (default: 90). A note is stale when max(mtime, lastAccessed) is older than this.'},
+                    olderThanDays: {type: 'number', description: 'Threshold in days (default: 90). A note is stale when max(mtime, lastAccessed, lastReferenced) is older than this — lastReferenced tracks explicit citations via synaipse_log_session, distinct from mere retrieval.'},
                     pathPrefix: {type: 'string', description: 'Restrict to a folder, e.g. "Memory/research/"'},
                     limit: {type: 'number', description: 'Max results (default: 100)'}
                 }

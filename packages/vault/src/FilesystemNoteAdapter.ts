@@ -86,6 +86,14 @@ export class FilesystemNoteAdapter implements NoteAdapter {
         this.cache.touch(id);
     }
 
+    public recordReference(id: NoteId, hashSeed?: string, mtimeSeed?: number): void {
+        if (hashSeed !== undefined && mtimeSeed !== undefined) {
+            this.cache.touchReference(id, {hash: hashSeed, mtime: mtimeSeed});
+            return;
+        }
+        this.cache.touchReference(id);
+    }
+
     public removeEntry(id: NoteId): void {
         this.cache.delete(id);
     }

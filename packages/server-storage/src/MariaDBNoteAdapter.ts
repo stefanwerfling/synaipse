@@ -20,6 +20,8 @@ interface NoteRow {
     mtime_ms: number;
     access_count: number;
     last_accessed: number | null;
+    referenced_count: number;
+    last_referenced: number | null;
 }
 
 const WIKILINK_RE = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
@@ -96,6 +98,8 @@ interface DirtyEntry {
     mtime?: number;
     accessCount?: number;
     lastAccessed?: number;
+    referencedCount?: number;
+    lastReferenced?: number;
 }
 
 /**
@@ -130,7 +134,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
 
     public async load(): Promise<void> {
         const rows = await this.pool.query<NoteRow[]>(
-            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed FROM notes WHERE vault_id = ?',
+            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed, referenced_count, last_referenced FROM notes WHERE vault_id = ?',
             [this.cfg.vaultId]
         );
 
@@ -147,7 +151,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                 hash: row.hash,
                 mtime: row.mtime_ms,
                 ...(row.access_count > 0 ? {accessCount: row.access_count} : {}),
-                ...(row.last_accessed !== null ? {lastAccessed: row.last_accessed} : {})
+                ...(row.last_accessed !== null ? {lastAccessed: row.last_accessed} : {}),
+                ...(row.referenced_count > 0 ? {referencedCount: row.referenced_count} : {}),
+                ...(row.last_referenced !== null ? {lastReferenced: row.last_referenced} : {})
             });
             for (const tag of note.tags) {
                 let bucket = this.tagIndex.get(tag);
@@ -282,7 +288,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             hash,
             mtime,
             ...(prev?.accessCount !== undefined ? {accessCount: prev.accessCount} : {}),
-            ...(prev?.lastAccessed !== undefined ? {lastAccessed: prev.lastAccessed} : {})
+            ...(prev?.lastAccessed !== undefined ? {lastAccessed: prev.lastAccessed} : {}),
+            ...(prev?.referencedCount !== undefined ? {referencedCount: prev.referencedCount} : {}),
+            ...(prev?.lastReferenced !== undefined ? {lastReferenced: prev.lastReferenced} : {})
         };
         this.entries.set(id, merged);
         const dirty = this.dirtyEntries.get(id) ?? {};
@@ -324,6 +332,39 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         });
     }
 
+    public recordReference(id: NoteId, hashSeed?: string, mtimeSeed?: number): void {
+        const now = Date.now();
+        const existing = this.entries.get(id);
+
+        if (existing) {
+            existing.referencedCount = (existing.referencedCount ?? 0) + 1;
+            existing.lastReferenced = now;
+            const dirty = this.dirtyEntries.get(id) ?? {};
+            dirty.referencedCount = existing.referencedCount;
+            dirty.lastReferenced = now;
+            this.dirtyEntries.set(id, dirty);
+            return;
+        }
+
+        if (hashSeed === undefined || mtimeSeed === undefined) {
+            return;
+        }
+
+        const seeded: NoteEntry = {
+            hash: hashSeed,
+            mtime: mtimeSeed,
+            referencedCount: 1,
+            lastReferenced: now
+        };
+        this.entries.set(id, seeded);
+        this.dirtyEntries.set(id, {
+            hash: hashSeed,
+            mtime: mtimeSeed,
+            referencedCount: 1,
+            lastReferenced: now
+        });
+    }
+
     public removeEntry(id: NoteId): void {
         this.entries.delete(id);
         this.dirtyEntries.delete(id);
@@ -343,13 +384,17 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                      SET hash = COALESCE(?, hash),
                          mtime_ms = COALESCE(?, mtime_ms),
                          access_count = COALESCE(?, access_count),
-                         last_accessed = COALESCE(?, last_accessed)
+                         last_accessed = COALESCE(?, last_accessed),
+                         referenced_count = COALESCE(?, referenced_count),
+                         last_referenced = COALESCE(?, last_referenced)
                      WHERE vault_id = ? AND note_path = ?`,
                     [
                         dirty.hash ?? null,
                         dirty.mtime ?? null,
                         dirty.accessCount ?? null,
                         dirty.lastAccessed ?? null,
+                        dirty.referencedCount ?? null,
+                        dirty.lastReferenced ?? null,
                         this.cfg.vaultId,
                         id
                     ]

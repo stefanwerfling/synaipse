@@ -114,6 +114,8 @@ export interface StaleNote {
     mtime: number;
     lastAccessed?: number;
     accessCount: number;
+    lastReferenced?: number;
+    referencedCount: number;
     ageDays: number;
 }
 
@@ -2081,6 +2083,45 @@ export class SynaipseService {
             'log_session'
         );
 
+        // References are an explicit "Claude actually used this" signal —
+        // distinct from touchAccess, which fires on every retrieval
+        // regardless of relevance. Record it against whichever note the
+        // title/alias resolves to; unresolved titles (typos, notes that
+        // don't exist yet) still get written as a wikilink above but don't
+        // bump anything here.
+        if (references.length > 0) {
+            const titleOrAliasToNote = new Map<string, Note>();
+
+            for (const other of this.notes.list()) {
+                if (other.title.length > 0 && !titleOrAliasToNote.has(other.title)) {
+                    titleOrAliasToNote.set(other.title, other);
+                }
+
+                const aliases = other.frontmatter.aliases;
+
+                if (aliases === undefined) {
+                    continue;
+                }
+
+                for (const alias of aliases) {
+                    if (alias.length > 0 && !titleOrAliasToNote.has(alias)) {
+                        titleOrAliasToNote.set(alias, other);
+                    }
+                }
+            }
+
+            for (const reference of references) {
+                const target = titleOrAliasToNote.get(reference);
+
+                if (target !== undefined) {
+                    // Seed hash/mtime like touchAccess does — a note that's
+                    // never been read/searched has no cache entry yet, and
+                    // recordReference() without a seed is a no-op.
+                    this.notes.recordReference(target.id, target.hash, target.mtime);
+                }
+            }
+        }
+
         return note.id;
     }
 
@@ -2303,10 +2344,18 @@ export class SynaipseService {
             const entry = this.notes.getEntry(note.id);
             const lastAccessed = entry?.lastAccessed;
             const accessCount = entry?.accessCount ?? 0;
+            const lastReferenced = entry?.lastReferenced;
+            const referencedCount = entry?.referencedCount ?? 0;
 
-            const effective = lastAccessed !== undefined
-                ? Math.max(note.mtime, lastAccessed)
-                : note.mtime;
+            // lastReferenced (explicit "Claude actually used this" from
+            // log_session) counts toward freshness alongside lastAccessed
+            // (mere retrieval) — a note cited in session outcomes isn't
+            // stale even if nobody has edited or merely searched it lately.
+            const effective = Math.max(
+                note.mtime,
+                lastAccessed ?? 0,
+                lastReferenced ?? 0
+            );
 
             const ageMs = now - effective;
 
@@ -2321,6 +2370,8 @@ export class SynaipseService {
                 mtime: note.mtime,
                 ...(lastAccessed !== undefined ? {lastAccessed} : {}),
                 accessCount,
+                ...(lastReferenced !== undefined ? {lastReferenced} : {}),
+                referencedCount,
                 ageDays: Math.floor(ageMs / MS_PER_DAY)
             });
         }
@@ -2350,7 +2401,15 @@ export class SynaipseService {
             this.notes.list(),
             now,
             opts,
-            (id) => this.notes.getEntry(id)?.lastAccessed
+            (id) => {
+                const entry = this.notes.getEntry(id);
+                return entry === undefined
+                    ? undefined
+                    : {
+                        ...(entry.lastAccessed !== undefined ? {lastAccessed: entry.lastAccessed} : {}),
+                        ...(entry.lastReferenced !== undefined ? {lastReferenced: entry.lastReferenced} : {})
+                    };
+            }
         );
         const archived: NoteId[] = [];
         const failed: Array<{id: NoteId; error: string}> = [];

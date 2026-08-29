@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import type {Note, NoteId, Frontmatter} from '@synaipse/core';
-import {findDecayCandidates, archivePathFor} from '../src/MemoryDecay.js';
+import {findDecayCandidates, archivePathFor, type DecayUsage} from '../src/MemoryDecay.js';
 
 const MS_PER_DAY = 86_400_000;
 const NOW = Date.UTC(2026, 5, 25);
@@ -120,32 +120,51 @@ describe('findDecayCandidates', () => {
             note('untouched.md', {ageDays: 200})
         ];
 
-        const lastAccessed = new Map<NoteId, number>([
-            ['read-recently.md', NOW - 5 * MS_PER_DAY]
+        const usage = new Map<NoteId, DecayUsage>([
+            ['read-recently.md', {lastAccessed: NOW - 5 * MS_PER_DAY}]
         ]);
 
-        const result = findDecayCandidates(notes, NOW, {}, (id) => lastAccessed.get(id));
+        const result = findDecayCandidates(notes, NOW, {}, (id) => usage.get(id));
 
         expect(result.map((c) => c.id)).toEqual(['untouched.md']);
     });
 
-    it('reports ageDays from the effective (max of mtime/lastAccessed) time, not raw mtime', () => {
-        const notes = [note('n.md', {ageDays: 200})];
-        const lastAccessed = new Map<NoteId, number>([['n.md', NOW - 95 * MS_PER_DAY]]);
+    it('excludes a note with no backlinks/tags that was recently referenced in a session log', () => {
+        const notes = [
+            note('cited-recently.md', {ageDays: 200}),
+            note('untouched.md', {ageDays: 200})
+        ];
 
-        const result = findDecayCandidates(notes, NOW, {olderThanDays: 90}, (id) => lastAccessed.get(id));
+        const usage = new Map<NoteId, DecayUsage>([
+            ['cited-recently.md', {lastReferenced: NOW - 5 * MS_PER_DAY}]
+        ]);
 
-        expect(result).toHaveLength(1);
-        expect(result[0]?.ageDays).toBe(95);
-        expect(result[0]?.lastAccessed).toBe(NOW - 95 * MS_PER_DAY);
+        const result = findDecayCandidates(notes, NOW, {}, (id) => usage.get(id));
+
+        expect(result.map((c) => c.id)).toEqual(['untouched.md']);
     });
 
-    it('falls back to mtime when no getLastAccessed callback is given', () => {
+    it('reports ageDays from the effective (max of mtime/lastAccessed/lastReferenced) time, not raw mtime', () => {
+        const notes = [note('n.md', {ageDays: 200})];
+        const usage = new Map<NoteId, DecayUsage>([
+            ['n.md', {lastAccessed: NOW - 95 * MS_PER_DAY, lastReferenced: NOW - 92 * MS_PER_DAY}]
+        ]);
+
+        const result = findDecayCandidates(notes, NOW, {olderThanDays: 90}, (id) => usage.get(id));
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.ageDays).toBe(92);
+        expect(result[0]?.lastAccessed).toBe(NOW - 95 * MS_PER_DAY);
+        expect(result[0]?.lastReferenced).toBe(NOW - 92 * MS_PER_DAY);
+    });
+
+    it('falls back to mtime when no getUsage callback is given', () => {
         const notes = [note('n.md', {ageDays: 200})];
         const result = findDecayCandidates(notes, NOW);
 
         expect(result).toHaveLength(1);
         expect(result[0]?.lastAccessed).toBeUndefined();
+        expect(result[0]?.lastReferenced).toBeUndefined();
     });
 
     it('uses a configurable archivePrefix', () => {

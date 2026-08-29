@@ -5,7 +5,13 @@ export interface DecayCandidate {
     title: string;
     mtime: number;
     lastAccessed?: number;
+    lastReferenced?: number;
     ageDays: number;
+}
+
+export interface DecayUsage {
+    lastAccessed?: number;
+    lastReferenced?: number;
 }
 
 export interface DecayOptions {
@@ -32,13 +38,13 @@ const MS_PER_DAY = 86_400_000;
  *   - not pinned (frontmatter.pinned !== true)
  *   - not a prime/index note (frontmatter.prime !== true)
  *   - not already under the archive prefix
- *   - effective age (max(mtime, lastAccessed) — same rule as staleNotes)
- *     older than the threshold
+ *   - effective age (max(mtime, lastAccessed, lastReferenced) — same rule
+ *     as staleNotes) older than the threshold
  *
- * `getLastAccessed` is optional so callers without an access journal (e.g.
- * a plain notes array in a test) still work — it just falls back to mtime.
- * Without it, a note that's actively read via MCP but never edited/tagged/
- * linked could get archived out from under an in-progress session.
+ * `getUsage` is optional so callers without an access journal (e.g. a plain
+ * notes array in a test) still work — it just falls back to mtime. Without
+ * it, a note that's actively read via MCP or cited in a session's
+ * `references` could get archived out from under an in-progress session.
  *
  * Returned sorted oldest-first (largest ageDays first).
  */
@@ -46,7 +52,7 @@ export const findDecayCandidates = (
     notes: readonly Note[],
     now: number,
     opts: DecayOptions = {},
-    getLastAccessed?: (id: NoteId) => number | undefined
+    getUsage?: (id: NoteId) => DecayUsage | undefined
 ): DecayCandidate[] => {
     const olderThanDays = opts.olderThanDays ?? 90;
     const pathPrefix = opts.pathPrefix ?? '';
@@ -81,10 +87,10 @@ export const findDecayCandidates = (
             continue;
         }
 
-        const lastAccessed = getLastAccessed?.(note.id);
-        const effective = lastAccessed !== undefined
-            ? Math.max(note.mtime, lastAccessed)
-            : note.mtime;
+        const usage = getUsage?.(note.id);
+        const lastAccessed = usage?.lastAccessed;
+        const lastReferenced = usage?.lastReferenced;
+        const effective = Math.max(note.mtime, lastAccessed ?? 0, lastReferenced ?? 0);
         const ageMs = now - effective;
 
         if (ageMs < thresholdMs) {
@@ -96,6 +102,7 @@ export const findDecayCandidates = (
             title: note.title,
             mtime: note.mtime,
             ...(lastAccessed !== undefined ? {lastAccessed} : {}),
+            ...(lastReferenced !== undefined ? {lastReferenced} : {}),
             ageDays: Math.floor(ageMs / MS_PER_DAY)
         });
     }

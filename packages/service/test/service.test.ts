@@ -465,6 +465,29 @@ describe('SynaipseService.staleNotes', () => {
         expect(entry?.lastAccessed).toBeDefined();
         expect(entry?.accessCount).toBe(1);
     });
+
+    it('uses max(mtime, lastAccessed, lastReferenced) so a note cited via log_session is fresh', async () => {
+        await writeNote(vaultDir, 'Memory/app-x/cited.md', '---\ntitle: Cited\n---\nbody');
+        await ageFile(vaultDir, 'Memory/app-x/cited.md', 200);
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await service.appendSessionLog('did something', ['Cited']);
+
+        const all = service.staleNotes({olderThanDays: 0});
+        const entry = all.find((s) => s.id === 'Memory/app-x/cited.md');
+        expect(entry?.lastReferenced).toBeDefined();
+        expect(entry?.referencedCount).toBe(1);
+    });
+
+    it('does not blow up or fabricate an entry when a log_session reference does not resolve to any note', async () => {
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'app-x'));
+        await service.start();
+
+        await expect(service.appendSessionLog('did something', ['Nonexistent Note']))
+            .resolves.toBeDefined();
+    });
 });
 
 describe('SynaipseService project enforcement', () => {

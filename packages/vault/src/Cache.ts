@@ -7,6 +7,15 @@ export interface CacheEntry {
     mtime: number;
     accessCount?: number;
     lastAccessed?: number;
+    /**
+     * Distinct from accessCount: bumped only when a note is named in a
+     * synaipse_log_session `references` list, i.e. Claude explicitly said
+     * this note was actually used for the session's outcome — not merely
+     * retrieved. accessCount fires on every search/related hit regardless
+     * of relevance, so it can't answer "was this useful"; this can.
+     */
+    referencedCount?: number;
+    lastReferenced?: number;
 }
 
 export interface TouchSeed {
@@ -96,6 +105,14 @@ export class HashCache {
             merged.lastAccessed = prev.lastAccessed;
         }
 
+        if (prev?.referencedCount !== undefined) {
+            merged.referencedCount = prev.referencedCount;
+        }
+
+        if (prev?.lastReferenced !== undefined) {
+            merged.lastReferenced = prev.lastReferenced;
+        }
+
         this.data.set(id, merged);
         this.schedule();
     }
@@ -119,6 +136,30 @@ export class HashCache {
             mtime: seed.mtime,
             accessCount: 1,
             lastAccessed: now
+        });
+        this.schedule();
+    }
+
+    /** Same shape as touch(), but bumps referencedCount/lastReferenced instead. */
+    public touchReference(id: string, seed?: TouchSeed, now: number = Date.now()): void {
+        const existing = this.data.get(id);
+
+        if (existing) {
+            existing.referencedCount = (existing.referencedCount ?? 0) + 1;
+            existing.lastReferenced = now;
+            this.schedule();
+            return;
+        }
+
+        if (!seed) {
+            return;
+        }
+
+        this.data.set(id, {
+            hash: seed.hash,
+            mtime: seed.mtime,
+            referencedCount: 1,
+            lastReferenced: now
         });
         this.schedule();
     }

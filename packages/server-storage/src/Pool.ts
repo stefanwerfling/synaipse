@@ -33,7 +33,8 @@ const MIGRATION_FILES = [
     '004_user_expiry.sql',
     '005_accounts.sql',
     '006_tokens_account_fk.sql',
-    '007_schedules.sql'
+    '007_schedules.sql',
+    '008_notes_referenced.sql'
 ] as const;
 
 export const createPool = (cfg: MariaDBConfig): Pool => {
