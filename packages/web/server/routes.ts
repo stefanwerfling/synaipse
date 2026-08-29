@@ -141,6 +141,7 @@ const REASON_HEADINGS: Record<PrimerReason, string> = {
     recent_session: 'Recent sessions',
     project_decision: 'Project decisions',
     topic: 'Topic-relevant',
+    referenced: 'Referenced (cited in past sessions)',
     hot: 'Hot (by backlink count)',
     recent: 'Recently edited'
 };
@@ -150,6 +151,7 @@ const REASON_ORDER: readonly PrimerReason[] = [
     'recent_session',
     'project_decision',
     'topic',
+    'referenced',
     'hot',
     'recent'
 ];

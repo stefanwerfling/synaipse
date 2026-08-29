@@ -151,7 +151,14 @@ export interface TodoItem {
     done: boolean;
 }
 
-export type PrimerReason = 'pinned' | 'recent_session' | 'project_decision' | 'hot' | 'recent' | 'topic';
+export type PrimerReason =
+    | 'pinned'
+    | 'recent_session'
+    | 'project_decision'
+    | 'referenced'
+    | 'hot'
+    | 'recent'
+    | 'topic';
 
 export interface PrimerEntry {
     id: NoteId;
@@ -161,6 +168,8 @@ export interface PrimerEntry {
     tags: string[];
     mtime: number;
     backlinkCount: number;
+    /** Times this note was named in a synaipse_log_session `references` list — explicit "was actually used", not just retrieved. */
+    referencedCount: number;
 }
 
 export interface PrimeOptions {
@@ -2897,7 +2906,8 @@ export class SynaipseService {
                 excerpt: extractExcerpt(note.content, 240),
                 tags: note.tags,
                 mtime: note.mtime,
-                backlinkCount: note.backlinks.length
+                backlinkCount: note.backlinks.length,
+                referencedCount: this.notes.getEntry(note.id)?.referencedCount ?? 0
             });
         };
 
@@ -2939,6 +2949,19 @@ export class SynaipseService {
         }
 
         const projectNotes = all.filter((n) => inProject(n) && (includeCrawler || !isCrawler(n)));
+
+        // Notes Claude explicitly cited as useful via log_session — real
+        // evidence of usefulness, not just link topology (hot, below) or
+        // edit recency. Ranked ahead of hot for that reason.
+        const referenced = [...projectNotes]
+            .filter((n) => (this.notes.getEntry(n.id)?.referencedCount ?? 0) > 0)
+            .sort((a, b) =>
+                (this.notes.getEntry(b.id)?.referencedCount ?? 0) - (this.notes.getEntry(a.id)?.referencedCount ?? 0))
+            .slice(0, 3);
+        for (const n of referenced) {
+            if (context.length >= limit) break;
+            push(n, 'referenced');
+        }
 
         const hot = [...projectNotes]
             .filter((n) => n.backlinks.length > 0)

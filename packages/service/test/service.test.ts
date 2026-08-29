@@ -1587,6 +1587,32 @@ describe('SynaipseService.prime', () => {
         expect(hot?.excerpt.length).toBeGreaterThan(0);
     });
 
+    it('ranks a note explicitly referenced via log_session above hot, with its referencedCount', async () => {
+        await writeNote(vaultDir, 'Memory/foo/cited.md', '---\ntitle: Cited\n---\nWas actually used.');
+        await writeNote(vaultDir, 'Memory/foo/hot.md', '---\ntitle: Hot\n---\nCentral node.');
+        await writeNote(vaultDir, 'Memory/foo/a.md', '---\ntitle: A\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/foo/b.md', '---\ntitle: B\n---\nLinks to [[Hot]].');
+        await writeNote(vaultDir, 'Memory/foo/c.md', '---\ntitle: C\n---\nLinks to [[Hot]].');
+
+        service = new SynaipseService(buildProjectConfig(vaultDir, cacheFile, 'foo'));
+        await service.start();
+
+        await service.appendSessionLog('did something', ['Cited']);
+
+        const result = await service.prime({limit: 10});
+        const reasons = result.context.map((e) => e.reason);
+        const referencedIdx = reasons.indexOf('referenced');
+        const hotIdx = reasons.indexOf('hot');
+
+        expect(referencedIdx).toBeGreaterThanOrEqual(0);
+        expect(hotIdx).toBeGreaterThanOrEqual(0);
+        expect(referencedIdx).toBeLessThan(hotIdx);
+
+        const cited = result.context.find((e) => e.id === 'Memory/foo/cited.md');
+        expect(cited?.reason).toBe('referenced');
+        expect(cited?.referencedCount).toBe(1);
+    });
+
     it('includes a todo digest scoped to the project', async () => {
         await writeNote(vaultDir, 'Memory/foo/work.md', '- [ ] first\n- [ ] second\n- [x] done');
         await writeNote(vaultDir, 'Memory/bar/work.md', '- [ ] other-project');
