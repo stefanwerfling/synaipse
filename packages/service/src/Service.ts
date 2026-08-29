@@ -2346,7 +2346,12 @@ export class SynaipseService {
         const archivePrefix = opts.archivePrefix ?? 'Archive/';
         const dryRun = opts.dryRun === true;
 
-        const candidates = findDecayCandidates(this.notes.list(), now, opts);
+        const candidates = findDecayCandidates(
+            this.notes.list(),
+            now,
+            opts,
+            (id) => this.notes.getEntry(id)?.lastAccessed
+        );
         const archived: NoteId[] = [];
         const failed: Array<{id: NoteId; error: string}> = [];
 

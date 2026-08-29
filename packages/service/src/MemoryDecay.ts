@@ -4,6 +4,7 @@ export interface DecayCandidate {
     id: NoteId;
     title: string;
     mtime: number;
+    lastAccessed?: number;
     ageDays: number;
 }
 
@@ -31,14 +32,21 @@ const MS_PER_DAY = 86_400_000;
  *   - not pinned (frontmatter.pinned !== true)
  *   - not a prime/index note (frontmatter.prime !== true)
  *   - not already under the archive prefix
- *   - mtime older than the threshold
+ *   - effective age (max(mtime, lastAccessed) — same rule as staleNotes)
+ *     older than the threshold
+ *
+ * `getLastAccessed` is optional so callers without an access journal (e.g.
+ * a plain notes array in a test) still work — it just falls back to mtime.
+ * Without it, a note that's actively read via MCP but never edited/tagged/
+ * linked could get archived out from under an in-progress session.
  *
  * Returned sorted oldest-first (largest ageDays first).
  */
 export const findDecayCandidates = (
     notes: readonly Note[],
     now: number,
-    opts: DecayOptions = {}
+    opts: DecayOptions = {},
+    getLastAccessed?: (id: NoteId) => number | undefined
 ): DecayCandidate[] => {
     const olderThanDays = opts.olderThanDays ?? 90;
     const pathPrefix = opts.pathPrefix ?? '';
@@ -73,7 +81,11 @@ export const findDecayCandidates = (
             continue;
         }
 
-        const ageMs = now - note.mtime;
+        const lastAccessed = getLastAccessed?.(note.id);
+        const effective = lastAccessed !== undefined
+            ? Math.max(note.mtime, lastAccessed)
+            : note.mtime;
+        const ageMs = now - effective;
 
         if (ageMs < thresholdMs) {
             continue;
@@ -83,6 +95,7 @@ export const findDecayCandidates = (
             id: note.id,
             title: note.title,
             mtime: note.mtime,
+            ...(lastAccessed !== undefined ? {lastAccessed} : {}),
             ageDays: Math.floor(ageMs / MS_PER_DAY)
         });
     }

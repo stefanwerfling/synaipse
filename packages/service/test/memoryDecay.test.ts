@@ -114,6 +114,40 @@ describe('findDecayCandidates', () => {
         expect(result.map((c) => c.id)).toEqual(['ancient.md', 'mid.md']);
     });
 
+    it('excludes a note with no backlinks/tags that was recently accessed', () => {
+        const notes = [
+            note('read-recently.md', {ageDays: 200}),
+            note('untouched.md', {ageDays: 200})
+        ];
+
+        const lastAccessed = new Map<NoteId, number>([
+            ['read-recently.md', NOW - 5 * MS_PER_DAY]
+        ]);
+
+        const result = findDecayCandidates(notes, NOW, {}, (id) => lastAccessed.get(id));
+
+        expect(result.map((c) => c.id)).toEqual(['untouched.md']);
+    });
+
+    it('reports ageDays from the effective (max of mtime/lastAccessed) time, not raw mtime', () => {
+        const notes = [note('n.md', {ageDays: 200})];
+        const lastAccessed = new Map<NoteId, number>([['n.md', NOW - 95 * MS_PER_DAY]]);
+
+        const result = findDecayCandidates(notes, NOW, {olderThanDays: 90}, (id) => lastAccessed.get(id));
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.ageDays).toBe(95);
+        expect(result[0]?.lastAccessed).toBe(NOW - 95 * MS_PER_DAY);
+    });
+
+    it('falls back to mtime when no getLastAccessed callback is given', () => {
+        const notes = [note('n.md', {ageDays: 200})];
+        const result = findDecayCandidates(notes, NOW);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.lastAccessed).toBeUndefined();
+    });
+
     it('uses a configurable archivePrefix', () => {
         const notes = [
             note('Old/already.md', {ageDays: 200}),
