@@ -311,6 +311,56 @@ describe('SynaipseService.suggestLinks', () => {
             }
         }
     });
+
+    it('suggests a pair via an unlinked entity mention in the body', async () => {
+        await writeNote(vaultDir, 'neo4j.md', '---\ntitle: Neo4j\n---\nGraph database notes.');
+        await writeNote(vaultDir, 'eval.md', '---\ntitle: Storage Eval\n---\nWe evaluated Neo4j for the graph layer.');
+        await writeNote(vaultDir, 'unrelated.md', '---\ntitle: Unrelated\n---\nnothing to see here');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        const pair = suggestions.find((s) =>
+            (s.a === 'neo4j.md' && s.b === 'eval.md') || (s.a === 'eval.md' && s.b === 'neo4j.md')
+        );
+
+        expect(pair).toBeDefined();
+        expect(pair?.reasons.some((r) => r.startsWith('entity:'))).toBe(true);
+
+        const unrelatedPair = suggestions.find((s) => s.a === 'unrelated.md' || s.b === 'unrelated.md');
+        expect(unrelatedPair).toBeUndefined();
+    });
+
+    it('does not match via frontmatter aliases (measured to be the dominant noise source on a real vault)', async () => {
+        await writeNote(vaultDir, 'qdrant.md', '---\ntitle: Qdrant\naliases: [QdrantDB]\n---\nVector store notes.');
+        await writeNote(vaultDir, 'eval.md', '---\ntitle: Storage Eval\n---\nQdrantDB looked promising for the vector layer.');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        const pair = suggestions.find((s) =>
+            (s.a === 'qdrant.md' && s.b === 'eval.md') || (s.a === 'eval.md' && s.b === 'qdrant.md')
+        );
+
+        expect(pair).toBeUndefined();
+    });
+
+    it('does not suggest an entity match for a pair already linked by a wikilink', async () => {
+        await writeNote(vaultDir, 'neo4j.md', '---\ntitle: Neo4j\n---\nGraph database notes.');
+        await writeNote(vaultDir, 'eval.md', '---\ntitle: Storage Eval\n---\nSee [[Neo4j]] — we evaluated Neo4j for the graph layer.');
+
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const suggestions = await service.suggestLinks();
+        const pair = suggestions.find((s) =>
+            (s.a === 'neo4j.md' && s.b === 'eval.md') || (s.a === 'eval.md' && s.b === 'neo4j.md')
+        );
+
+        expect(pair).toBeUndefined();
+    });
 });
 
 describe('SynaipseService.staleNotes', () => {

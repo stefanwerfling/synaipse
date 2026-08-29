@@ -15,6 +15,7 @@ import {createLlmProvider, isLocalUrl, type LlmConfig, type LlmProvider, type Ll
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
 import {AuditLog, type AuditEntry} from './AuditLog.js';
+import {extractEntitySpans} from './EntityLinker.js';
 import {getAuditTokenLabel} from './AuditContext.js';
 import {ConsentStore, type ConsentDecision, type ConsentRequest} from './ConsentStore.js';
 import {
@@ -215,6 +216,10 @@ const isPathNotFound = (err: unknown): boolean => {
 
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
 const SEMANTIC_SAMPLE_CHARS = 1500;
+const ENTITY_SAMPLE_CHARS = 4000;
+const ENTITY_SCORE_BASE = 0.35;
+const ENTITY_SCORE_STEP = 0.15;
+const ENTITY_SCORE_CAP = 0.9;
 
 type ChatConfigField = NonNullable<Config['chat']>;
 type ResearchConfigField = NonNullable<Config['research']>;
@@ -2660,6 +2665,66 @@ export class SynaipseService {
                     embedCalls,
                     durationMs: Date.now() - embedStart
                 });
+            }
+        }
+
+        // Entity-match signal: extract proper-noun-like spans from each
+        // note's body and check them against other notes' titles in scope.
+        // Catches unlinked mentions that share no tags and aren't close
+        // enough in embedding space to surface as "semantic" — e.g. a
+        // one-line reference to a tool/concept that has its own note.
+        // Extraction is deliberately coarse (see EntityLinker.ts); precision
+        // comes entirely from requiring an exact title match, so
+        // over-inclusive spans that match nothing are harmless.
+        //
+        // Deliberately titles only, not frontmatter aliases: measured
+        // against the real synaipse-vault (~2.8k notes), short convenience
+        // aliases (e.g. "setup", "install", "ACL") were the single biggest
+        // source of noise — generic words that happen to double as an
+        // alias match constantly against unrelated prose. A single-word
+        // *title* that collides with a common word (e.g. a note literally
+        // titled "MEMORY") is a smaller residual version of the same
+        // problem; it isn't filtered here and shows up as low-score noise
+        // rather than being fully solved.
+        {
+            const entityIndex = new Map<string, NoteId>();
+
+            for (const note of scoped) {
+                if (note.title.length > 0 && !entityIndex.has(note.title.toLowerCase())) {
+                    entityIndex.set(note.title.toLowerCase(), note.id);
+                }
+            }
+
+            for (const note of scoped) {
+                if (note.content.length === 0) {
+                    continue;
+                }
+
+                const linked = linkedSet(note);
+                const sample = note.content.slice(0, ENTITY_SAMPLE_CHARS);
+                const spans = extractEntitySpans(sample);
+                const matchedByTarget = new Map<NoteId, Set<string>>();
+
+                for (const span of spans) {
+                    const targetId = entityIndex.get(span.toLowerCase());
+
+                    if (targetId === undefined || linked.has(targetId)) {
+                        continue;
+                    }
+
+                    const entities = matchedByTarget.get(targetId) ?? new Set<string>();
+                    entities.add(span);
+                    matchedByTarget.set(targetId, entities);
+                }
+
+                for (const [targetId, entities] of matchedByTarget) {
+                    const score = Math.min(
+                        ENTITY_SCORE_CAP,
+                        ENTITY_SCORE_BASE + ENTITY_SCORE_STEP * (entities.size - 1)
+                    );
+                    const reason = `entity:${[...entities].sort().join(',')}`;
+                    recordPair(note.id, targetId, score, reason);
+                }
             }
         }
 
