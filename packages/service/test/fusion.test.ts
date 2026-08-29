@@ -109,6 +109,27 @@ describe('reciprocalRankFusion', () => {
         });
     });
 
+    it('does not double-count a note that appears more than once in the SAME signal (multi-chunk hits)', () => {
+        // Qdrant returns per-chunk hits, so a long note can occupy several
+        // slots in one semantic result list. Fusion must treat that as one
+        // contribution (the best rank), not several.
+        const sem = [hit('long-note', 0.9), hit('other', 0.5), hit('long-note', 0.3)];
+        const ft = [hit('other', 10)];
+
+        const fused = reciprocalRankFusion(
+            [signal('semantic', sem), signal('fulltext', ft)],
+            {limit: 5}
+        );
+
+        const byId = new Map(fused.map((h) => [h.noteId, h]));
+
+        // long-note's semantic score is 1/(60+1), not 1/(60+1) + 1/(60+3).
+        expect(byId.get('long-note')?.score).toBeCloseTo(1 / 61, 10);
+        expect(byId.get('long-note')?.components).toEqual({
+            semantic: {score: 0.9, rank: 1}
+        });
+    });
+
     it('records demote multiplier in components when < 1', () => {
         const ft = [hit('demoted', 1), hit('normal', 1)];
 

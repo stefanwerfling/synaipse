@@ -56,6 +56,17 @@ export const reciprocalRankFusion = (
                 return;
             }
 
+            // A signal's hit list is pre-sorted best-first (e.g. Qdrant
+            // returns per-CHUNK hits, so one long note can appear more than
+            // once in the semantic list). Only the first occurrence — the
+            // best rank — should count; otherwise a note with several
+            // matching chunks racks up repeated contributions from what is
+            // really a single signal, inflating its score past notes that
+            // matched once but more precisely.
+            if (existing.components[signal.name] !== undefined) {
+                return;
+            }
+
             existing.score += contribution;
             existing.components[signal.name] = component;
 
