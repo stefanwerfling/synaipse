@@ -28,14 +28,6 @@ interface EntryFormFields {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-/**
- * Pseudo dimension key for "group by metric" — metric is a first-class
- * entry field, not part of the open `dimensions` bag, but it's just as
- * valid a grouping level (e.g. Machine → Backend → Metric) so it's offered
- * alongside the real dimension keys in the "Gruppieren nach" checkboxes,
- * always last since it's the innermost, most granular axis.
- */
-const METRIC_GROUP_KEY = 'metric';
 
 export class BenchmarksPanel {
     public readonly element: HTMLElement;
@@ -55,6 +47,8 @@ export class BenchmarksPanel {
     private dimFilters: Record<string, string> = {};
     /** When false (default), soft-deleted entries are hidden from the table. */
     private showDeleted = false;
+    /** Which "Vergleich" chart tab is active. */
+    private chartView: 'bar' | 'bar-h' | 'trend' = 'bar';
     private addFormOpen = false;
     private editingId: string | null = null;
     private readonly expandedGroups = new Set<string>();
@@ -188,12 +182,14 @@ export class BenchmarksPanel {
             console.error('failed to load benchmarks', e);
             this.set = {project: this.project, updatedAt: '', entries: []};
         }
-        // Default to the full drill-down tree — every dimension key this
-        // project uses, then metric innermost (e.g. Machine → Backend →
-        // Metric) — otherwise every entry lands flat with all dimensions as
-        // columns. Only set on a fresh load; re-renders after a mutation
+        // Default to grouping by every dimension key this project uses (e.g.
+        // Machine → Backend) — otherwise every entry lands flat with all
+        // dimensions as columns. Metric stays a plain, always-visible table
+        // column — it's usually one entry per (dims, metric) combo, so
+        // giving it its own collapsible group row is more chrome than
+        // signal. Only set on a fresh load; re-renders after a mutation
         // leave the user's own level choices alone (unchecking boxes).
-        this.groupByKeys = [...dimensionKeys(withoutDeletedEntries(this.set.entries)), METRIC_GROUP_KEY];
+        this.groupByKeys = dimensionKeys(withoutDeletedEntries(this.set.entries));
         this.collapsedGroups.clear();
         this.render();
     }
@@ -249,15 +245,11 @@ export class BenchmarksPanel {
         const base = this.showDeleted ? set.entries : withoutDeletedEntries(set.entries);
         const keys = dimensionKeys(base);
 
-        // Grouping levels: every real dimension key, then metric innermost —
-        // fixed order regardless of which boxes are checked or in what order.
-        const groupableKeys = [...keys, METRIC_GROUP_KEY];
-
         // Drop filter/grouping selections for keys that no longer exist (e.g. after a project switch).
         for (const key of Object.keys(this.dimFilters)) {
             if (!keys.includes(key)) delete this.dimFilters[key];
         }
-        this.groupByKeys = this.groupByKeys.filter((k) => groupableKeys.includes(k));
+        this.groupByKeys = this.groupByKeys.filter((k) => keys.includes(k));
 
         const metrics = [...new Set(base.map((e) => e.metric))].sort();
         const metricSel = el('select', {
@@ -272,25 +264,25 @@ export class BenchmarksPanel {
         }
         this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Metrik'}), metricSel));
 
-        {
-            // One checkbox per dimension key plus metric — check several to
-            // nest sub-groups (e.g. machine, then backend, then metric).
-            // Order always follows groupableKeys' fixed order, not click
+        if (keys.length > 0) {
+            // One checkbox per dimension key — check several to nest
+            // sub-groups (e.g. machine, then backend within each machine).
+            // Order always follows dimensionKeys()' natural order, not click
             // order, so the hierarchy stays predictable regardless of which
-            // box you toggle.
+            // box you toggle. Metric is deliberately not offered here — it's
+            // always a plain table column (see renderRow/renderTable).
             const groupHost = el('div', {class: 'bm-group-toggles'});
-            for (const key of groupableKeys) {
+            for (const key of keys) {
                 const checkbox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
                 checkbox.checked = this.groupByKeys.includes(key);
                 checkbox.addEventListener('change', () => {
                     this.groupByKeys = checkbox.checked
-                        ? groupableKeys.filter((k) => this.groupByKeys.includes(k) || k === key)
+                        ? keys.filter((k) => this.groupByKeys.includes(k) || k === key)
                         : this.groupByKeys.filter((k) => k !== key);
                     this.collapsedGroups.clear();
                     this.render();
                 });
-                const label = key === METRIC_GROUP_KEY ? 'Metrik' : key;
-                groupHost.appendChild(el('label', {class: 'bm-group-toggle'}, checkbox, el('span', {text: label})));
+                groupHost.appendChild(el('label', {class: 'bm-group-toggle'}, checkbox, el('span', {text: key})));
             }
             this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Gruppieren nach'}), groupHost));
         }
@@ -447,6 +439,22 @@ export class BenchmarksPanel {
         const section = el('section', {class: 'activity-section'});
         section.appendChild(el('h3', {class: 'activity-section-title', text: 'Vergleich'}));
 
+        const views: ReadonlyArray<{id: 'bar' | 'bar-h' | 'trend'; label: string}> = [
+            {id: 'bar', label: 'Balken'},
+            {id: 'bar-h', label: 'Balken (horizontal)'},
+            {id: 'trend', label: 'Verlauf'}
+        ];
+        const tabs = el('div', {class: 'bm-chart-tabs'});
+        for (const v of views) {
+            tabs.appendChild(el('button', {
+                class: `bm-chart-tab${this.chartView === v.id ? ' active' : ''}`,
+                attrs: {type: 'button'},
+                text: v.label,
+                on: {click: () => { this.chartView = v.id; this.render(); }}
+            }));
+        }
+        section.appendChild(tabs);
+
         if (this.metricFilter === '') {
             section.appendChild(el('div', {class: 'activity-empty', text: 'Metrik oben wählen, um ein Diagramm zu sehen — Werte unterschiedlicher Metriken sind nicht vergleichbar.'}));
             return section;
@@ -458,15 +466,31 @@ export class BenchmarksPanel {
             return section;
         }
 
-        const higherIsBetter = items[0]?.higherIsBetter ?? true;
-        const sorted = [...items].sort((a, b) => higherIsBetter ? b.value - a.value : a.value - b.value);
-        // Label bars by whichever dimensions AREN'T already pinned by a filter
-        // — that's the axis actually being compared (e.g. backend, once machine is pinned).
+        // Label bars/points by whichever dimensions AREN'T already pinned by
+        // a filter — that's the axis actually being compared (e.g. backend,
+        // once machine is pinned).
         const activeDimKeys = new Set(Object.keys(this.dimFilters).filter((k) => this.dimFilters[k] !== ''));
-        const labelKeys = dimensionKeys(sorted).filter((k) => !activeDimKeys.has(k));
+        const labelKeys = dimensionKeys(items).filter((k) => !activeDimKeys.has(k));
         const labelFor = (e: BenchmarkEntry): string =>
             labelKeys.map((k) => e.dimensions[k]).filter((v): v is string => v !== undefined).join(' / ') || e.metric;
 
+        if (this.chartView === 'trend') {
+            section.appendChild(this.renderTrendChart(items, labelFor));
+            return section;
+        }
+
+        const higherIsBetter = items[0]?.higherIsBetter ?? true;
+        const sorted = [...items].sort((a, b) => higherIsBetter ? b.value - a.value : a.value - b.value);
+        section.appendChild(
+            this.chartView === 'bar-h'
+                ? this.renderHorizontalBarChart(sorted, labelFor)
+                : this.renderBarChart(sorted, labelFor)
+        );
+        return section;
+    }
+
+    private renderBarChart(sorted: BenchmarkEntry[], labelFor: (e: BenchmarkEntry) => string): HTMLElement {
+        const wrap = el('div', {});
         const chartHost = el('div', {class: 'activity-chart'});
         const max = Math.max(...sorted.map((e) => Math.abs(e.value)), 1);
         const width = Math.max(sorted.length * 60, 320);
@@ -501,15 +525,116 @@ export class BenchmarksPanel {
         });
 
         chartHost.appendChild(svg);
-        section.appendChild(chartHost);
+        wrap.appendChild(chartHost);
 
         const labels = el('div', {class: 'activity-chart-labels bm-chart-labels'});
         for (const entry of sorted) {
             labels.appendChild(el('span', {text: labelFor(entry)}));
         }
-        section.appendChild(labels);
+        wrap.appendChild(labels);
 
-        return section;
+        return wrap;
+    }
+
+    /** Horizontal ranking view — reuses the leaderboard's bar-row pattern (label left, bar behind, value right). */
+    private renderHorizontalBarChart(sorted: BenchmarkEntry[], labelFor: (e: BenchmarkEntry) => string): HTMLElement {
+        const max = Math.max(...sorted.map((e) => Math.abs(e.value)), 1);
+        const list = el('ul', {class: 'activity-list'});
+        sorted.forEach((entry, i) => {
+            const pct = (Math.abs(entry.value) / max) * 100;
+            list.appendChild(el('li', {class: 'activity-bar-row'},
+                el('div', {class: 'activity-bar-bg'},
+                    el('div', {class: 'activity-bar-fill', style: {width: `${pct}%`, ...(i === 0 ? {background: 'var(--accent)'} : {})}})
+                ),
+                el('div', {class: 'activity-bar-content'},
+                    el('span', {class: 'activity-bar-label', text: labelFor(entry)}),
+                    el('span', {class: 'activity-bar-value', text: `${entry.value.toLocaleString('de-DE')} ${entry.unit}`})
+                )
+            ));
+        });
+        return list;
+    }
+
+    /** Multi-series line/scatter of value over recordedAt — one series per distinct label (e.g. per backend). */
+    private renderTrendChart(items: BenchmarkEntry[], labelFor: (e: BenchmarkEntry) => string): HTMLElement {
+        const wrap = el('div', {});
+        const dated = items.filter((e) => e.recordedAt !== undefined);
+        if (dated.length === 0) {
+            wrap.appendChild(el('div', {class: 'activity-empty', text: 'Keine Einträge mit Zeitstempel für einen Verlauf.'}));
+            return wrap;
+        }
+
+        const series = new Map<string, BenchmarkEntry[]>();
+        for (const entry of dated) {
+            const label = labelFor(entry);
+            const list = series.get(label) ?? [];
+            list.push(entry);
+            series.set(label, list);
+        }
+        for (const list of series.values()) {
+            list.sort((a, b) => (a.recordedAt ?? '').localeCompare(b.recordedAt ?? ''));
+        }
+
+        const timeOf = (e: BenchmarkEntry): number => new Date(e.recordedAt as string).getTime();
+        const times = dated.map(timeOf);
+        const minT = Math.min(...times);
+        const maxT = Math.max(...times);
+        const values = dated.map((e) => e.value);
+        const minV = Math.min(0, ...values);
+        const maxV = Math.max(...values, 1);
+
+        const width = 560;
+        const height = 200;
+        const padding = 28;
+        const xFor = (t: number): number =>
+            maxT === minT ? width / 2 : padding + ((t - minT) / (maxT - minT)) * (width - padding * 2);
+        const yFor = (v: number): number =>
+            maxV === minV ? height / 2 : height - padding - ((v - minV) / (maxV - minV)) * (height - padding * 2);
+
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('class', 'activity-svg');
+
+        const colors = ['var(--accent)', '#0DCE74', '#EF2CC1', '#3D99F5', '#FEA595', '#A373ED'];
+        const legend = el('div', {class: 'bm-trend-legend'});
+        let colorIdx = 0;
+        for (const [label, list] of series) {
+            const color = colors[colorIdx % colors.length] as string;
+            colorIdx += 1;
+
+            if (list.length > 1) {
+                const points = list.map((e) => `${xFor(timeOf(e))},${yFor(e.value)}`).join(' ');
+                const polyline = document.createElementNS(SVG_NS, 'polyline');
+                polyline.setAttribute('points', points);
+                polyline.setAttribute('fill', 'none');
+                polyline.setAttribute('stroke', color);
+                polyline.setAttribute('stroke-width', '2');
+                svg.appendChild(polyline);
+            }
+
+            for (const entry of list) {
+                const circle = document.createElementNS(SVG_NS, 'circle');
+                circle.setAttribute('cx', String(xFor(timeOf(entry))));
+                circle.setAttribute('cy', String(yFor(entry.value)));
+                circle.setAttribute('r', '4');
+                circle.setAttribute('fill', color);
+                const title = document.createElementNS(SVG_NS, 'title');
+                title.textContent =
+                    `${label}: ${entry.value.toLocaleString('de-DE')} ${entry.unit} — ${new Date(entry.recordedAt as string).toLocaleString('de-DE')}`;
+                circle.appendChild(title);
+                svg.appendChild(circle);
+            }
+
+            legend.appendChild(el('span', {class: 'bm-trend-legend-item'},
+                el('span', {class: 'bm-trend-swatch', style: {background: color}}),
+                label
+            ));
+        }
+
+        wrap.appendChild(el('div', {class: 'activity-chart'}, svg));
+        wrap.appendChild(legend);
+        return wrap;
     }
 
     // --- table ------------------------------------------------------------
@@ -559,17 +684,17 @@ export class BenchmarksPanel {
         // order, so they're dropped from the per-entry dimension columns —
         // showing "GB10/Spark" in both a group header AND every row nested
         // under it is redundant once the row already sits under that header.
-        // Metric is a pseudo dimension key (see METRIC_GROUP_KEY) — not part
-        // of `keys`, so it's allowed through the filter explicitly.
-        const groupKeys = this.groupByKeys.filter((k) => keys.includes(k) || k === METRIC_GROUP_KEY);
+        // Metric is deliberately never a group key here — usually one entry
+        // per (dims, metric) combo, so it stays a plain, always-visible,
+        // sortable column instead of its own collapsible group row.
+        const groupKeys = this.groupByKeys.filter((k) => keys.includes(k));
         const rowKeys = keys.filter((k) => !groupKeys.includes(k));
-        const showMetricColumn = !groupKeys.includes(METRIC_GROUP_KEY);
-        const totalCols = rowKeys.length + (showMetricColumn ? 6 : 5); // (metric,) value, unit, recorded, notes, actions
+        const totalCols = rowKeys.length + 6; // metric, value, unit, recorded, notes, actions
 
         const table = el('table', {class: 'rm-table bm-table'});
         table.appendChild(el('thead', {}, el('tr', {},
             ...rowKeys.map((k) => this.sortableHeader(k, k)),
-            showMetricColumn ? this.sortableHeader('Metrik', 'metric') : null,
+            this.sortableHeader('Metrik', 'metric'),
             this.sortableHeader('Wert', 'value', 'r'),
             this.sortableHeader('Einheit', 'unit'),
             this.sortableHeader('Erfasst', 'recordedAt'),
@@ -578,7 +703,7 @@ export class BenchmarksPanel {
         )));
 
         const tbody = el('tbody');
-        this.renderGroupedRows(tbody, this.sortEntries(visible), groupKeys, rowKeys, showMetricColumn, winnerIds, totalCols, set, 0, '');
+        this.renderGroupedRows(tbody, this.sortEntries(visible), groupKeys, rowKeys, winnerIds, totalCols, set, 0, '');
         table.appendChild(tbody);
         return el('div', {class: 'rm-scroll'}, table);
     }
@@ -595,7 +720,6 @@ export class BenchmarksPanel {
         entries: readonly BenchmarkEntry[],
         remainingGroupKeys: readonly string[],
         rowKeys: readonly string[],
-        showMetricColumn: boolean,
         winnerIds: ReadonlySet<string>,
         totalCols: number,
         set: BenchmarkSet,
@@ -605,7 +729,7 @@ export class BenchmarksPanel {
         const [key, ...restKeys] = remainingGroupKeys;
         if (key === undefined) {
             for (const entry of entries) {
-                tbody.appendChild(this.renderRow(entry, rowKeys, showMetricColumn, winnerIds.has(entry.id), depth));
+                tbody.appendChild(this.renderRow(entry, rowKeys, winnerIds.has(entry.id), depth));
                 if (this.editingId === entry.id) {
                     tbody.appendChild(el('tr', {},
                         el('td', {attrs: {colspan: String(totalCols)}},
@@ -619,7 +743,7 @@ export class BenchmarksPanel {
 
         const groups = new Map<string, BenchmarkEntry[]>();
         for (const entry of entries) {
-            const groupValue = key === METRIC_GROUP_KEY ? entry.metric : (entry.dimensions[key] ?? '—');
+            const groupValue = entry.dimensions[key] ?? '—';
             const list = groups.get(groupValue) ?? [];
             list.push(entry);
             groups.set(groupValue, list);
@@ -629,7 +753,7 @@ export class BenchmarksPanel {
             const collapsed = this.collapsedGroups.has(groupPath);
             tbody.appendChild(this.renderGroupRow(key, groupValue, groupEntries.length, totalCols, collapsed, depth, groupPath));
             if (!collapsed) {
-                this.renderGroupedRows(tbody, groupEntries, restKeys, rowKeys, showMetricColumn, winnerIds, totalCols, set, depth + 1, groupPath);
+                this.renderGroupedRows(tbody, groupEntries, restKeys, rowKeys, winnerIds, totalCols, set, depth + 1, groupPath);
             }
         }
     }
@@ -656,7 +780,7 @@ export class BenchmarksPanel {
                     el('span', {class: `rm-caret ${collapsed ? 'collapsed' : 'open'}`},
                         el('span', {class: 'rm-caret-tw', text: collapsed ? '▸' : '▾'})
                     ),
-                    el('span', {class: 'bm-group-key', text: key === METRIC_GROUP_KEY ? 'Metrik' : key}),
+                    el('span', {class: 'bm-group-key', text: key}),
                     el('span', {class: 'bm-group-label', text: value}),
                     el('span', {class: 'bm-group-count', text: String(count)})
                 )
@@ -667,14 +791,12 @@ export class BenchmarksPanel {
     private renderRow(
         entry: BenchmarkEntry,
         keys: readonly string[],
-        showMetricColumn: boolean,
         isWinner: boolean,
         depth: number
     ): HTMLElement {
         // Explicit spacer span, prepended to whichever cell renders first — a
-        // dimension column if any remain, else the metric cell if it's still
-        // shown, else the value cell (when both dimensions AND metric are
-        // grouped away, e.g. Machine → Backend → Metric all checked). Own
+        // dimension column if any remain, otherwise the metric cell (always
+        // shown — metric is never a group key, see renderTable). Own
         // class/width (not RoadmapPanel's .rm-indent) — measured live in the
         // browser: a bare 20px roadmap-style indent IS applied correctly (real
         // DOM offset, confirmed via getBoundingClientRect), but reads as
@@ -685,23 +807,17 @@ export class BenchmarksPanel {
         // further right than one under a single level.
         const makeIndent = (): HTMLElement | null =>
             depth > 0 ? el('span', {class: 'bm-indent', style: {width: `${depth * 30}px`}}) : null;
-        const indentTarget: 'dim' | 'metric' | 'value' =
-            keys.length > 0 ? 'dim' : showMetricColumn ? 'metric' : 'value';
 
         const dimCells = keys.map((k, i) => {
             const value = entry.dimensions[k] ?? '—';
-            return i === 0 && indentTarget === 'dim'
+            return i === 0
                 ? el('td', {}, makeIndent(), el('span', {text: value}))
                 : el('td', {text: value});
         });
-        const metricCell = showMetricColumn
-            ? (indentTarget === 'metric'
-                ? el('td', {}, makeIndent(), el('span', {text: entry.metric}))
-                : el('td', {text: entry.metric}))
-            : null;
-        const valueCell = indentTarget === 'value'
-            ? el('td', {class: 'r num'}, makeIndent(), el('span', {text: entry.value.toLocaleString('de-DE')}))
-            : el('td', {class: 'r num', text: entry.value.toLocaleString('de-DE')});
+        const metricCell = keys.length === 0
+            ? el('td', {}, makeIndent(), el('span', {text: entry.metric}))
+            : el('td', {text: entry.metric});
+        const valueCell = el('td', {class: 'r num', text: entry.value.toLocaleString('de-DE')});
 
         const notes = el('div', {class: 'rm-notes'});
         for (const link of entry.noteLinks ?? []) {
