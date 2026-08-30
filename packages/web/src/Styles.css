@@ -7761,7 +7761,6 @@ button.typed-link-badge:hover {
 .bm-group-head { display: flex; align-items: center; gap: 8px; }
 .bm-group-label { font-weight: 640; font-size: 13px; }
 .bm-group-count { font-size: 11px; color: var(--text-2); background: var(--bg-1); border-radius: var(--r-pill); padding: 0 7px; line-height: 17px; }
-.bm-child-row td:first-child { padding-left: 30px; }
 
 .bm-chart-labels { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 

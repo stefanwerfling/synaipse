@@ -612,7 +612,23 @@ export class BenchmarksPanel {
     }
 
     private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean, indented: boolean): HTMLElement {
-        const dimCells = keys.map((k) => el('td', {text: entry.dimensions[k] ?? '—'}));
+        // Explicit spacer span (same pattern as RoadmapPanel's .rm-indent),
+        // prepended to whichever cell renders first — a dimension column if
+        // any remain, otherwise the metric cell. A CSS padding-left on
+        // td:first-child is easy to lose to table auto-layout quirks; an
+        // inline-block spacer with a real width always shows.
+        const makeIndent = (): HTMLElement | null =>
+            indented ? el('span', {class: 'rm-indent', style: {width: '20px'}}) : null;
+
+        const dimCells = keys.map((k, i) => {
+            const value = entry.dimensions[k] ?? '—';
+            return i === 0
+                ? el('td', {}, makeIndent(), el('span', {text: value}))
+                : el('td', {text: value});
+        });
+        const metricCell = keys.length === 0
+            ? el('td', {}, makeIndent(), el('span', {text: entry.metric}))
+            : el('td', {text: entry.metric});
 
         const notes = el('div', {class: 'rm-notes'});
         for (const link of entry.noteLinks ?? []) {
@@ -649,10 +665,10 @@ export class BenchmarksPanel {
                 el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
-        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', indented ? 'bm-child-row' : ''].filter(Boolean).join(' ');
+        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : ''].filter(Boolean).join(' ');
         return el('tr', {class: rowCls},
             ...dimCells,
-            el('td', {text: entry.metric}),
+            metricCell,
             el('td', {class: 'r num', text: entry.value.toLocaleString('de-DE')}),
             el('td', {text: entry.unit}),
             el('td', {text: recorded}),
