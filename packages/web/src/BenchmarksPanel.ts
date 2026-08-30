@@ -612,13 +612,16 @@ export class BenchmarksPanel {
     }
 
     private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean, indented: boolean): HTMLElement {
-        // Explicit spacer span (same pattern as RoadmapPanel's .rm-indent),
-        // prepended to whichever cell renders first — a dimension column if
-        // any remain, otherwise the metric cell. A CSS padding-left on
-        // td:first-child is easy to lose to table auto-layout quirks; an
-        // inline-block spacer with a real width always shows.
+        // Explicit spacer span, prepended to whichever cell renders first — a
+        // dimension column if any remain, otherwise the metric cell. Own
+        // class/width (not RoadmapPanel's .rm-indent) — measured live in the
+        // browser: the 20px roadmap-style indent IS applied correctly (real
+        // DOM offset, confirmed via getBoundingClientRect), but reads as
+        // basically invisible in this table — no caret/connector next to it
+        // the way roadmap rows have, so it needs to be wider and paired with
+        // a visible border-left guide (see .bm-child-row in Styles.css).
         const makeIndent = (): HTMLElement | null =>
-            indented ? el('span', {class: 'rm-indent', style: {width: '20px'}}) : null;
+            indented ? el('span', {class: 'bm-indent'}) : null;
 
         const dimCells = keys.map((k, i) => {
             const value = entry.dimensions[k] ?? '—';
@@ -665,7 +668,7 @@ export class BenchmarksPanel {
                 el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
-        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : ''].filter(Boolean).join(' ');
+        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', indented ? 'bm-child-row' : ''].filter(Boolean).join(' ');
         return el('tr', {class: rowCls},
             ...dimCells,
             metricCell,

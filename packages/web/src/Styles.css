@@ -7762,6 +7762,13 @@ button.typed-link-badge:hover {
 .bm-group-label { font-weight: 640; font-size: 13px; }
 .bm-group-count { font-size: 11px; color: var(--text-2); background: var(--bg-1); border-radius: var(--r-pill); padding: 0 7px; line-height: 17px; }
 
+/* Child-row indentation. A plain spacer span alone measured out correctly
+   (real 20px DOM offset) but read as invisible without a caret next to it
+   like roadmap rows have — so this pairs a wider spacer with a visible
+   guide line on the cell itself. */
+.bm-indent { display: inline-block; width: 30px; }
+.bm-child-row td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+
 .bm-chart-labels { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 
 @media (max-width: 760px) {
