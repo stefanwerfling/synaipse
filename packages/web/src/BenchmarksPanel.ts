@@ -51,8 +51,14 @@ export class BenchmarksPanel {
     private editingId: string | null = null;
     private readonly expandedGroups = new Set<string>();
     private sort: {key: string; dir: 'asc' | 'desc'} = {key: 'value', dir: 'desc'};
-    /** Table grouping: which dimension key's values become indented parent rows. null = flat table. */
-    private groupByKey: string | null = null;
+    /**
+     * Table grouping: ordered dimension keys that become nested, indented
+     * parent rows — e.g. ['machine', 'backend'] groups by machine, then by
+     * backend within each machine. Empty = flat table. Order always follows
+     * dimensionKeys()' natural (first-seen) order, not selection order.
+     */
+    private groupByKeys: string[] = [];
+    /** Keyed by a composite path (e.g. "machine=GB10|backend=vLLM|") so collapse state can't collide across sibling branches. */
     private readonly collapsedGroups = new Set<string>();
     private saving = false;
 
@@ -174,11 +180,13 @@ export class BenchmarksPanel {
             console.error('failed to load benchmarks', e);
             this.set = {project: this.project, updatedAt: '', entries: []};
         }
-        // Default to grouping by the first dimension key this project uses —
-        // otherwise every entry lands flat with all dimensions as columns.
-        // Only set on a fresh load; re-renders after a mutation leave a
-        // user's explicit "no grouping" choice alone.
-        this.groupByKey = dimensionKeys(withoutDeletedEntries(this.set.entries))[0] ?? null;
+        // Default to grouping by just the first dimension key this project
+        // uses — otherwise every entry lands flat with all dimensions as
+        // columns. Only set on a fresh load; re-renders after a mutation
+        // leave the user's own grouping/level choices alone. Deeper nesting
+        // (more keys) is opt-in via the checkboxes in the filter bar.
+        const firstKey = dimensionKeys(withoutDeletedEntries(this.set.entries))[0];
+        this.groupByKeys = firstKey !== undefined ? [firstKey] : [];
         this.collapsedGroups.clear();
         this.render();
     }
@@ -238,9 +246,7 @@ export class BenchmarksPanel {
         for (const key of Object.keys(this.dimFilters)) {
             if (!keys.includes(key)) delete this.dimFilters[key];
         }
-        if (this.groupByKey !== null && !keys.includes(this.groupByKey)) {
-            this.groupByKey = null;
-        }
+        this.groupByKeys = this.groupByKeys.filter((k) => keys.includes(k));
 
         const metrics = [...new Set(base.map((e) => e.metric))].sort();
         const metricSel = el('select', {
@@ -256,22 +262,24 @@ export class BenchmarksPanel {
         this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Metrik'}), metricSel));
 
         if (keys.length > 0) {
-            const groupSel = el('select', {
-                class: 'rm-picker-select',
-                on: {change: (e) => {
-                    const v = (e.target as HTMLSelectElement).value;
-                    this.groupByKey = v === '' ? null : v;
+            // One checkbox per dimension key — check several to nest sub-groups
+            // (e.g. machine, then backend within each machine). Order always
+            // follows dimensionKeys()' natural order, not click order, so the
+            // hierarchy stays predictable regardless of which box you toggle.
+            const groupHost = el('div', {class: 'bm-group-toggles'});
+            for (const key of keys) {
+                const checkbox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
+                checkbox.checked = this.groupByKeys.includes(key);
+                checkbox.addEventListener('change', () => {
+                    this.groupByKeys = checkbox.checked
+                        ? keys.filter((k) => this.groupByKeys.includes(k) || k === key)
+                        : this.groupByKeys.filter((k) => k !== key);
                     this.collapsedGroups.clear();
                     this.render();
-                }}
-            }) as HTMLSelectElement;
-            groupSel.appendChild(el('option', {text: '— keine Gruppierung —', attrs: {value: ''}}));
-            for (const key of keys) {
-                const opt = el('option', {text: key, attrs: {value: key}}) as HTMLOptionElement;
-                if (key === this.groupByKey) opt.selected = true;
-                groupSel.appendChild(opt);
+                });
+                groupHost.appendChild(el('label', {class: 'bm-group-toggle'}, checkbox, el('span', {text: key})));
             }
-            this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Gruppieren nach'}), groupSel));
+            this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Gruppieren nach'}), groupHost));
         }
 
         for (const key of keys) {
@@ -534,12 +542,12 @@ export class BenchmarksPanel {
             computeWinners(visible, ['metric']).map((g) => g.entries[0]?.id).filter((id): id is string => id !== undefined)
         );
 
-        // groupKey's values become their own indented parent rows, so it's
-        // dropped from the per-entry dimension columns — showing "GB10/Spark"
-        // in both the group header AND every child row underneath it is
-        // redundant once the row is already nested under that header.
-        const groupKey = this.groupByKey !== null && keys.includes(this.groupByKey) ? this.groupByKey : null;
-        const rowKeys = groupKey === null ? keys : keys.filter((k) => k !== groupKey);
+        // Active group keys' values become their own indented parent rows, in
+        // order, so they're dropped from the per-entry dimension columns —
+        // showing "GB10/Spark" in both a group header AND every row nested
+        // under it is redundant once the row already sits under that header.
+        const groupKeys = this.groupByKeys.filter((k) => keys.includes(k));
+        const rowKeys = keys.filter((k) => !groupKeys.includes(k));
         const totalCols = rowKeys.length + 6; // metric, value, unit, recorded, notes, actions
 
         const table = el('table', {class: 'rm-table bm-table'});
@@ -554,56 +562,84 @@ export class BenchmarksPanel {
         )));
 
         const tbody = el('tbody');
-        const appendEntry = (entry: BenchmarkEntry, indented: boolean): void => {
-            tbody.appendChild(this.renderRow(entry, rowKeys, winnerIds.has(entry.id), indented));
-            if (this.editingId === entry.id) {
-                tbody.appendChild(el('tr', {},
-                    el('td', {attrs: {colspan: String(totalCols)}},
-                        this.renderEntryForm(entry, set, () => { this.editingId = null; this.render(); })
-                    )
-                ));
-            }
-        };
-
-        if (groupKey === null) {
-            for (const entry of this.sortEntries(visible)) {
-                appendEntry(entry, false);
-            }
-        } else {
-            const groups = new Map<string, BenchmarkEntry[]>();
-            for (const entry of this.sortEntries(visible)) {
-                const groupValue = entry.dimensions[groupKey] ?? '—';
-                const list = groups.get(groupValue) ?? [];
-                list.push(entry);
-                groups.set(groupValue, list);
-            }
-            for (const [groupValue, entries] of groups) {
-                const collapsed = this.collapsedGroups.has(groupValue);
-                tbody.appendChild(this.renderGroupRow(groupValue, entries.length, totalCols, collapsed));
-                if (!collapsed) {
-                    for (const entry of entries) {
-                        appendEntry(entry, true);
-                    }
-                }
-            }
-        }
+        this.renderGroupedRows(tbody, this.sortEntries(visible), groupKeys, rowKeys, winnerIds, totalCols, set, 0, '');
         table.appendChild(tbody);
         return el('div', {class: 'rm-scroll'}, table);
     }
 
-    /** Parent row for a grouped-by dimension value — click/caret toggles its children. */
-    private renderGroupRow(value: string, count: number, colSpan: number, collapsed: boolean): HTMLElement {
+    /**
+     * Recursively nests rows by `remainingGroupKeys`, one level of indented
+     * parent rows per key, then renders leaf entry rows at the bottom of the
+     * recursion. `path` is a composite id (e.g. "machine=GB10|backend=vLLM|")
+     * so collapse state can't collide between sibling branches that happen to
+     * share a value (two machines both having a "vLLM" backend, say).
+     */
+    private renderGroupedRows(
+        tbody: HTMLElement,
+        entries: readonly BenchmarkEntry[],
+        remainingGroupKeys: readonly string[],
+        rowKeys: readonly string[],
+        winnerIds: ReadonlySet<string>,
+        totalCols: number,
+        set: BenchmarkSet,
+        depth: number,
+        path: string
+    ): void {
+        const [key, ...restKeys] = remainingGroupKeys;
+        if (key === undefined) {
+            for (const entry of entries) {
+                tbody.appendChild(this.renderRow(entry, rowKeys, winnerIds.has(entry.id), depth));
+                if (this.editingId === entry.id) {
+                    tbody.appendChild(el('tr', {},
+                        el('td', {attrs: {colspan: String(totalCols)}},
+                            this.renderEntryForm(entry, set, () => { this.editingId = null; this.render(); })
+                        )
+                    ));
+                }
+            }
+            return;
+        }
+
+        const groups = new Map<string, BenchmarkEntry[]>();
+        for (const entry of entries) {
+            const groupValue = entry.dimensions[key] ?? '—';
+            const list = groups.get(groupValue) ?? [];
+            list.push(entry);
+            groups.set(groupValue, list);
+        }
+        for (const [groupValue, groupEntries] of groups) {
+            const groupPath = `${path}${key}=${groupValue}|`;
+            const collapsed = this.collapsedGroups.has(groupPath);
+            tbody.appendChild(this.renderGroupRow(key, groupValue, groupEntries.length, totalCols, collapsed, depth, groupPath));
+            if (!collapsed) {
+                this.renderGroupedRows(tbody, groupEntries, restKeys, rowKeys, winnerIds, totalCols, set, depth + 1, groupPath);
+            }
+        }
+    }
+
+    /** Parent row for a grouped-by dimension value at a given nesting depth — click/caret toggles its children. */
+    private renderGroupRow(
+        key: string,
+        value: string,
+        count: number,
+        colSpan: number,
+        collapsed: boolean,
+        depth: number,
+        path: string
+    ): HTMLElement {
         const toggle = (): void => {
-            if (this.collapsedGroups.has(value)) this.collapsedGroups.delete(value);
-            else this.collapsedGroups.add(value);
+            if (this.collapsedGroups.has(path)) this.collapsedGroups.delete(path);
+            else this.collapsedGroups.add(path);
             this.render();
         };
         return el('tr', {class: 'bm-group-row', on: {click: toggle}},
             el('td', {attrs: {colspan: String(colSpan)}},
                 el('div', {class: 'bm-group-head'},
+                    depth > 0 ? el('span', {class: 'bm-indent', style: {width: `${depth * 30}px`}}) : null,
                     el('span', {class: `rm-caret ${collapsed ? 'collapsed' : 'open'}`},
                         el('span', {class: 'rm-caret-tw', text: collapsed ? '▸' : '▾'})
                     ),
+                    el('span', {class: 'bm-group-key', text: key}),
                     el('span', {class: 'bm-group-label', text: value}),
                     el('span', {class: 'bm-group-count', text: String(count)})
                 )
@@ -611,17 +647,19 @@ export class BenchmarksPanel {
         );
     }
 
-    private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean, indented: boolean): HTMLElement {
+    private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean, depth: number): HTMLElement {
         // Explicit spacer span, prepended to whichever cell renders first — a
         // dimension column if any remain, otherwise the metric cell. Own
         // class/width (not RoadmapPanel's .rm-indent) — measured live in the
-        // browser: the 20px roadmap-style indent IS applied correctly (real
+        // browser: a bare 20px roadmap-style indent IS applied correctly (real
         // DOM offset, confirmed via getBoundingClientRect), but reads as
-        // basically invisible in this table — no caret/connector next to it
-        // the way roadmap rows have, so it needs to be wider and paired with
-        // a visible border-left guide (see .bm-child-row in Styles.css).
+        // basically invisible in this table without a caret/connector next to
+        // it the way roadmap rows have — paired with a visible border-left
+        // guide on the row instead (see .bm-child-row in Styles.css). Width
+        // scales with nesting depth so a leaf under two group levels sits
+        // further right than one under a single level.
         const makeIndent = (): HTMLElement | null =>
-            indented ? el('span', {class: 'bm-indent'}) : null;
+            depth > 0 ? el('span', {class: 'bm-indent', style: {width: `${depth * 30}px`}}) : null;
 
         const dimCells = keys.map((k, i) => {
             const value = entry.dimensions[k] ?? '—';
@@ -668,7 +706,7 @@ export class BenchmarksPanel {
                 el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
-        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', indented ? 'bm-child-row' : ''].filter(Boolean).join(' ');
+        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', depth > 0 ? 'bm-child-row' : ''].filter(Boolean).join(' ');
         return el('tr', {class: rowCls},
             ...dimCells,
             metricCell,
