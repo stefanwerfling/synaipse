@@ -7751,6 +7751,18 @@ button.typed-link-badge:hover {
 .bm-rank-list { list-style: decimal; margin: 4px 0 4px 22px; padding: 0; font-size: 12px; color: var(--text-2); }
 .bm-group-detail { padding: 0 8px; cursor: default; }
 
+/* Grouped table: a "Gruppieren nach" dimension's values become their own
+   parent rows (reuses .rm-caret from the roadmap table); entries under a
+   group are indented on their first cell instead of repeating the group's
+   value as its own column. */
+.bm-group-row { cursor: pointer; background: var(--bg-2); }
+.bm-group-row:hover td { background: var(--bg-3); }
+.bm-group-row td { padding: 7px 14px; border-bottom: 1px solid var(--border); }
+.bm-group-head { display: flex; align-items: center; gap: 8px; }
+.bm-group-label { font-weight: 640; font-size: 13px; }
+.bm-group-count { font-size: 11px; color: var(--text-2); background: var(--bg-1); border-radius: var(--r-pill); padding: 0 7px; line-height: 17px; }
+.bm-child-row td:first-child { padding-left: 30px; }
+
 .bm-chart-labels { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 
 @media (max-width: 760px) {

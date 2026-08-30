@@ -51,6 +51,9 @@ export class BenchmarksPanel {
     private editingId: string | null = null;
     private readonly expandedGroups = new Set<string>();
     private sort: {key: string; dir: 'asc' | 'desc'} = {key: 'value', dir: 'desc'};
+    /** Table grouping: which dimension key's values become indented parent rows. null = flat table. */
+    private groupByKey: string | null = null;
+    private readonly collapsedGroups = new Set<string>();
     private saving = false;
 
     public constructor(opts: BenchmarksPanelOptions = {}) {
@@ -171,6 +174,12 @@ export class BenchmarksPanel {
             console.error('failed to load benchmarks', e);
             this.set = {project: this.project, updatedAt: '', entries: []};
         }
+        // Default to grouping by the first dimension key this project uses —
+        // otherwise every entry lands flat with all dimensions as columns.
+        // Only set on a fresh load; re-renders after a mutation leave a
+        // user's explicit "no grouping" choice alone.
+        this.groupByKey = dimensionKeys(withoutDeletedEntries(this.set.entries))[0] ?? null;
+        this.collapsedGroups.clear();
         this.render();
     }
 
@@ -225,9 +234,12 @@ export class BenchmarksPanel {
         const base = this.showDeleted ? set.entries : withoutDeletedEntries(set.entries);
         const keys = dimensionKeys(base);
 
-        // Drop filter selections for keys that no longer exist (e.g. after a project switch).
+        // Drop filter/grouping selections for keys that no longer exist (e.g. after a project switch).
         for (const key of Object.keys(this.dimFilters)) {
             if (!keys.includes(key)) delete this.dimFilters[key];
+        }
+        if (this.groupByKey !== null && !keys.includes(this.groupByKey)) {
+            this.groupByKey = null;
         }
 
         const metrics = [...new Set(base.map((e) => e.metric))].sort();
@@ -242,6 +254,25 @@ export class BenchmarksPanel {
             metricSel.appendChild(opt);
         }
         this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Metrik'}), metricSel));
+
+        if (keys.length > 0) {
+            const groupSel = el('select', {
+                class: 'rm-picker-select',
+                on: {change: (e) => {
+                    const v = (e.target as HTMLSelectElement).value;
+                    this.groupByKey = v === '' ? null : v;
+                    this.collapsedGroups.clear();
+                    this.render();
+                }}
+            }) as HTMLSelectElement;
+            groupSel.appendChild(el('option', {text: '— keine Gruppierung —', attrs: {value: ''}}));
+            for (const key of keys) {
+                const opt = el('option', {text: key, attrs: {value: key}}) as HTMLOptionElement;
+                if (key === this.groupByKey) opt.selected = true;
+                groupSel.appendChild(opt);
+            }
+            this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Gruppieren nach'}), groupSel));
+        }
 
         for (const key of keys) {
             const values = [...new Set(base.map((e) => e.dimensions[key]).filter((v): v is string => v !== undefined))].sort();
@@ -503,9 +534,17 @@ export class BenchmarksPanel {
             computeWinners(visible, ['metric']).map((g) => g.entries[0]?.id).filter((id): id is string => id !== undefined)
         );
 
+        // groupKey's values become their own indented parent rows, so it's
+        // dropped from the per-entry dimension columns — showing "GB10/Spark"
+        // in both the group header AND every child row underneath it is
+        // redundant once the row is already nested under that header.
+        const groupKey = this.groupByKey !== null && keys.includes(this.groupByKey) ? this.groupByKey : null;
+        const rowKeys = groupKey === null ? keys : keys.filter((k) => k !== groupKey);
+        const totalCols = rowKeys.length + 6; // metric, value, unit, recorded, notes, actions
+
         const table = el('table', {class: 'rm-table bm-table'});
         table.appendChild(el('thead', {}, el('tr', {},
-            ...keys.map((k) => this.sortableHeader(k, k)),
+            ...rowKeys.map((k) => this.sortableHeader(k, k)),
             this.sortableHeader('Metrik', 'metric'),
             this.sortableHeader('Wert', 'value', 'r'),
             this.sortableHeader('Einheit', 'unit'),
@@ -515,21 +554,64 @@ export class BenchmarksPanel {
         )));
 
         const tbody = el('tbody');
-        for (const entry of this.sortEntries(visible)) {
-            tbody.appendChild(this.renderRow(entry, keys, winnerIds.has(entry.id)));
+        const appendEntry = (entry: BenchmarkEntry, indented: boolean): void => {
+            tbody.appendChild(this.renderRow(entry, rowKeys, winnerIds.has(entry.id), indented));
             if (this.editingId === entry.id) {
                 tbody.appendChild(el('tr', {},
-                    el('td', {attrs: {colspan: String(keys.length + 6)}},
+                    el('td', {attrs: {colspan: String(totalCols)}},
                         this.renderEntryForm(entry, set, () => { this.editingId = null; this.render(); })
                     )
                 ));
+            }
+        };
+
+        if (groupKey === null) {
+            for (const entry of this.sortEntries(visible)) {
+                appendEntry(entry, false);
+            }
+        } else {
+            const groups = new Map<string, BenchmarkEntry[]>();
+            for (const entry of this.sortEntries(visible)) {
+                const groupValue = entry.dimensions[groupKey] ?? '—';
+                const list = groups.get(groupValue) ?? [];
+                list.push(entry);
+                groups.set(groupValue, list);
+            }
+            for (const [groupValue, entries] of groups) {
+                const collapsed = this.collapsedGroups.has(groupValue);
+                tbody.appendChild(this.renderGroupRow(groupValue, entries.length, totalCols, collapsed));
+                if (!collapsed) {
+                    for (const entry of entries) {
+                        appendEntry(entry, true);
+                    }
+                }
             }
         }
         table.appendChild(tbody);
         return el('div', {class: 'rm-scroll'}, table);
     }
 
-    private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean): HTMLElement {
+    /** Parent row for a grouped-by dimension value — click/caret toggles its children. */
+    private renderGroupRow(value: string, count: number, colSpan: number, collapsed: boolean): HTMLElement {
+        const toggle = (): void => {
+            if (this.collapsedGroups.has(value)) this.collapsedGroups.delete(value);
+            else this.collapsedGroups.add(value);
+            this.render();
+        };
+        return el('tr', {class: 'bm-group-row', on: {click: toggle}},
+            el('td', {attrs: {colspan: String(colSpan)}},
+                el('div', {class: 'bm-group-head'},
+                    el('span', {class: `rm-caret ${collapsed ? 'collapsed' : 'open'}`},
+                        el('span', {class: 'rm-caret-tw', text: collapsed ? '▸' : '▾'})
+                    ),
+                    el('span', {class: 'bm-group-label', text: value}),
+                    el('span', {class: 'bm-group-count', text: String(count)})
+                )
+            )
+        );
+    }
+
+    private renderRow(entry: BenchmarkEntry, keys: readonly string[], isWinner: boolean, indented: boolean): HTMLElement {
         const dimCells = keys.map((k) => el('td', {text: entry.dimensions[k] ?? '—'}));
 
         const notes = el('div', {class: 'rm-notes'});
@@ -567,7 +649,7 @@ export class BenchmarksPanel {
                 el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
-        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : ''].filter(Boolean).join(' ');
+        const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', indented ? 'bm-child-row' : ''].filter(Boolean).join(' ');
         return el('tr', {class: rowCls},
             ...dimCells,
             el('td', {text: entry.metric}),
