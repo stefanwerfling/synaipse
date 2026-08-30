@@ -1,4 +1,4 @@
-import type {CanvasDocument, Frontmatter, Graph, Note, Roadmap, RoadmapSummary, SearchHit, SearchMode} from '@synaipse/core';
+import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Frontmatter, Graph, Note, Roadmap, RoadmapSummary, SearchHit, SearchMode} from '@synaipse/core';
 
 const json = async <T>(response: Response): Promise<T> => {
     if (!response.ok) {
@@ -110,6 +110,25 @@ export const api = {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(roadmap)
+        });
+        return json(response);
+    },
+    listBenchmarks: async (): Promise<BenchmarkSummary[]> => {
+        const {benchmarks} = await json<{benchmarks: BenchmarkSummary[]}>(await fetch('/api/benchmarks'));
+        return benchmarks;
+    },
+    getBenchmark: async (project: string): Promise<BenchmarkSet> => {
+        const url = new URL('/api/benchmark', window.location.origin);
+        url.searchParams.set('project', project);
+        return json(await fetch(url));
+    },
+    putBenchmark: async (project: string, set: BenchmarkSet): Promise<BenchmarkSet> => {
+        const url = new URL('/api/benchmark', window.location.origin);
+        url.searchParams.set('project', project);
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(set)
         });
         return json(response);
     },

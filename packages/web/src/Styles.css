@@ -7714,3 +7714,45 @@ button.typed-link-badge:hover {
     .rm-detail-box + .rm-detail-box { border-left: 0; border-top: 1px solid var(--border); }
 }
 @media (prefers-reduced-motion: reduce) { .rm-pulse::after { animation: none; } }
+
+/* Benchmarks panel — reuses .rm-panel/.rm-head/.rm-picker*/.rm-btn*/.rm-kpi*/
+   .rm-empty/.rm-scroll/.rm-notes/.rm-nchip/.rm-row-actions/.rm-icon/
+   .rm-edit-*/.rm-deleted-toggle and .activity-* chrome verbatim; only
+   genuinely new pieces (dynamic filters/form/table) get their own classes. */
+
+.bm-kpis { grid-template-columns: repeat(4, 1fr); }
+
+.bm-filters { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-bottom: var(--space-5); }
+.bm-filter { display: flex; flex-direction: column; gap: 4px; }
+
+.bm-content { display: flex; flex-direction: column; gap: var(--space-5); }
+.bm-add-row { display: flex; justify-content: flex-end; }
+
+.bm-form { border: 1px solid var(--border); border-radius: var(--r-4); background: var(--bg-1); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.bm-form-row { display: flex; flex-direction: column; gap: 6px; }
+.bm-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
+
+.bm-dim-rows { display: flex; flex-direction: column; gap: 6px; }
+.bm-dim-row { display: flex; gap: 6px; align-items: center; }
+.bm-dim-input {
+    flex: 1 1 0; min-width: 0; font: inherit; font-size: 13px;
+    background: var(--bg-0); color: var(--text-0); border: 1px solid var(--border); border-radius: var(--r-2); padding: 6px 8px;
+}
+.bm-dim-input:focus { outline: none; border-color: var(--accent); }
+
+/* Dynamic-column table: unlike .rm-table's fixed step-column widths, the
+   dimension columns here vary per project, so let the browser size them. */
+.bm-table { table-layout: auto; min-width: 0; }
+.bm-table thead th { cursor: pointer; user-select: none; }
+.bm-table thead th:hover { color: var(--text-0); }
+
+.bm-winner-badge { margin-right: 6px; }
+
+.bm-rank-list { list-style: decimal; margin: 4px 0 4px 22px; padding: 0; font-size: 12px; color: var(--text-2); }
+.bm-group-detail { padding: 0 8px; cursor: default; }
+
+.bm-chart-labels { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+
+@media (max-width: 760px) {
+    .bm-kpis { grid-template-columns: repeat(2, 1fr); }
+}
