@@ -4,7 +4,7 @@ import {stat} from 'node:fs/promises';
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 import type {Config, Frontmatter, ScheduleStore} from '@synaipse/core';
-import {parseCanvas, parseRoadmap} from '@synaipse/core';
+import {parseBenchmarkSet, parseCanvas, parseRoadmap} from '@synaipse/core';
 import type {ChatgptImportConversation, ChatSourceRef, ChatTurn, PrimerEntry, PrimerReason, PrimeResult, SynaipseService} from '@synaipse/service';
 import type {EventBroadcaster, SynaipseEvent} from './events.js';
  import type {JobManager, JobParams} from './jobs.js';
@@ -452,6 +452,54 @@ export const routes = (
                 const parsed = parseRoadmap(project, {roadmap: body});
                 const roadmap = parsed ?? {project, updatedAt: '', active: null, steps: []};
                 const saved = await service.writeRoadmap({...roadmap, project});
+                await jsonLarge(req, res, 200, saved);
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                const status = message.includes('invalid project') ? 400 : 500;
+                json(res, status, {error: message});
+            }
+            return;
+        }
+
+        methodNotAllowed(res);
+        return;
+    }
+
+    if (path === '/api/benchmarks') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        json(res, 200, {benchmarks: service.listBenchmarks()});
+        return;
+    }
+
+    if (path === '/api/benchmark') {
+        const project = url.searchParams.get('project');
+        if (project === null || project.length === 0) {
+            json(res, 400, {error: 'project query param required'});
+            return;
+        }
+
+        if (method === 'GET') {
+            try {
+                await jsonLarge(req, res, 200, service.readBenchmarks(project));
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                json(res, 400, {error: message});
+            }
+            return;
+        }
+
+        if (method === 'PUT') {
+            try {
+                const body = await readJson<{entries?: unknown}>(req);
+                // Re-parse through the defensive core parser so a malformed
+                // client payload drops bad entries instead of persisting them.
+                const parsed = parseBenchmarkSet(project, {benchmarks: body});
+                const set = parsed ?? {project, updatedAt: '', entries: []};
+                const saved = await service.writeBenchmarks({...set, project});
                 await jsonLarge(req, res, 200, saved);
             } catch (e) {
                 const message = e instanceof Error ? e.message : String(e);
