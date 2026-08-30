@@ -1,17 +1,25 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
-import type {Note, Roadmap, RoadmapStatus, RoadmapStep, SearchMode} from '@synaipse/core';
+import type {BenchmarkEntry, Note, Roadmap, RoadmapStatus, RoadmapStep, SearchMode} from '@synaipse/core';
 import {
     ROADMAP_STATUSES,
     appendActivity,
+    computeWinners,
+    dimensionKeys,
     extractTypedLinks,
+    findEntry,
     findStep,
+    generateEntryId,
     moveStep,
     parseRoadmap,
     reconcilePlan,
     setActive,
+    setEntryDeleted,
     setStepDeleted,
     summarize,
-    upsertStep
+    summarizeBenchmarks,
+    upsertEntry,
+    upsertStep,
+    withoutDeletedEntries
 } from '@synaipse/core';
 import {SynaipseService, getAuditTokenLabel, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
@@ -229,6 +237,10 @@ const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
     synaipse_roadmap_rollback:    {mode: 'write'},
     synaipse_roadmap_get:         {mode: 'read'},
     synaipse_roadmap_history:     {mode: 'read'},
+    // Benchmark tools scope on ctx.project too, same reasoning as roadmap.
+    synaipse_benchmark_add:       {mode: 'write'},
+    synaipse_benchmark_update:    {mode: 'write'},
+    synaipse_benchmark_list:      {mode: 'read'},
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
     synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
     synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
@@ -295,6 +307,65 @@ const roadmapResult = (roadmap: Roadmap): unknown => ({
     active: roadmap.active,
     steps: roadmap.steps
 });
+
+// --- Benchmark helpers -------------------------------------------------------
+
+/** Resolve the active project or throw a helpful error for benchmark tools. */
+const requireBenchmarkProject = (service: SynaipseService, ctx?: ToolContext): string => {
+    const project = service.getProject(ctx?.project);
+    if (project === null) {
+        throw new Error(
+            'No project context set. Benchmark tools operate per project — set one via the /mcp/<project> URL segment or the x-synaipse-project header.'
+        );
+    }
+    return project;
+};
+
+const asDimensions = (value: unknown, field: string): Record<string, string> => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`Missing object argument: ${field}`);
+    }
+    const out: Record<string, string> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof v === 'string' && v.length > 0) {
+            out[key] = v;
+        }
+    }
+    if (Object.keys(out).length === 0) {
+        throw new Error(`${field} must have at least one key.`);
+    }
+    return out;
+};
+
+const asRequiredNumber = (value: unknown, field: string): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`Missing number argument: ${field}`);
+    }
+    return value;
+};
+
+const asRequiredBoolean = (value: unknown, field: string): boolean => {
+    if (typeof value !== 'boolean') {
+        throw new Error(`Missing boolean argument: ${field}`);
+    }
+    return value;
+};
+
+/** Apply a benchmark_update field patch to an entry, returning a new entry. */
+const patchBenchmarkEntry = (entry: BenchmarkEntry, args: Record<string, unknown>): BenchmarkEntry => {
+    const next: BenchmarkEntry = {...entry};
+    if (args.dimensions !== undefined) next.dimensions = asDimensions(args.dimensions, 'dimensions');
+    if (typeof args.metric === 'string' && args.metric.length > 0) next.metric = args.metric;
+    if (typeof args.value === 'number' && Number.isFinite(args.value)) next.value = args.value;
+    if (typeof args.unit === 'string' && args.unit.length > 0) next.unit = args.unit;
+    if (typeof args.higherIsBetter === 'boolean') next.higherIsBetter = args.higherIsBetter;
+    if (typeof args.context === 'string') next.context = args.context;
+    if (Array.isArray(args.noteLinks)) {
+        next.noteLinks = args.noteLinks.filter((n): n is string => typeof n === 'string');
+    }
+    if (typeof args.recordedAt === 'string' && args.recordedAt.length > 0) next.recordedAt = args.recordedAt;
+    return next;
+};
 
 export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl([
     {
@@ -1257,6 +1328,153 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             return {
                 response: ok({project, restoredFrom: commitSha, ...(roadmapResult(saved) as object)}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
+            };
+        }
+    },
+    // ─── Benchmarks (per-project speed/technique comparison) ───────────────
+    {
+        definition: {
+            name: 'synaipse_benchmark_add',
+            description: 'Log a benchmark result for the active project: a speed/quality number tagged with an open set of dimensions (e.g. {machine, backend, technique} for an inference-engine project, or {language, algorithm, input_size} for another — the project decides its own vocabulary). Before inventing new dimension key names, call synaipse_benchmark_list to see what keys this project already uses and stay consistent. This is additive alongside your usual narrative research note, not a replacement — link back to it via noteLinks. Writes Memory/<project>/_benchmarks.md.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    dimensions: {
+                        type: 'object',
+                        additionalProperties: {type: 'string'},
+                        description: 'Open key/value tags describing what was measured, e.g. {"machine":"GB10","backend":"vLLM","technique":"NVFP4"}. At least one key required.'
+                    },
+                    metric: {type: 'string', description: 'What was measured, e.g. "decode_tok_s", "prefill_ms".'},
+                    value: {type: 'number'},
+                    unit: {type: 'string', description: 'e.g. "tok/s", "ms".'},
+                    higherIsBetter: {type: 'boolean', description: 'Required — never inferred from the metric name.'},
+                    context: {type: 'string', description: 'Free text, e.g. "single-user, 2316-tok prompt".'},
+                    noteLinks: {type: 'array', items: {type: 'string'}, description: 'Wikilink targets to the narrative research note this result came from.'},
+                    recordedAt: {type: 'string', description: 'ISO timestamp. Defaults to now.'}
+                },
+                required: ['dimensions', 'metric', 'value', 'unit', 'higherIsBetter']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireBenchmarkProject(service, ctx);
+            const current = service.readBenchmarks(project);
+
+            const entry: BenchmarkEntry = {
+                id: generateEntryId(),
+                dimensions: asDimensions(args.dimensions, 'dimensions'),
+                metric: asString(args.metric, 'metric'),
+                value: asRequiredNumber(args.value, 'value'),
+                unit: asString(args.unit, 'unit'),
+                higherIsBetter: asRequiredBoolean(args.higherIsBetter, 'higherIsBetter'),
+                recordedAt: typeof args.recordedAt === 'string' && args.recordedAt.length > 0
+                    ? args.recordedAt
+                    : new Date().toISOString()
+            };
+            if (typeof args.context === 'string' && args.context.length > 0) entry.context = args.context;
+            if (Array.isArray(args.noteLinks)) {
+                const noteLinks = args.noteLinks.filter((n): n is string => typeof n === 'string');
+                if (noteLinks.length > 0) entry.noteLinks = noteLinks;
+            }
+
+            const saved = await service.writeBenchmarks({...current, entries: upsertEntry(current.entries, entry)});
+            return {
+                response: ok({project, entry, summary: summarizeBenchmarks(saved)}),
+                event: {kind: 'write', touched: [`Memory/${project}/_benchmarks.md`]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_benchmark_list',
+            description: 'List benchmark results for the active project, optionally filtered by metric and/or dimensions (e.g. {"machine":"GB10"} to see only that machine\'s entries). Returns the filtered entries, a per-metric leaderboard (or scoped by groupBy, e.g. ["metric","machine"] to rank within each machine), the union of dimension keys this project actually uses (so you know its vocabulary before adding new entries), and a summary. Call this before synaipse_benchmark_add to reuse existing dimension key names.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    metric: {type: 'string', description: 'Only entries with this exact metric.'},
+                    dimensions: {
+                        type: 'object',
+                        additionalProperties: {type: 'string'},
+                        description: 'Only entries matching ALL given key/value pairs.'
+                    },
+                    includeDeleted: {type: 'boolean', description: 'Include soft-deleted entries (default false).'},
+                    groupBy: {
+                        type: 'array',
+                        items: {type: 'string'},
+                        description: 'Dimension keys (plus implicit "metric") to rank within. Default ["metric"] — a pure per-metric leaderboard across everything.'
+                    }
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireBenchmarkProject(service, ctx);
+            const current = service.readBenchmarks(project);
+            const includeDeleted = args.includeDeleted === true;
+
+            let entries = includeDeleted ? current.entries : withoutDeletedEntries(current.entries);
+
+            if (typeof args.metric === 'string' && args.metric.length > 0) {
+                entries = entries.filter((e) => e.metric === args.metric);
+            }
+            if (args.dimensions !== null && typeof args.dimensions === 'object' && !Array.isArray(args.dimensions)) {
+                const filter = Object.entries(args.dimensions as Record<string, unknown>)
+                    .filter((pair): pair is [string, string] => typeof pair[1] === 'string');
+                entries = entries.filter((e) => filter.every(([key, value]) => e.dimensions[key] === value));
+            }
+
+            const groupBy = Array.isArray(args.groupBy)
+                ? args.groupBy.filter((g): g is string => typeof g === 'string')
+                : [];
+
+            return {
+                response: ok({
+                    project,
+                    entries,
+                    winners: computeWinners(entries, groupBy.length > 0 ? groupBy : ['metric']),
+                    dimensionKeys: dimensionKeys(entries),
+                    summary: summarizeBenchmarks({...current, entries})
+                }),
+                event: {kind: 'list', touched: []}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_benchmark_update',
+            description: 'Patch a single benchmark entry by id: correct a value, add missing dimensions/context/noteLinks, or soft-delete/restore it. Only the fields you pass change. Pass deleted:true to hide a bad entry (reversible via deleted:false) — entries are never hard-removed.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    id: {type: 'string', description: 'Id of the entry to update.'},
+                    dimensions: {type: 'object', additionalProperties: {type: 'string'}, description: 'Replaces the whole dimensions object when passed.'},
+                    metric: {type: 'string'},
+                    value: {type: 'number'},
+                    unit: {type: 'string'},
+                    higherIsBetter: {type: 'boolean'},
+                    context: {type: 'string'},
+                    noteLinks: {type: 'array', items: {type: 'string'}},
+                    recordedAt: {type: 'string'},
+                    deleted: {type: 'boolean', description: 'Soft-delete (true) or restore (false) this entry.'}
+                },
+                required: ['id']
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = requireBenchmarkProject(service, ctx);
+            const id = asString(args.id, 'id');
+            const current = service.readBenchmarks(project);
+            const existing = findEntry(current.entries, id);
+            if (existing === null) {
+                throw new Error(`Benchmark entry "${id}" not found in the ${project} benchmark set.`);
+            }
+            const patched = patchBenchmarkEntry(existing, args);
+            let nextEntries = upsertEntry(current.entries, patched);
+            if (typeof args.deleted === 'boolean') {
+                nextEntries = setEntryDeleted(nextEntries, id, args.deleted);
+            }
+            const saved = await service.writeBenchmarks({...current, entries: nextEntries});
+            return {
+                response: ok({project, entry: findEntry(saved.entries, id), summary: summarizeBenchmarks(saved)}),
+                event: {kind: 'write', touched: [`Memory/${project}/_benchmarks.md`]}
             };
         }
     }
