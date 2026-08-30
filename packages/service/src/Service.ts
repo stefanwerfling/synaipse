@@ -1,9 +1,16 @@
-import type {CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
+import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
 import {listRoadmapSummaries, normalizeRoadmap, roadmapFromNote, roadmapPathFor, roadmapWriteInput} from './Roadmap.js';
+import {
+    benchmarkPathFor,
+    benchmarkSetFromNote,
+    benchmarkWriteInput,
+    listBenchmarkSummaries,
+    normalizeBenchmarks
+} from './Benchmark.js';
 import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit';
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource, type SummarizeEvent} from './Chat.js';
 import {type WriteAssetResult} from './Assets.js';
@@ -2265,6 +2272,36 @@ export class SynaipseService {
             throw new Error(`commit ${commitSha.slice(0, 8)} has no valid roadmap for project "${project}"`);
         }
         return this.writeRoadmap({...roadmap, project});
+    }
+
+    // --- Benchmarks (per-project, vault-native markdown) ---------------------
+
+    /** Summaries of every project's benchmark set in the vault (for the list view). */
+    public listBenchmarks(): BenchmarkSummary[] {
+        return listBenchmarkSummaries(this.notes.list());
+    }
+
+    /**
+     * Read a project's benchmark set. Returns an empty set (no entries) when
+     * the `Memory/<project>/_benchmarks.md` note does not exist yet.
+     */
+    public readBenchmarks(project: string): BenchmarkSet {
+        const note = this.notes.tryGet(benchmarkPathFor(project));
+        return benchmarkSetFromNote(project, note, new Date().toISOString());
+    }
+
+    /**
+     * Persist a benchmark set: normalize it (timestamp only — no roll-up/
+     * gating like roadmap), then write `Memory/<project>/_benchmarks.md`
+     * through the unscoped note path so it is indexed, versioned and
+     * searchable. The frontmatter carries the entry list; the body is
+     * auto-rendered.
+     */
+    public async writeBenchmarks(set: BenchmarkSet): Promise<BenchmarkSet> {
+        const normalized = normalizeBenchmarks(set, new Date().toISOString());
+        const input = benchmarkWriteInput(normalized);
+        await this.writeNoteUnscoped(input as NoteWriteInput, 'benchmark');
+        return normalized;
     }
 
     public tags(): Map<string, NoteId[]> {

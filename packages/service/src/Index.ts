@@ -33,5 +33,12 @@ export type {
 export {findDecayCandidates, archivePathFor} from './MemoryDecay.js';
 export type {DecayCandidate, DecayOptions} from './MemoryDecay.js';
 export {roadmapPathFor, projectFromRoadmapPath, roadmapFromNote, emptyRoadmap, ROADMAP_FILENAME} from './Roadmap.js';
+export {
+    benchmarkPathFor,
+    projectFromBenchmarkPath,
+    benchmarkSetFromNote,
+    emptyBenchmarkSet,
+    BENCHMARK_FILENAME
+} from './Benchmark.js';
 export {ConsentStore} from './ConsentStore.js';
 export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';
