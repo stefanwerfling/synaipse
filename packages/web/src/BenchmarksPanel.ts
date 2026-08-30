@@ -439,6 +439,20 @@ export class BenchmarksPanel {
         const section = el('section', {class: 'activity-section'});
         section.appendChild(el('h3', {class: 'activity-section-title', text: 'Vergleich'}));
 
+        // No metric picked: show every metric's comparison at once (small
+        // multiples) instead of forcing a pick-one-metric-first empty state
+        // — that's the overview a user actually wants before drilling in.
+        if (this.metricFilter === '') {
+            section.appendChild(this.renderAllMetricsOverview(visible));
+            return section;
+        }
+
+        const items = visible.filter((e) => e.metric === this.metricFilter);
+        if (items.length === 0) {
+            section.appendChild(el('div', {class: 'activity-empty', text: 'keine Daten für diese Metrik'}));
+            return section;
+        }
+
         const views: ReadonlyArray<{id: 'bar' | 'bar-h' | 'trend'; label: string}> = [
             {id: 'bar', label: 'Balken'},
             {id: 'bar-h', label: 'Balken (horizontal)'},
@@ -454,17 +468,6 @@ export class BenchmarksPanel {
             }));
         }
         section.appendChild(tabs);
-
-        if (this.metricFilter === '') {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'Metrik oben wählen, um ein Diagramm zu sehen — Werte unterschiedlicher Metriken sind nicht vergleichbar.'}));
-            return section;
-        }
-
-        const items = visible.filter((e) => e.metric === this.metricFilter);
-        if (items.length === 0) {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'keine Daten für diese Metrik'}));
-            return section;
-        }
 
         // Label bars/points by whichever dimensions AREN'T already pinned by
         // a filter — that's the axis actually being compared (e.g. backend,
@@ -487,6 +490,43 @@ export class BenchmarksPanel {
                 : this.renderBarChart(sorted, labelFor)
         );
         return section;
+    }
+
+    /**
+     * Default "Vergleich" view when no metric is picked: one compact
+     * horizontal-bar comparison per metric, side by side, so you can scan
+     * every comparison at a glance instead of picking metrics one at a time.
+     * Each card has its own scale (values across metrics aren't comparable —
+     * tok/s and ms/tok can't share an axis), same rule as the single view.
+     */
+    private renderAllMetricsOverview(visible: BenchmarkEntry[]): HTMLElement {
+        const activeDimKeys = new Set(Object.keys(this.dimFilters).filter((k) => this.dimFilters[k] !== ''));
+        const metrics = [...new Set(visible.map((e) => e.metric))].sort();
+
+        if (metrics.length === 0) {
+            return el('div', {class: 'activity-empty', text: 'keine Daten'});
+        }
+
+        const grid = el('div', {class: 'bm-overview-grid'});
+        for (const metric of metrics) {
+            const items = visible.filter((e) => e.metric === metric);
+            const higherIsBetter = items[0]?.higherIsBetter ?? true;
+            const sorted = [...items].sort((a, b) => higherIsBetter ? b.value - a.value : a.value - b.value);
+            const labelKeys = dimensionKeys(sorted).filter((k) => !activeDimKeys.has(k));
+            const labelFor = (e: BenchmarkEntry): string =>
+                labelKeys.map((k) => e.dimensions[k]).filter((v): v is string => v !== undefined).join(' / ') || e.metric;
+
+            const card = el('div', {
+                class: 'bm-overview-card',
+                attrs: {role: 'button', title: 'Klicken, um diese Metrik einzeln zu betrachten'},
+                on: {click: () => { this.metricFilter = metric; this.render(); }}
+            },
+                el('div', {class: 'bm-overview-title', text: metric}),
+                this.renderHorizontalBarChart(sorted, labelFor)
+            );
+            grid.appendChild(card);
+        }
+        return grid;
     }
 
     private renderBarChart(sorted: BenchmarkEntry[], labelFor: (e: BenchmarkEntry) => string): HTMLElement {
