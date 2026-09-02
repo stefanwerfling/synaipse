@@ -3,6 +3,7 @@ import type {BenchmarkEntry, Note, Roadmap, RoadmapStatus, RoadmapStep, SearchMo
 import {
     ROADMAP_STATUSES,
     appendActivity,
+    canonicalNoteLink,
     computeWinners,
     dimensionKeys,
     extractTypedLinks,
@@ -12,6 +13,7 @@ import {
     moveStep,
     parseRoadmap,
     reconcilePlan,
+    resolveNoteRefTarget,
     setActive,
     setEntryDeleted,
     setStepDeleted,
@@ -276,6 +278,34 @@ const requireRoadmapProject = (service: SynaipseService, ctx?: ToolContext): str
 
 const isRoadmapStatus = (value: unknown): value is RoadmapStatus =>
     typeof value === 'string' && (ROADMAP_STATUSES as readonly string[]).includes(value);
+
+/**
+ * Resolve free-form note references (titles / paths / ids) against the vault to
+ * their canonical wikilink form, so a step/entry never stores a link that
+ * points at no note. Refs that resolve to nothing are returned in `unresolved`
+ * — callers reject the write instead of persisting a dead link.
+ */
+const resolveNoteLinks = (
+    service: SynaipseService,
+    refs: readonly string[]
+): {resolved: string[]; unresolved: string[]} => {
+    const targets = service.listNotes().map((n) => ({
+        id: n.id,
+        title: n.title,
+        aliases: Array.isArray(n.frontmatter.aliases) ? n.frontmatter.aliases : []
+    }));
+    const resolved: string[] = [];
+    const unresolved: string[] = [];
+    for (const ref of refs) {
+        const target = resolveNoteRefTarget(ref, targets);
+        if (target === null) {
+            unresolved.push(ref);
+        } else {
+            resolved.push(canonicalNoteLink(target));
+        }
+    }
+    return {resolved, unresolved};
+};
 
 /** Apply an update_step field patch to a step, returning a new step. */
 const patchStep = (step: RoadmapStep, args: Record<string, unknown>): RoadmapStep => {
@@ -1254,12 +1284,12 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
     {
         definition: {
             name: 'synaipse_roadmap_link_note',
-            description: 'Attach note links to a roadmap step. Pass note titles or vault paths — they are stored on the step and rendered as [[wikilinks]] in the roadmap body, so backlinks and graph edges work. Idempotent: already-linked notes are skipped.',
+            description: 'Attach note links to a roadmap step. Pass note titles, aliases, vault paths or ids — each is resolved against the vault to an EXISTING note and stored in its canonical wikilink form, so backlinks and graph edges work. References that match no note are REJECTED (the whole call fails, naming the offenders) so a step never accumulates dead links. Idempotent: already-linked notes are skipped.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     stepId: {type: 'string', description: 'Step to link notes to.'},
-                    notes: {type: 'array', items: {type: 'string'}, description: 'Note titles or paths to link (become [[Title]]).'}
+                    notes: {type: 'array', items: {type: 'string'}, description: 'Note titles, aliases, paths or ids to link. Must resolve to existing notes; unresolvable refs are rejected.'}
                 },
                 required: ['stepId', 'notes']
             }
@@ -1275,15 +1305,23 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             if (existing === null) {
                 throw new Error(`Step "${stepId}" not found in the ${project} roadmap.`);
             }
+            const {resolved, unresolved} = resolveNoteLinks(service, notes);
+            if (unresolved.length > 0) {
+                throw new Error(
+                    `These note references resolve to no existing note: ${unresolved.map((r) => `"${r}"`).join(', ')}. ` +
+                        'Link a note by its exact title, an alias, or its vault path (e.g. Memory/<project>/note.md). ' +
+                        'Nothing was linked.'
+                );
+            }
             const have = new Set(existing.noteLinks ?? []);
-            const added = notes.filter((n) => !have.has(n));
+            const added = resolved.filter((n) => !have.has(n));
             const merged: RoadmapStep = {...existing, noteLinks: [...(existing.noteLinks ?? []), ...added]};
             const logged = added.length > 0
                 ? appendActivity(merged, {at: new Date().toISOString(), who: roadmapActor(), what: `linked ${added.join(', ')}`})
                 : merged;
             await service.writeRoadmap({...current, steps: upsertStep(current.steps, logged)});
             return {
-                response: ok({project, stepId, added, skipped: notes.filter((n) => have.has(n))}),
+                response: ok({project, stepId, added, skipped: resolved.filter((n) => have.has(n))}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }

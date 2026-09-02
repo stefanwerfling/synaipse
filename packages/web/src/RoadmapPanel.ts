@@ -6,6 +6,12 @@ import {clear, el} from './Dom.js';
 export interface RoadmapPanelOptions {
     /** Open a linked note in the Notes tab. */
     onOpenNote?: (noteId: string) => void;
+    /**
+     * Resolve a user-entered note reference (title / alias / path / id) to the
+     * canonical string to store, or null when it matches no note. Lets the
+     * panel reject dead links at creation time instead of persisting them.
+     */
+    resolveNoteLink?: (ref: string) => string | null;
 }
 
 const STATUS_ORDER: RoadmapStatus[] = [
@@ -775,13 +781,23 @@ export class RoadmapPanel {
     }
 
     private async linkNote(id: string): Promise<void> {
-        const target = window.prompt('Notiz-Titel oder Pfad verlinken:', '')?.trim();
-        if (!target) return;
+        const raw = window.prompt('Notiz-Titel, Alias oder Pfad verlinken:', '')?.trim();
+        if (!raw) return;
+        // Resolve to an existing note before storing, so no dead links are created.
+        const resolve = this.opts.resolveNoteLink;
+        const canonical = resolve ? resolve(raw) : raw;
+        if (canonical === null) {
+            window.alert(
+                `Keine Notiz gefunden für „${raw}". Verlinke sie mit ihrem exakten Titel, einem Alias ` +
+                    'oder ihrem Pfad (z. B. Memory/projekt/notiz.md). Es wurde nichts verlinkt.'
+            );
+            return;
+        }
         await this.mutate((rm) => {
             const s = findStepLocal(rm.steps, id);
             if (!s) return;
             const have = new Set(s.noteLinks ?? []);
-            if (!have.has(target)) s.noteLinks = [...(s.noteLinks ?? []), target];
+            if (!have.has(canonical)) s.noteLinks = [...(s.noteLinks ?? []), canonical];
         });
     }
 

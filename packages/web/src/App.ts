@@ -1,4 +1,5 @@
 import type {Graph} from '@synaipse/core';
+import {resolveNoteRef as resolveNoteRefCore, resolveNoteRefTarget as resolveNoteRefTargetCore, canonicalNoteLink} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
 import {CanvasPanel} from './CanvasPanel.js';
@@ -17,7 +18,6 @@ import {ImportDialog} from './ImportDialog.js';
 import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
-import {buildWikilinkResolver} from './Wikilinks.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {Search} from './Search.js';
 import {Settings} from './Settings.js';
@@ -174,6 +174,10 @@ export class App {
                 }
                 this.notesPanel.openNote(id);
                 void this.switchTab('notes');
+            },
+            resolveNoteLink: (ref) => {
+                const target = resolveNoteRefTargetCore(ref, this.notes);
+                return target === null ? null : canonicalNoteLink(target);
             }
         });
 
@@ -714,19 +718,7 @@ export class App {
      * step linked by `[[Title]]` opens the same note the graph/backlinks use.
      */
     private resolveNoteRef(ref: string): string | null {
-        const trimmed = ref.trim();
-        if (trimmed.length === 0) {
-            return null;
-        }
-        if (this.notes.some((n) => n.id === trimmed)) {
-            return trimmed;
-        }
-        const withMd = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
-        const byPath = this.notes.find((n) => n.id === withMd || n.id.endsWith(`/${withMd}`));
-        if (byPath !== undefined) {
-            return byPath.id;
-        }
-        return buildWikilinkResolver(this.notes)(trimmed) ?? null;
+        return resolveNoteRefCore(ref, this.notes);
     }
 
     private async showActivity(): Promise<void> {

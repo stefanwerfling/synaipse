@@ -6,6 +6,7 @@ export * from './Adapter.js';
 export * from './Canvas.js';
 export * from './Chat.js';
 export * from './TypedLinks.js';
+export * from './NoteRef.js';
 export * from './Roadmap.js';
 export * from './Benchmark.js';
 

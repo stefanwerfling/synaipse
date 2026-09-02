@@ -234,13 +234,52 @@ describe('synaipse_roadmap_set_active', () => {
 });
 
 describe('synaipse_roadmap_link_note', () => {
-    it('links notes idempotently', async () => {
+    const seedNotes = async () => {
+        await call('synaipse_write_note', {
+            path: 'Memory/proj/decisions/adr-x.md',
+            content: 'x',
+            frontmatter: {title: 'ADR-x'}
+        });
+        await call('synaipse_write_note', {
+            path: 'Memory/proj/decisions/adr-y.md',
+            content: 'y',
+            frontmatter: {title: 'ADR-y'}
+        });
+        await call('synaipse_write_note', {
+            path: 'Memory/proj/decisions/adr-z.md',
+            content: 'z',
+            frontmatter: {title: 'ADR-z'}
+        });
+    };
+
+    it('resolves refs to canonical titles and links idempotently', async () => {
+        await seedNotes();
         await call('synaipse_roadmap_plan', {steps: [{id: '1', title: 'A', status: 'planned'}]});
-        let payload = parse(await call('synaipse_roadmap_link_note', {stepId: '1', notes: ['ADR-x', 'ADR-y']}));
+        // Link one by title and one by path — both stored canonically as the title.
+        let payload = parse(
+            await call('synaipse_roadmap_link_note', {
+                stepId: '1',
+                notes: ['ADR-x', 'Memory/proj/decisions/adr-y.md']
+            })
+        );
         expect(payload.added).toEqual(['ADR-x', 'ADR-y']);
-        payload = parse(await call('synaipse_roadmap_link_note', {stepId: '1', notes: ['ADR-x', 'ADR-z']}));
+        // Re-linking the same notes (via different ref forms) is a no-op.
+        payload = parse(
+            await call('synaipse_roadmap_link_note', {stepId: '1', notes: ['adr-x', 'ADR-z']})
+        );
         expect(payload.added).toEqual(['ADR-z']);
         expect(payload.skipped).toEqual(['ADR-x']);
+    });
+
+    it('rejects the whole call when any ref resolves to no note', async () => {
+        await seedNotes();
+        await call('synaipse_roadmap_plan', {steps: [{id: '1', title: 'A', status: 'planned'}]});
+        await expect(
+            call('synaipse_roadmap_link_note', {stepId: '1', notes: ['ADR-x', 'project_phantom_slug']})
+        ).rejects.toThrow(/project_phantom_slug/);
+        // Nothing was linked — not even the valid ref.
+        const got = parse(await call('synaipse_roadmap_get', {}));
+        expect(got.steps.find((s: any) => s.id === '1').noteLinks ?? []).toEqual([]);
     });
 });
 
