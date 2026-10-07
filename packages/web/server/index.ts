@@ -5,22 +5,6 @@ import http from 'node:http';
 import {URL} from 'node:url';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
-import type {AccountStore, ScheduleStore, UserStore} from '@synaipse/core';
-import {NoopAssetStore, type ServiceOverrides} from '@synaipse/service';
-import {CachedUserStore} from '@synaipse/mcp-server';
-import {InMemorySessionStore} from './sessions.js';
-import {LoginRateLimit} from './login-rate-limit.js';
-import type {AuthContext} from './auth-routes.js';
-
-const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
-
-const resolveAuthCacheTtlMs = (): number => {
-    const raw = process.env.SYNAIPSE_AUTH_CACHE_TTL_MS;
-    if (raw === undefined || raw.trim() === '') return DEFAULT_AUTH_CACHE_TTL_MS;
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AUTH_CACHE_TTL_MS;
-    return parsed;
-};
 
 const STATIC_MIME: Readonly<Record<string, string>> = {
     '.html': 'text/html; charset=utf-8',
@@ -91,142 +75,18 @@ const repoRoot = path.resolve(here, '..', '..', '..', '..');
 process.chdir(repoRoot);
 dotenvConfig();
 
-const {loadConfigFromEnv} = await import('@synaipse/core');
-const {SynaipseService} = await import('@synaipse/service');
-const {buildMcpHttpHandler} = await import('@synaipse/mcp-server');
-const {NoopHistory} = await import('@synaipse/vault');
-const {routes} = await import('./routes.js');
-const {EventBroadcaster} = await import('./events.js');
-const {JobManager} = await import('./jobs.js');
-const {LocalScheduleStore} = await import('./local-schedule-store.js');
-const {Scheduler} = await import('./scheduler.js');
-
-const config = loadConfigFromEnv();
-
-const MCP_BASE_PATH = (process.env.SYNAIPSE_MCP_PATH ?? '/mcp').replace(/\/+$/, '') || '/mcp';
-
-interface OverridesResult {
-    overrides: ServiceOverrides;
-    userStore: UserStore | null;
-    accountStore: AccountStore | null;
-    scheduleStore: ScheduleStore | null;
-    close: () => Promise<void>;
-}
-
-const buildOverrides = async (): Promise<OverridesResult> => {
-    if (config.mode !== 'server') {
-        return {
-            overrides: {},
-            userStore: null,
-            accountStore: null,
-            scheduleStore: null,
-            close: () => Promise.resolve()
-        };
-    }
-
-    if (config.mariadb === undefined) {
-        throw new Error('config.mode=server requires config.mariadb — check loadConfigFromEnv');
-    }
-
-    const {createServerAdapters} = await import('@synaipse/server-storage');
-    const bundle = await createServerAdapters(config.mariadb);
-
-    const cacheTtl = resolveAuthCacheTtlMs();
-    const userStore: UserStore = cacheTtl > 0
-        ? new CachedUserStore(bundle.users, cacheTtl)
-        : bundle.users;
-
-    return {
-        overrides: {
-            notes: bundle.notes,
-            chats: bundle.chats,
-            history: new NoopHistory(),
-            assetStore: new NoopAssetStore(),
-            skipWatcher: true
-        },
-        userStore,
-        accountStore: bundle.accounts,
-        scheduleStore: bundle.schedules,
-        close: () => bundle.close()
-    };
-};
-
-const resolveSecureCookie = (): boolean => {
-    const raw = process.env.SYNAIPSE_COOKIE_SECURE;
-    if (raw === undefined) return false;
-    const lower = raw.trim().toLowerCase();
-    return lower === '1' || lower === 'true' || lower === 'yes';
-};
-
 const main = async (): Promise<void> => {
-     const {overrides, userStore, accountStore, scheduleStore: mariaScheduleStore, close: closeAdapters} = await buildOverrides();
-    if (config.mode === 'server') {
-        const cacheTtl = resolveAuthCacheTtlMs();
-        const cacheNote = cacheTtl > 0 ? `auth-cache TTL=${cacheTtl}ms` : 'auth-cache OFF';
-        process.stdout.write(`[synaipse-web-api] server-mode: MariaDB-backed adapters wired in (${cacheNote})\n`);
-        if (config.server.tokens !== undefined && config.server.tokens.length > 0) {
-            process.stdout.write(
-                '[synaipse-web-api] WARN: config.server.tokens is set but mode=server — '
-                + 'yaml tokens are ignored. Use `npm run user create` or `npm run user import-yaml` to populate the users table.\n'
-            );
-        }
+    // All service/routes/MCP wiring now lives in the side-effect-free
+    // embed factory so an in-process host (pkgstudio) can reuse it; here
+    // we only add the HTTP transport, static serving and signal handling.
+    const {createSynaipseEmbed} = await import('./embed.js');
+    const embed = await createSynaipseEmbed();
+
+    const {apiHandle, mcpHandler, mcpBasePath} = embed;
+
+    if (process.env.SYNAIPSE_MODE === 'server') {
+        process.stdout.write('[synaipse-web-api] server-mode active\n');
     }
-
-    let auth: AuthContext | null = null;
-    if (config.mode === 'server' && accountStore !== null) {
-        auth = {
-            sessions: new InMemorySessionStore(),
-            accounts: accountStore,
-            rateLimit: new LoginRateLimit(),
-            secureCookie: resolveSecureCookie()
-        };
-        process.stdout.write(
-            `[synaipse-web-api] auth: cookie-session gate ON (Secure=${auth.secureCookie}). `
-            + 'Bootstrap admin via `npm run admin bootstrap --email=... --password=...`\n'
-        );
-    }
-
-    const service = new SynaipseService(config, overrides);
-    await service.start();
-
-    const broadcaster = new EventBroadcaster();
-    const jobs = new JobManager(service);
-
-    // Scheduler for recurring jobs (crawl-gitea, relink, compile).
-    // - Local mode: JSON sidecar at config.schedulesPath.
-    // - Server mode: MariaDBScheduleStore from the bundle (Slice 3b).
-    // Both implement ScheduleStore so the runner + routes stay identical.
-    const scheduleStore: ScheduleStore = mariaScheduleStore ?? new LocalScheduleStore(config.schedulesPath);
-    if (mariaScheduleStore !== null) {
-        process.stdout.write('[synaipse-web-api] scheduler: MariaDB-backed store\n');
-    }
-    const scheduler = new Scheduler(scheduleStore, jobs);
-    scheduler.start();
-
-    const handle = routes(service, broadcaster, jobs, {
-        mode: config.mode === 'server' ? 'server' : 'local',
-        auth,
-        userStore,
-        config,
-        scheduleStore,
-        scheduler
-    });
-
-    service.onVaultChange((event) => {
-        broadcaster.publish({
-            tool: 'fs-watcher',
-            kind: event.kind === 'deleted' ? 'delete' : 'write',
-            touched: [event.noteId],
-            ts: Date.now()
-        });
-    });
-
-    // Mount MCP under /mcp on the same http server, sharing the service.
-    const mcpHandler = buildMcpHttpHandler(config, service, {
-        basePath: MCP_BASE_PATH,
-        eventsUrl: null,  // MCP would self-publish through the in-process broadcaster, but the existing publisher does http POST — skip the loopback round-trip and just rely on vault watcher events instead.
-        userStore
-    });
 
     const staticDirRaw = process.env.SYNAIPSE_STATIC_DIR;
     const staticDir = staticDirRaw !== undefined && staticDirRaw.length > 0
@@ -238,7 +98,7 @@ const main = async (): Promise<void> => {
     }
 
     const server = http.createServer((req, res) => {
-        if (req.url !== undefined && req.url.startsWith(MCP_BASE_PATH)) {
+        if (req.url !== undefined && req.url.startsWith(mcpBasePath)) {
             mcpHandler(req, res);
             return;
         }
@@ -246,7 +106,7 @@ const main = async (): Promise<void> => {
         const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
 
         if (url.pathname.startsWith('/api/')) {
-            handle(req, res, url).catch((error: unknown) => {
+            apiHandle(req, res, url).catch((error: unknown) => {
                 res.writeHead(500, {'Content-Type': 'application/json'});
                 res.end(JSON.stringify({error: error instanceof Error ? error.message : String(error)}));
             });
@@ -254,13 +114,12 @@ const main = async (): Promise<void> => {
         }
 
         // Non-API, non-MCP GET requests fall through to the static frontend
-        // when configured. Anything else (POST/PUT/DELETE on a non-API
-        // path) goes through the routes handler so its 404/405 responses
-        // stay consistent with API behaviour.
+        // when configured. Anything else goes through the API handler so its
+        // 404/405 responses stay consistent.
         if (staticDir !== null && (req.method === 'GET' || req.method === 'HEAD')) {
             void tryServeStatic(res, url.pathname, staticDir).then((served) => {
                 if (!served) {
-                    handle(req, res, url).catch((error: unknown) => {
+                    apiHandle(req, res, url).catch((error: unknown) => {
                         res.writeHead(500, {'Content-Type': 'application/json'});
                         res.end(JSON.stringify({error: error instanceof Error ? error.message : String(error)}));
                     });
@@ -269,7 +128,7 @@ const main = async (): Promise<void> => {
             return;
         }
 
-        handle(req, res, url).catch((error: unknown) => {
+        apiHandle(req, res, url).catch((error: unknown) => {
             res.writeHead(500, {'Content-Type': 'application/json'});
             res.end(JSON.stringify({error: error instanceof Error ? error.message : String(error)}));
         });
@@ -279,17 +138,14 @@ const main = async (): Promise<void> => {
 
     server.listen(apiPort, () => {
         process.stdout.write(`[synaipse-web-api] listening on :${apiPort} (cwd=${process.cwd()})\n`);
-        process.stdout.write(`[synaipse-web-api] MCP mounted at http://localhost:${apiPort}${MCP_BASE_PATH}\n`);
+        process.stdout.write(`[synaipse-web-api] MCP mounted at http://localhost:${apiPort}${mcpBasePath}\n`);
     });
 
     const shutdown = async (signal: string): Promise<void> => {
         process.stdout.write(`[synaipse-web-api] ${signal} — shutting down\n`);
         try {
-            scheduler.stop();
-            await scheduleStore.close();
             server.close();
-            await service.stop();
-            await closeAdapters();
+            await embed.close();
         } finally {
             process.exit(0);
         }
