@@ -12,30 +12,30 @@ services:
     environment:
       QDRANT__LOG_LEVEL: INFO
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: synaipse-ollama
-    profiles: [ollama]
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./data/ollama:/root/.ollama
-
-  ollama-init:
-    image: ollama/ollama:latest
-    container_name: synaipse-ollama-init
-    profiles: [ollama]
-    depends_on:
-      - ollama
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    # Pulls the embedder only — chat model is now provider-agnostic and may
-    # live elsewhere (openai/anthropic/claude-shell). Pull a chat model
-    # manually with `docker exec synaipse-ollama ollama pull <model>` if you
-    # want Ollama for chat too.
-    entrypoint: ["sh", "-c", "sleep 10 && ollama pull ${OLLAMA_MODEL:-nomic-embed-text} && echo 'embedder ready'"]
-    restart: "no"
+#  ollama:
+#    image: ollama/ollama:latest
+#    container_name: synaipse-ollama
+#    profiles: [ollama]
+#    restart: unless-stopped
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ./data/ollama:/root/.ollama
+#
+#  ollama-init:
+#    image: ollama/ollama:latest
+#    container_name: synaipse-ollama-init
+#    profiles: [ollama]
+#    depends_on:
+#      - ollama
+#    environment:
+#      OLLAMA_HOST: http://ollama:11434
+#    # Pulls the embedder only — chat model is now provider-agnostic and may
+#    # live elsewhere (openai/anthropic/claude-shell). Pull a chat model
+#    # manually with `docker exec synaipse-ollama ollama pull <model>` if you
+#    # want Ollama for chat too.
+#    entrypoint: ["sh", "-c", "sleep 10 && ollama pull ${OLLAMA_MODEL:-nomic-embed-text} && echo 'embedder ready'"]
+#    restart: "no"
 
   # MariaDB hot-tier for SYNAIPSE_MODE=server. 11.7+ ships native VECTOR
   # support — we don't use it yet (vectors stay in Qdrant for now) but
