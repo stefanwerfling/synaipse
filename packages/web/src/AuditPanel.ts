@@ -259,10 +259,17 @@ export class AuditPanel {
             )
         );
 
+        // Details are built on first expand (plan P4 / D5): most entries are
+        // never opened, and eagerly built hidden rows doubled the DOM size
+        // of a long list.
         const details = el('div', {class: 'audit-entry-details', style: {display: 'none'}});
-        this.fillDetails(details, e);
+        let filled = false;
 
         head.addEventListener('click', () => {
+            if (!filled) {
+                this.fillDetails(details, e);
+                filled = true;
+            }
             details.style.display = details.style.display === 'none' ? '' : 'none';
         });
 
