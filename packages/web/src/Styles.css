@@ -3647,41 +3647,6 @@ body.synaipse-sidebar-resizing {
     color: var(--text-1);
 }
 
-.synaipse-root .graph-canvas.atlas {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: var(--bg-0);
-}
-
-.synaipse-root .atlas-canvas {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    cursor: grab;
-}
-
-.synaipse-root .atlas-canvas:active { cursor: grabbing; }
-
-.synaipse-root .atlas-overlay {
-    position: absolute;
-    pointer-events: none;
-    background: var(--bg-1);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--r-2);
-    padding: 4px 8px;
-    font-size: 11px;
-    color: var(--text-1);
-    display: none;
-    z-index: 10;
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .synaipse-root .palette-wrap {
     position: fixed;
     inset: 0;
