@@ -107,6 +107,22 @@ Suite 1108 grün. Tool-Liste von ca. 7k auf ca. 4,5k Tokens (31 sichtbare Tools)
 
 **Verhaltensänderungen:** Write-Tools liefern nicht mehr die ganze Note. `read_note` kappt den Body standardmäßig bei 20.000 Zeichen (mit `next`-Hinweis). `synaipse_graph` liefert nie mehr den ganzen Vault, und Kanten kommen als `[from, to]`. `verify_history` und `snapshot_list` brauchen `SYNAIPSE_MCP_TOOLSETS=…,admin`. Ungültige Enum-Werte werden abgelehnt. Ein laufender Server braucht einen Neustart.
 
+
+### Status P1 (2026-11-18): Fundament umgesetzt, committet (`8cda0db`..`2471e45`)
+
+Suite 1127 grün (25 übersprungen), Lint ohne Fehler.
+
+| Punkt | Stand |
+|---|---|
+| G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bench-Gate, Bundle-Budget und Playwright kommen mit A7, D4 und P4 |
+| G5 Pinning | erledigt: `ngit`, `vts` und `mdfloor` auf die Commit-SHAs aus dem Lockfile gepinnt; `engines.node >=22.13`, `.nvmrc`. **Offen:** vitest-Major-Update und Ersatz von `gray-matter` (braucht Round-Trip-Tests, eigener Slice) |
+| A1 `LinkIndex` und Bulk-Write | erledigt: Backlinks werden inkrementell gepflegt, Tag-Index ebenso. `service.batch()` macht einen ngit-Commit, embeddet in Gruppen und flusht einmal. Crawler-CLI und Jobs (gitea, devto, github-stars, code) nutzen es |
+| A1 persistente Titel/Alias-Indizes | offen. Die O(N)-Rescans in `related`, `prime`, `todos` usw. bleiben vorerst; sie sind erst ab ca. 50k Notes spürbar → mit A7-Bench messen, dann entscheiden |
+| A2 SQLite-State | erledigt für die Index-Einträge: `<vault>/.synaipse/state.db` (`node:sqlite`, WAL), es werden nur geänderte Zeilen geschrieben, Fremdprozesse über `PRAGMA data_version` erkannt. Das alte JSON wird beim ersten Start importiert (ohne Re-Embedding) und als `*.migrated-<ts>` behalten. Mit echtem Vault-Abzug (2118 Einträge) geprüft: 0 Abweichungen, Import ca. 100 ms, 200 Zugriffe plus Flush ca. 3 ms. Such-Treffer zählen nicht mehr als Zugriff. **Offen:** Tabellen `audit`, `jobs`, `query_cache` (die Sidecars bleiben JSON, bis ein Slice sie braucht) |
+| G2 Logging | erledigt mit eigenem, abhängigkeitsfreiem Logger (`core/Log.ts`) statt pino: Levels, `child`, Kontext-Provider, `SYNAIPSE_LOG_FORMAT=json`, immer stderr. Alle serverseitigen `stderr.write` wurden umgestellt; CLI-Ausgaben bleiben. **Abweichung:** kein pino, weil `core` auch im Browser läuft und der Bedarf klein ist. **Offen:** Request-IDs über den Kontext-Provider und `/api/metrics` |
+
+**Verhaltensänderungen:** Der erste Start legt `.synaipse/state.db` an und benennt `.synaipse-index.json` um (die Rücksicherung ist einfaches Zurückbenennen, solange `state.db` gelöscht wird). Walker und Watcher ignorieren `.synaipse/` und `.ngit/`. Embed-Fortschritt pro Batch erscheint nur noch mit `SYNAIPSE_LOG_LEVEL=debug`.
+
 ---
 
 ## 3. Säule A: Performance und Skalierung (Backend)
@@ -461,7 +477,7 @@ Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größ
 
 ## 13. Offene Entscheidungen
 
-1. **SQLite-State:** `node:sqlite` (setzt Node ≥ 22.5 voraus, heute `engines >=20`) oder `better-sqlite3` (native Abhängigkeit)?
+1. ~~**SQLite-State:** `node:sqlite` oder `better-sqlite3`?~~ Entschieden: `node:sqlite` (2026-11-18), `engines >=22.13`.
 2. **MCP im Embed:** Tools beim PKG-Studio-Gateway registrieren (E2) oder `/synaipse/mcp` beibehalten? Das hat Auswirkungen auf Token und ACL.
 3. **Tool-Konsolidierung (B2):** Wie lange bleiben die alten Tool-Namen als Aliase bestehen (eine Version oder dauerhaft)?
 4. **Shared Tokens (E3):** eigenes Paket `pkg-tokens` oder Teil des PKG-Studio-Shells?
