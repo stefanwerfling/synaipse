@@ -4,10 +4,12 @@ import matter from 'gray-matter';
 import {access} from 'node:fs/promises';
 import {constants as fsConstants} from 'node:fs';
 import {Repo, type PersonInput} from 'ngit';
-import {NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
+import {LinkIndex, NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
 import type {Note, NoteId, NoteWriteInput, Frontmatter} from '@synaipse/core';
 import {parseNote} from './Parser.js';
 import {walkMarkdown} from './Walker.js';
+import {currentWriteBatch} from './WriteBatch.js';
+import type {WriteBatchChanges} from '@synaipse/core';
 
 export interface VaultHistoryConfig {
     autoCommit: boolean;
@@ -25,7 +27,13 @@ export interface CommitContext {
 
 export class Vault {
     private readonly notes = new Map<NoteId, Note>();
-    private readonly backlinkIndex = new Map<string, Set<NoteId>>();
+    /**
+     * Incremental wikilink index (shared with the MariaDB adapter): a write
+     * touches only the written note's links instead of rescanning the vault.
+     */
+    private readonly links = new LinkIndex();
+    /** tag → ids, maintained incrementally alongside {@link links}. */
+    private readonly tagIndex = new Map<string, Set<NoteId>>();
     private loaded = false;
     private readonly historyConfig: VaultHistoryConfig | null;
     private repo: Repo | null = null;
@@ -81,13 +89,13 @@ export class Vault {
     public async load(): Promise<void> {
         await this.ensureRoot();
         this.notes.clear();
-        this.backlinkIndex.clear();
+        this.links.clear();
+        this.tagIndex.clear();
 
         for await (const file of walkMarkdown(this.root)) {
             await this.ingestFile(file);
         }
 
-        this.rebuildBacklinks();
         this.loaded = true;
     }
 
@@ -96,7 +104,7 @@ export class Vault {
     }
 
     public list(): Note[] {
-        return [...this.notes.values()];
+        return [...this.notes.values()].map((n) => this.withBacklinks(n));
     }
 
     public get(id: NoteId): Note {
@@ -106,23 +114,26 @@ export class Vault {
             throw new NotFoundError(`Note not found: ${id}`);
         }
 
-        return note;
+        return this.withBacklinks(note);
     }
 
     public tryGet(id: NoteId): Note | undefined {
-        return this.notes.get(id);
+        const note = this.notes.get(id);
+        return note === undefined ? undefined : this.withBacklinks(note);
+    }
+
+    /** Backlinks are derived on read (memoised in LinkIndex), never stored on the note. */
+    private withBacklinks(note: Note): Note {
+        return {...note, backlinks: this.links.backlinksOf(note.id)};
     }
 
     public async read(id: NoteId): Promise<Note> {
-        const cached = this.notes.get(id);
-
-        if (cached) {
-            return cached;
+        if (this.notes.has(id)) {
+            return this.get(id);
         }
 
         const absolute = this.toAbsolute(id);
         await this.ingestFile(absolute);
-        this.rebuildBacklinks();
 
         return this.get(id);
     }
@@ -145,7 +156,6 @@ export class Vault {
         await writeFile(absolute, body, 'utf8');
 
         await this.ingestFile(absolute);
-        this.rebuildBacklinks();
 
         const id = this.toId(absolute);
         await this.autoCommit(id, ctx, 'write');
@@ -156,12 +166,19 @@ export class Vault {
     public async delete(id: NoteId, ctx: CommitContext = {}): Promise<void> {
         const absolute = this.toAbsolute(id);
         await rm(absolute, {force: true});
-        this.notes.delete(id);
-        this.rebuildBacklinks();
+        this.forget(id);
         await this.autoCommit(id, ctx, 'delete');
     }
 
     private async autoCommit(id: NoteId, ctx: CommitContext, kind: 'write' | 'delete'): Promise<void> {
+        const batch = currentWriteBatch();
+        if (batch !== undefined) {
+            // Committed once, together with the rest, in commitBatch().
+            if (kind === 'write') batch.recordWrite(id);
+            else batch.recordDelete(id);
+            return;
+        }
+
         const repo = await this.ensureRepoForCommit();
 
         if (repo === null) {
@@ -182,53 +199,58 @@ export class Vault {
         }
     }
 
+    /** One atomic ngit commit for every path a write batch touched. */
+    public async commitBatch(changes: WriteBatchChanges, ctx: CommitContext = {}): Promise<void> {
+        if (changes.adds.size === 0 && changes.deletes.size === 0) return;
+        const repo = await this.ensureRepoForCommit();
+        if (repo === null) return;
+
+        const adds: Array<{path: string; content: Buffer}> = [];
+        const deletes: string[] = [];
+        for (const rel of changes.adds) {
+            try {
+                adds.push({path: rel, content: await readFile(this.toAbsolute(rel))});
+            } catch {
+                deletes.push(rel); // gone again by the end of the batch
+            }
+        }
+        deletes.push(...changes.deletes);
+
+        // A note created and removed inside the same batch was never
+        // committed; asking ngit to delete it would fail the whole commit.
+        const head = await repo.head();
+        const committedDeletes: string[] = [];
+        for (const rel of deletes) {
+            if (head === null) continue;
+            try {
+                await repo.show(head, rel);
+                committedDeletes.push(rel);
+            } catch {
+                // not in HEAD — nothing to delete
+            }
+        }
+        if (adds.length === 0 && committedDeletes.length === 0) return;
+
+        const message = ctx.message ?? `synaipse: batch (${adds.length} written, ${committedDeletes.length} deleted)`;
+        const author = ctx.author ?? this.historyConfig?.author;
+        try {
+            await repo.commitFiles({adds, deletes: committedDeletes, message, ...(author ? {author} : {})});
+        } catch (cause) {
+            process.stderr.write(`[synaipse] batch commit failed (${adds.length + committedDeletes.length} paths): ${String(cause)}\n`);
+        }
+    }
+
     public backlinksOf(id: NoteId): NoteId[] {
-        const note = this.notes.get(id);
-
-        if (!note) {
-            return [];
-        }
-
-        // Wikilinks may reference a note by its title OR by any of its
-        // aliases (matches the frontend resolver in
-        // packages/web/src/Wikilinks.ts). Union the lookups so callers get
-        // a complete list regardless of which key the linker used.
-        const out = new Set<NoteId>();
-
-        const collect = (key: string): void => {
-            const set = this.backlinkIndex.get(key);
-            if (set) {
-                for (const linker of set) {
-                    out.add(linker);
-                }
-            }
-        };
-
-        if (note.title.length > 0) {
-            collect(note.title);
-        }
-
-        const aliases = note.frontmatter.aliases;
-        if (aliases !== undefined) {
-            for (const alias of aliases) {
-                if (alias.length > 0) {
-                    collect(alias);
-                }
-            }
-        }
-
-        return [...out];
+        // Title before alias, first note wins — the same rule as graph(),
+        // related() and the MariaDB adapter (see core/LinkIndex).
+        return this.links.backlinksOf(id);
     }
 
     public tags(): Map<string, NoteId[]> {
         const result = new Map<string, NoteId[]>();
 
-        for (const note of this.notes.values()) {
-            for (const tag of note.tags) {
-                const list = result.get(tag) ?? [];
-                list.push(note.id);
-                result.set(tag, list);
-            }
+        for (const [tag, ids] of this.tagIndex) {
+            result.set(tag, [...ids]);
         }
 
         return result;
@@ -238,12 +260,10 @@ export class Vault {
         const id = this.toId(absolutePath);
 
         if (kind === 'deleted') {
-            this.notes.delete(id);
+            this.forget(id);
         } else {
             await this.ingestFile(absolutePath);
         }
-
-        this.rebuildBacklinks();
     }
 
     private async ingestFile(absolutePath: string): Promise<void> {
@@ -263,54 +283,29 @@ export class Vault {
             console.warn(`[synaipse] invalid frontmatter in ${note.id}: ${validation.errors.join('; ')}`);
         }
 
+        this.unindexTags(this.notes.get(note.id));
         this.notes.set(note.id, note);
+        this.links.upsert(note);
+        for (const tag of note.tags) {
+            let ids = this.tagIndex.get(tag);
+            if (ids === undefined) this.tagIndex.set(tag, ids = new Set());
+            ids.add(note.id);
+        }
     }
 
-    private rebuildBacklinks(): void {
-        this.backlinkIndex.clear();
+    private forget(id: NoteId): void {
+        this.unindexTags(this.notes.get(id));
+        this.notes.delete(id);
+        this.links.remove(id);
+    }
 
-        // Build a key→noteId lookup from titles AND aliases. Title wins
-        // on collision; aliases register only if the key isn't already
-        // taken. Matches packages/web/src/Wikilinks.ts so the frontend
-        // and backend agree on which note a wikilink resolves to.
-        const keyToId = new Map<string, NoteId>();
-
-        for (const note of this.notes.values()) {
-            if (note.title.length > 0 && !keyToId.has(note.title)) {
-                keyToId.set(note.title, note.id);
-            }
-        }
-
-        for (const note of this.notes.values()) {
-            const aliases = note.frontmatter.aliases;
-            if (aliases === undefined) continue;
-
-            for (const alias of aliases) {
-                if (alias.length > 0 && !keyToId.has(alias)) {
-                    keyToId.set(alias, note.id);
-                }
-            }
-        }
-
-        for (const note of this.notes.values()) {
-            note.backlinks = [];
-        }
-
-        for (const note of this.notes.values()) {
-            for (const link of note.wikilinks) {
-                const targetId = keyToId.get(link);
-                const set = this.backlinkIndex.get(link) ?? new Set<NoteId>();
-                set.add(note.id);
-                this.backlinkIndex.set(link, set);
-
-                if (targetId !== undefined) {
-                    const target = this.notes.get(targetId);
-
-                    if (target && !target.backlinks.includes(note.id)) {
-                        target.backlinks.push(note.id);
-                    }
-                }
-            }
+    private unindexTags(note: Note | undefined): void {
+        if (note === undefined) return;
+        for (const tag of note.tags) {
+            const ids = this.tagIndex.get(tag);
+            if (ids === undefined) continue;
+            ids.delete(note.id);
+            if (ids.size === 0) this.tagIndex.delete(tag);
         }
     }
 

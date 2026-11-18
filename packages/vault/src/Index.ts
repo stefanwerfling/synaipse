@@ -8,3 +8,4 @@ export type {CacheEntry, TouchSeed} from './Cache.js';
 export {parseNote, extractWikilinks, extractTags} from './Parser.js';
 export {walkMarkdown, walkCanvas} from './Walker.js';
 export {VaultWatcher} from './Watcher.js';
+export {WriteBatch, writeBatchStorage, currentWriteBatch, runWriteBatch} from './WriteBatch.js';

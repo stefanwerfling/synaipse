@@ -5,6 +5,12 @@ export interface NoteWriteContext {
     author?: {name: string; email: string};
 }
 
+/** Paths written / deleted inside a write batch (see SynaipseService.batch). */
+export interface WriteBatchChanges {
+    readonly adds: ReadonlySet<string>;
+    readonly deletes: ReadonlySet<string>;
+}
+
 /**
  * Per-note index entry tracked by the adapter: content hash for
  * change-detection (decides whether to re-embed) plus a runtime
@@ -63,6 +69,11 @@ export interface NoteAdapter {
     read(id: NoteId): Promise<Note>;
     write(input: NoteWriteInput, ctx?: NoteWriteContext): Promise<Note>;
     delete(id: NoteId, ctx?: NoteWriteContext): Promise<void>;
+    /**
+     * Version all changes of a write batch as ONE commit. Adapters without
+     * per-write versioning omit it.
+     */
+    commitBatch?(changes: WriteBatchChanges, ctx?: NoteWriteContext): Promise<void>;
     backlinksOf(id: NoteId): NoteId[];
     tags(): Map<string, NoteId[]>;
 

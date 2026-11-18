@@ -1,4 +1,4 @@
-import type {Note, NoteAdapter, NoteEntry, NoteId, NoteWriteContext, NoteWriteInput} from '@synaipse/core';
+import type {Note, NoteAdapter, NoteEntry, NoteId, NoteWriteContext, NoteWriteInput, WriteBatchChanges} from '@synaipse/core';
 import {HashCache} from './Cache.js';
 import {Vault} from './Vault.js';
 
@@ -56,6 +56,10 @@ export class FilesystemNoteAdapter implements NoteAdapter {
         await this.vault.delete(id, ctx);
         this.cache.delete(id);
         await this.cache.flush();
+    }
+
+    public commitBatch(changes: WriteBatchChanges, ctx: NoteWriteContext = {}): Promise<void> {
+        return this.vault.commitBatch(changes, ctx);
     }
 
     public backlinksOf(id: NoteId): NoteId[] {

@@ -57,8 +57,15 @@ export class LinkIndex {
     /** alias → ids carrying that alias (insertion order = precedence) */
     private readonly byAlias = new Map<string, Set<NoteId>>();
     private readonly notes = new Map<NoteId, {title: string; aliases: string[]; wikilinks: string[]}>();
+    /**
+     * backlinksOf() results, dropped wholesale on every mutation. Adapters
+     * attach backlinks to every note in list(); between writes that is
+     * now a map lookup instead of a recomputation per note.
+     */
+    private readonly memo = new Map<NoteId, readonly NoteId[]>();
 
     public clear(): void {
+        this.memo.clear();
         this.sources.clear();
         this.byTitle.clear();
         this.byAlias.clear();
@@ -66,6 +73,7 @@ export class LinkIndex {
     }
 
     public upsert(note: LinkIndexNote): void {
+        this.memo.clear();
         const prev = this.notes.get(note.id);
         const next = {title: note.title, aliases: aliasesOf(note), wikilinks: [...new Set(note.wikilinks)]};
 
@@ -92,6 +100,7 @@ export class LinkIndex {
     public remove(id: NoteId): void {
         const prev = this.notes.get(id);
         if (prev === undefined) return;
+        this.memo.clear();
         removeFrom(this.byTitle, prev.title, id);
         for (const a of prev.aliases) removeFrom(this.byAlias, a, id);
         for (const l of prev.wikilinks) removeFrom(this.sources, l, id);
@@ -107,6 +116,9 @@ export class LinkIndex {
 
     /** Ids of notes whose wikilinks resolve to `id`. */
     public backlinksOf(id: NoteId): NoteId[] {
+        const cached = this.memo.get(id);
+        if (cached !== undefined) return [...cached];
+
         const note = this.notes.get(id);
         if (note === undefined) return [];
 
@@ -119,7 +131,9 @@ export class LinkIndex {
                 if (s !== id) out.add(s);
             }
         }
-        return [...out];
+        const result = [...out];
+        this.memo.set(id, result);
+        return [...result];
     }
 }
 

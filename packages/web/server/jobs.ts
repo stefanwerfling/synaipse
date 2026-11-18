@@ -459,7 +459,8 @@ export class JobManager {
 
         this.log(job.id, `[gitea] crawling ${params.owner}/${params.repo} (state=${params.state ?? 'open'}) → project ${params.project}`);
 
-        const report = await crawler.run({
+        // One commit + grouped embedding for the whole crawl (service.batch).
+        const report = await this.service.batch(() => crawler.run({
             log: (line) => this.log(job.id, line),
             // writeNoteUnscoped goes through the service's write path
             // → fulltext + graph + semantic indices update live, so the
@@ -473,7 +474,7 @@ export class JobManager {
             // cheap.
             listNotesUnder: (prefix) => this.service.listNotes().filter((n) => n.id.startsWith(prefix)),
             signal
-        });
+        }), {message: `synaipse: crawl gitea ${params.owner}/${params.repo}`});
 
         // Track progress from the running counter so the frontend gets
         // a final "N of N" summary. Total is only known after the crawl
@@ -527,10 +528,10 @@ export class JobManager {
         });
 
         this.log(job.id, '[devto] crawling latest articles');
-        const report = await crawler.run({
+        const report = await this.service.batch(() => crawler.run({
             vault: this.service.getVault(),
             log: (line) => this.log(job.id, line)
-        });
+        }), {message: `synaipse: crawl ${crawler.name}`});
         this.applyCrawlerReport(job, 'devto', report);
     }
 
@@ -550,10 +551,10 @@ export class JobManager {
         });
 
         this.log(job.id, '[github-stars] crawling starred repos');
-        const report = await crawler.run({
+        const report = await this.service.batch(() => crawler.run({
             vault: this.service.getVault(),
             log: (line) => this.log(job.id, line)
-        });
+        }), {message: `synaipse: crawl ${crawler.name}`});
         this.applyCrawlerReport(job, 'github-stars', report);
     }
 
@@ -572,10 +573,10 @@ export class JobManager {
         });
 
         this.log(job.id, `[code] walking ${repoPath}`);
-        const report = await crawler.run({
+        const report = await this.service.batch(() => crawler.run({
             vault: this.service.getVault(),
             log: (line) => this.log(job.id, line)
-        });
+        }), {message: `synaipse: crawl ${crawler.name}`});
 
         job.progress.total = report.walked;
         job.progress.done = report.written + report.unchanged;

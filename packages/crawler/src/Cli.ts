@@ -10,7 +10,7 @@ process.chdir(repoRoot);
 dotenvConfig({path: path.join(repoRoot, '.env')});
 
 const {loadConfigFromEnv} = await import('@synaipse/core');
-const {Vault} = await import('@synaipse/vault');
+const {Vault, runWriteBatch} = await import('@synaipse/vault');
 const {SynaipseService} = await import('@synaipse/service');
 const {GitHubStarsCrawler} = await import('./GitHubStars.js');
 const {DevToCrawler} = await import('./DevTo.js');
@@ -35,6 +35,10 @@ const log = (line: string): void => {
 
 const ctx = {vault, log};
 
+/** One ngit commit for the whole crawl instead of one per crawled item. */
+const runCrawl = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
+    runWriteBatch(fn, (batch) => vault.commitBatch(batch, {message: `synaipse: crawl ${name}`}));
+
 const runCrawler = async (name: string): Promise<number> => {
     if (name === 'github-stars') {
         const token = process.env.GITHUB_TOKEN;
@@ -54,7 +58,7 @@ const runCrawler = async (name: string): Promise<number> => {
         });
 
         log(`[crawler] starting ${crawler.name}`);
-        const report = await crawler.run(ctx);
+        const report = await runCrawl(crawler.name, () => crawler.run(ctx));
         log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
 
         if (report.errors.length > 0) {
@@ -87,7 +91,7 @@ const runCrawler = async (name: string): Promise<number> => {
         });
 
         log(`[crawler] starting ${crawler.name}`);
-        const report = await crawler.run(ctx);
+        const report = await runCrawl(crawler.name, () => crawler.run(ctx));
         log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — fetched ${report.fetched}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
 
         if (report.errors.length > 0) {
@@ -118,7 +122,7 @@ const runCrawler = async (name: string): Promise<number> => {
         });
 
         log(`[crawler] starting ${crawler.name} (${repoPath}${withSource ? ', with source' : ''})`);
-        const report = await crawler.run(ctx);
+        const report = await runCrawl(crawler.name, () => crawler.run(ctx));
         log(`[crawler] done in ${(report.elapsedMs / 1000).toFixed(1)}s — walked ${report.walked}, written ${report.written}, unchanged ${report.unchanged}, errors ${report.errors.length}`);
 
         if (report.errors.length > 0) {

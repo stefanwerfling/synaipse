@@ -1,7 +1,7 @@
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {buildLinkKeyMap, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
-import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
+import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, currentWriteBatch, runWriteBatch, type History, type WriteBatch} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
 import {listRoadmapSummaries, normalizeRoadmap, roadmapFromNote, roadmapPathFor, roadmapWriteInput} from './Roadmap.js';
 import {
@@ -473,7 +473,11 @@ export class SynaipseService {
      * marked as not-embedded and is retried on its next write and on start.
      */
     private async maybeIndexNote(note: Note): Promise<void> {
-        if (this.index !== null && this.embedModel !== null && this.shouldEmbed(note.id)) {
+        const batch = currentWriteBatch();
+        if (batch !== undefined && this.index !== null && this.embedModel !== null && this.shouldEmbed(note.id)) {
+            // Embedded in groups when the batch ends (see batch()).
+            batch.deferEmbed(note);
+        } else if (this.index !== null && this.embedModel !== null && this.shouldEmbed(note.id)) {
             try {
                 await this.index.indexNote(note);
                 this.notes.recordEmbedded(note.id, note.hash, this.embedModel);
@@ -519,6 +523,63 @@ export class SynaipseService {
     public unresolvedWikilinks(note: Pick<Note, 'wikilinks'>): string[] {
         const keys = this.linkKeyMap();
         return [...new Set(note.wikilinks)].filter((target) => !keys.has(target));
+    }
+
+    /**
+     * Run many writes as one unit (plan P1 / A1): every write inside `fn`
+     * still lands on disk and in the in-memory indexes immediately, but
+     * versioning, embedding and the index-cache flush happen ONCE at the
+     * end — one ngit commit, embeddings in groups of
+     * {@link STARTUP_EMBED_GROUP}. Crawlers and imports use this; a crawl
+     * of M notes no longer costs M commits and M embedding round-trips.
+     *
+     * The batch is bound to the async context of `fn`: concurrent writes
+     * from other callers are unaffected. A nested call joins the outer
+     * batch. Side effects run even if `fn` throws (the writes it made are
+     * on disk and must be versioned and indexed).
+     */
+    public async batch<T>(fn: () => Promise<T>, opts: {message?: string; author?: {name: string; email: string}} = {}): Promise<T> {
+        return runWriteBatch(fn, (batch) => this.finishBatch(batch, opts));
+    }
+
+    private async finishBatch(batch: WriteBatch, opts: {message?: string; author?: {name: string; email: string}}): Promise<void> {
+        if (this.notes.commitBatch !== undefined) {
+            await this.notes.commitBatch(batch, {
+                ...(opts.message !== undefined ? {message: opts.message} : {}),
+                ...(opts.author !== undefined ? {author: opts.author} : {})
+            });
+        }
+
+        // Latest version of each note that still exists.
+        const notes = [...batch.embeds.keys()]
+            .map((id) => this.notes.tryGet(id))
+            .filter((n): n is Note => n !== undefined);
+
+        if (this.index !== null && this.embedModel !== null) {
+            for (let i = 0; i < notes.length; i += STARTUP_EMBED_GROUP) {
+                const group = notes.slice(i, i + STARTUP_EMBED_GROUP);
+                try {
+                    await this.index.indexNotes(group);
+                } catch (error) {
+                    for (const note of notes.slice(i)) this.pendingEmbeds.add(note.id);
+                    this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
+                    process.stderr.write(
+                        `[synaipse] WARN batch embedding failed (${error instanceof Error ? error.message : String(error)}); ` +
+                        `${notes.length - i} notes saved but not embedded, retried on next write or start\n`
+                    );
+                    break;
+                }
+                for (const note of group) {
+                    this.notes.recordEmbedded(note.id, note.hash, this.embedModel);
+                    this.pendingEmbeds.delete(note.id);
+                }
+                this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
+            }
+        }
+
+        if (batch.size > 0 || notes.length > 0) {
+            await this.notes.flushEntries();
+        }
     }
 
     public async start(): Promise<void> {
