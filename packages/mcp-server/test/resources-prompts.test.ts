@@ -161,3 +161,30 @@ describe('structured output', () => {
         expect(result.structuredContent).toMatchObject({id: 'Memory/demo/new.md'});
     });
 });
+
+describe('over Streamable HTTP', () => {
+    it('serves resources and prompts per session with the project from the URL', async () => {
+        const http = await import('node:http');
+        const {StreamableHTTPClientTransport} = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+        const {buildMcpHttpHandler} = await import('../src/Server.js');
+
+        const handler = buildMcpHttpHandler(config(), service, {basePath: '/mcp', eventsUrl: null});
+        const httpServer = http.createServer(handler);
+        await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+        const port = (httpServer.address() as {port: number}).port;
+
+        const remote = new Client({name: 'http-test', version: '0.0.0'});
+        try {
+            await remote.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/demo`)));
+            const {resources} = await remote.listResources();
+            expect(resources[0]?.uri).toBe('synaipse://project/demo/primer');
+            const note = await remote.readResource({uri: noteUri('Memory/demo/decisions/cache.md')});
+            expect((note.contents[0] as {text: string}).text).toContain('Redis');
+            expect((await remote.listPrompts()).prompts).toHaveLength(4);
+        } finally {
+            await remote.close();
+            await handler.closeAll();
+            await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+        }
+    });
+});
