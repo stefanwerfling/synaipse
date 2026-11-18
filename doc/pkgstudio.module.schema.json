@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pkgstudio.module.schema.json",
+  "title": "PKG Studio module manifest",
+  "description": "What a building block tells PKG Studio about itself (pkgstudio.module.json in the module root). Paths are relative to that root. See doc/embedding.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestVersion", "id", "label", "entries", "capabilities"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "manifestVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "Tab id and URL prefix (/<id>)."},
+    "label": {"type": "string", "minLength": 1},
+    "version": {"type": "string"},
+    "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Tab and status-bar accent."},
+    "theme": {"enum": ["light", "dark"], "description": "Theme the module starts in; with theme-switch it reports changes through onThemeChange."},
+    "projectScoped": {"type": "boolean", "description": "true: mounted per project under /<id>/<project>. false: mounted once, the module keeps its own project context."},
+    "entries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frontend"],
+      "properties": {
+        "frontend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["module", "export"],
+          "properties": {
+            "module": {"type": "string", "description": "Built ESM entry."},
+            "css": {"type": "string", "description": "Stylesheet the host imports once (the module does not import it itself)."},
+            "export": {"type": "string", "description": "Named export: mount(container, options) => Promise<handle>."},
+            "source": {"type": "string", "description": "Optional TypeScript entry for development (host's bundler transforms it)."},
+            "package": {"type": "string", "description": "Package export of the same entry, when the module is installed as a dependency."}
+          }
+        },
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["module", "export"],
+          "properties": {
+            "module": {"type": "string", "description": "Built Node ESM entry."},
+            "export": {"type": "string", "description": "Named export: start(options) => handle with apiHandle, mcpHandler, mcpRegistrar, ready, health, close."},
+            "package": {"type": "string"}
+          }
+        }
+      }
+    },
+    "build": {"type": "string", "description": "Command (run in the module root) that produces the built entries."},
+    "mcpPath": {"type": "string", "pattern": "^/", "description": "Module-root-relative MCP endpoint, served by the backend handle's mcpHandler."},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "mount-handle",
+          "api-base",
+          "theme-switch",
+          "shell-tokens",
+          "backend-handle",
+          "health",
+          "mcp-endpoint",
+          "mcp-registrar"
+        ]
+      },
+      "description": "mount-handle: mount() returns {unmount, onShow, onHide, navigate, setTheme, getTheme}. api-base: every request goes through the apiBase option. theme-switch: onThemeChange option. shell-tokens: reads --sh-* tokens. backend-handle: start() returns working handlers at once (503 until ready). health: handle.health(). mcp-endpoint: own MCP endpoint at mcpPath. mcp-registrar: handle.mcpRegistrar for the host's MCP gateway."
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "envFile": {"type": "string", "description": "Env file with the module's settings, passed as `env` to the backend start."},
+        "project": {"type": "string", "description": "Env variable the host sets to its configured project for this module."}
+      }
+    }
+  }
+}

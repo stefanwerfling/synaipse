@@ -147,6 +147,28 @@ mountMcp(app, '/mcp', [registerCoreTools, synaipse.mcpRegistrar]);
 
 Outside the web package the same comes from `createSynaipseRegistrar(service, {project, toolsets})` in `@synaipse/mcp-server`.
 
+## Module manifest
+
+`pkgstudio.module.json` in the repo root describes Synaipse to PKG Studio, so
+the host can read it instead of keeping `MODULE_ENTRY`, `ModuleLoaders.ts`
+and the `embedEntry` in `pkgstudio.json` by hand. Paths are relative to the
+repo root; the schema is `doc/pkgstudio.module.schema.json`.
+
+| Field | Synaipse | Host use |
+|---|---|---|
+| `id`, `label`, `color`, `theme` | `synaipse`, `Synaipse`, `#22B8A6`, `dark` | tab, status bar, initial shell theme |
+| `projectScoped` | `false` | mount once at `/synaipse`; Synaipse keeps its own project |
+| `entries.frontend` | `module` + `css` (library build), `export: mount`, `source` for development, `package` | `import()` the module, import the CSS once, call the export |
+| `entries.backend` | `module`, `export: startSynaipseEmbed`, `package` | start the backend, route `/synaipse/api` and `mcpPath` to the handle |
+| `build` | `npm --workspace @synaipse/web run build` | run when `entries.*.module` is missing or older than the sources |
+| `mcpPath` | `/mcp` | Synaipse's own MCP endpoint under `/synaipse` |
+| `capabilities` | `mount-handle`, `api-base`, `theme-switch`, `shell-tokens`, `backend-handle`, `health`, `mcp-endpoint`, `mcp-registrar` | what the host may call; see the schema for each |
+| `config` | `envFile: .env`, `project: SYNAIPSE_PROJECT` | load the env file, set the project variable, pass both as `env` |
+
+A test (`packages/web/test/manifest.test.ts`) checks the manifest against
+the schema, against the package exports and against the real export names,
+so it can't drift from the code.
+
 ## Migrating PKG Studio
 
 These changes are in the host and are not done yet:
@@ -156,7 +178,7 @@ These changes are in the host and are not done yet:
 3. `main.css`: the bleed guards for Synaipse (`.synaipse-root .topbar` background, `html body`) are no longer needed for Synaipse itself. `.synaipse-root > .root` keeps working because the class still exists.
 4. The global `fetch`/`EventSource` rewrite is no longer needed for Synaipse. It can stay for modules that have not moved yet.
 
-5. Frontend: import `@synaipse/web/mount` and `@synaipse/web/mount.css` instead of the alias to `packages/web/src/mount.ts`; the Synaipse entry in `MODULE_ENTRY`/`optimizeDeps` is then no longer needed.
+5. Frontend: import `@synaipse/web/mount` and `@synaipse/web/mount.css` instead of the alias to `packages/web/src/mount.ts`; the Synaipse entry in `MODULE_ENTRY`/`optimizeDeps` is then no longer needed. Better: read both from `pkgstudio.module.json` (see "Module manifest") for every module that has one.
 6. MCP: add `synaipse.mcpRegistrar` to the registrars of `mountMcp` (see "MCP on the host gateway").
 7. Theme: set the `--sh-*` tokens on `:root` and switch them in `onThemeChange` (see "Design tokens").
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "./doc/pkgstudio.module.schema.json",
+  "manifestVersion": 1,
+  "id": "synaipse",
+  "label": "Synaipse",
+  "version": "0.1.0",
+  "color": "#22B8A6",
+  "theme": "dark",
+  "projectScoped": false,
+  "entries": {
+    "frontend": {
+      "module": "packages/web/dist/lib/mount.js",
+      "css": "packages/web/dist/lib/synaipse.css",
+      "export": "mount",
+      "source": "packages/web/src/mount.ts",
+      "package": "@synaipse/web/mount"
+    },
+    "backend": {
+      "module": "packages/web/dist/server/embed.js",
+      "export": "startSynaipseEmbed",
+      "package": "@synaipse/web/embed"
+    }
+  },
+  "build": "npm --workspace @synaipse/web run build",
+  "mcpPath": "/mcp",
+  "capabilities": [
+    "mount-handle",
+    "api-base",
+    "theme-switch",
+    "shell-tokens",
+    "backend-handle",
+    "health",
+    "mcp-endpoint",
+    "mcp-registrar"
+  ],
+  "config": {
+    "envFile": ".env",
+    "project": "SYNAIPSE_PROJECT"
+  }
+}
