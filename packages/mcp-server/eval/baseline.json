@@ -10,52 +10,52 @@
   },
   "overall": {
     "questions": 32,
-    "hitAt1": 0.625,
+    "hitAt1": 0.75,
     "recallAt5": 0.953,
-    "mrr": 0.763,
+    "mrr": 0.84,
     "outdatedAbove": 0.455,
-    "tokensPerQuestion": 497
+    "tokensPerQuestion": 483
   },
   "byCategory": {
     "lookup": {
       "questions": 14,
-      "hitAt1": 0.714,
+      "hitAt1": 0.929,
       "recallAt5": 0.964,
-      "mrr": 0.827,
+      "mrr": 0.952,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 452
+      "tokensPerQuestion": 444
     },
     "paraphrase": {
       "questions": 6,
       "hitAt1": 0.667,
       "recallAt5": 1,
-      "mrr": 0.806,
+      "mrr": 0.783,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 487
+      "tokensPerQuestion": 471
     },
     "current": {
       "questions": 6,
       "hitAt1": 0.5,
       "recallAt5": 0.833,
-      "mrr": 0.625,
-      "outdatedAbove": 0.333,
-      "tokensPerQuestion": 578
+      "mrr": 0.639,
+      "outdatedAbove": 0.5,
+      "tokensPerQuestion": 554
     },
     "trust": {
       "questions": 2,
-      "hitAt1": 0.5,
+      "hitAt1": 0,
       "recallAt5": 1,
-      "mrr": 0.75,
-      "outdatedAbove": 0.5,
-      "tokensPerQuestion": 537
+      "mrr": 0.5,
+      "outdatedAbove": 1,
+      "tokensPerQuestion": 520
     },
     "scoped": {
       "questions": 4,
-      "hitAt1": 0.5,
+      "hitAt1": 1,
       "recallAt5": 1,
-      "mrr": 0.688,
-      "outdatedAbove": 0.667,
-      "tokensPerQuestion": 530
+      "mrr": 1,
+      "outdatedAbove": 0,
+      "tokensPerQuestion": 517
     }
   },
   "questions": [
@@ -98,11 +98,11 @@
     {
       "id": "L5",
       "category": "lookup",
-      "rank": 2,
+      "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
       "searchTokens": 379,
-      "readTokens": 165
+      "readTokens": 160
     },
     {
       "id": "L6",
@@ -125,11 +125,11 @@
     {
       "id": "L8",
       "category": "lookup",
-      "rank": 4,
+      "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
       "searchTokens": 397,
-      "readTokens": 220
+      "readTokens": 136
     },
     {
       "id": "L9",
@@ -188,7 +188,7 @@
     {
       "id": "P3",
       "category": "paraphrase",
-      "rank": 2,
+      "rank": 5,
       "recallAt5": 1,
       "outdatedAbove": false,
       "searchTokens": 387,
@@ -197,11 +197,11 @@
     {
       "id": "P4",
       "category": "paraphrase",
-      "rank": 3,
+      "rank": 2,
       "recallAt5": 1,
       "outdatedAbove": false,
       "searchTokens": 375,
-      "readTokens": 211
+      "readTokens": 118
     },
     {
       "id": "P5",
@@ -224,20 +224,20 @@
     {
       "id": "C1",
       "category": "current",
-      "rank": 4,
+      "rank": 3,
       "recallAt5": 1,
       "outdatedAbove": true,
       "searchTokens": 390,
-      "readTokens": 220
+      "readTokens": 132
     },
     {
       "id": "C2",
       "category": "current",
-      "rank": 2,
+      "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 394,
-      "readTokens": 220
+      "searchTokens": 397,
+      "readTokens": 213
     },
     {
       "id": "C3",
@@ -251,11 +251,11 @@
     {
       "id": "C4",
       "category": "current",
-      "rank": 1,
+      "rank": 2,
       "recallAt5": 1,
-      "outdatedAbove": false,
+      "outdatedAbove": true,
       "searchTokens": 326,
-      "readTokens": 195
+      "readTokens": 141
     },
     {
       "id": "C5",
@@ -263,7 +263,7 @@
       "rank": 0,
       "recallAt5": 0,
       "outdatedAbove": true,
-      "searchTokens": 381,
+      "searchTokens": 384,
       "readTokens": 220
     },
     {
@@ -278,11 +278,11 @@
     {
       "id": "T1",
       "category": "trust",
-      "rank": 1,
+      "rank": 2,
       "recallAt5": 1,
-      "outdatedAbove": false,
+      "outdatedAbove": true,
       "searchTokens": 405,
-      "readTokens": 170
+      "readTokens": 135
     },
     {
       "id": "T2",
@@ -296,11 +296,11 @@
     {
       "id": "S1",
       "category": "scoped",
-      "rank": 2,
+      "rank": 1,
       "recallAt5": 1,
-      "outdatedAbove": true,
+      "outdatedAbove": false,
       "searchTokens": 365,
-      "readTokens": 174
+      "readTokens": 161
     },
     {
       "id": "S2",
@@ -317,17 +317,17 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 378,
+      "searchTokens": 393,
       "readTokens": 132
     },
     {
       "id": "S4",
       "category": "scoped",
-      "rank": 4,
+      "rank": 1,
       "recallAt5": 1,
-      "outdatedAbove": true,
+      "outdatedAbove": false,
       "searchTokens": 369,
-      "readTokens": 220
+      "readTokens": 166
     },
     {
       "id": "L13",
@@ -341,11 +341,11 @@
     {
       "id": "L14",
       "category": "lookup",
-      "rank": 2,
+      "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
       "searchTokens": 163,
-      "readTokens": 177
+      "readTokens": 153
     }
   ]
 }

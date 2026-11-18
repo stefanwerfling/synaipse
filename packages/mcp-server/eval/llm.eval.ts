@@ -128,11 +128,17 @@ const table = (report: EvalReport, base: EvalReport | null): string => {
 
 describe('LLM usability eval', () => {
     it('answers the fixture questions over MCP without regressing against the baseline', async () => {
-        const vaultDir = await mkdtemp(path.join(tmpdir(), 'synaipse-eval-'));
-        const vault = path.join(vaultDir, 'vault');
-        await mkdir(vault);
+        const root = await mkdtemp(path.join(tmpdir(), 'synaipse-eval-'));
+        let run = 0;
 
-        try {
+        /**
+         * A fresh vault and server per question: reads count as accesses and
+         * make the read notes graph seeds, so a shared session would let one
+         * question's answer shift the ranking of the next.
+         */
+        const session = async <T>(fn: (client: Client) => Promise<T>): Promise<T> => {
+            const vault = path.join(root, `vault-${run++}`);
+            await mkdir(vault);
             await seedVault(vault, EVAL_NOTES);
             const cfg = config(vault);
             const service = new SynaipseService(cfg);
@@ -144,49 +150,54 @@ describe('LLM usability eval', () => {
             await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
 
             try {
-                const results: QuestionResult[] = [];
-                for (const q of EVAL_QUESTIONS) results.push(await answer(client, q));
-
-                const categories = [...new Set(EVAL_QUESTIONS.map((q) => q.category))];
-                const report: EvalReport = {
-                    fixture: {notes: EVAL_NOTES.length, questions: EVAL_QUESTIONS.length},
-                    context: {
-                        toolListTokens: tokens(JSON.stringify((await client.listTools()).tools)),
-                        instructionsTokens: tokens(client.getInstructions() ?? ''),
-                        primeTokens: tokens(textOf(await client.callTool({name: 'synaipse_prime', arguments: {}})))
-                    },
-                    overall: summarize(results, EVAL_QUESTIONS),
-                    byCategory: Object.fromEntries(categories.map((c) => [c, summarize(results.filter((r) => r.category === c), EVAL_QUESTIONS)])),
-                    questions: results
-                };
-
-                const base = await readFile(BASELINE, 'utf8').then((raw) => JSON.parse(raw) as EvalReport, () => null);
-                const misses = results.filter((r) => r.rank !== 1).map((r) => `${r.id}${r.rank === 0 ? '✗' : `@${r.rank}`}${r.outdatedAbove ? '!' : ''}`);
-
-                process.stdout.write([
-                    '',
-                    `Synaipse LLM eval: ${report.fixture.questions} questions, ${report.fixture.notes} notes (baseline values in brackets)`,
-                    '',
-                    table(report, base),
-                    '',
-                    `context tokens: tool list ${report.context.toolListTokens}, instructions ${report.context.instructionsTokens}, prime ${report.context.primeTokens}`,
-                    `not first (rank, ✗ = missing, ! = outdated above): ${misses.join(' ') || 'none'}`,
-                    ''
-                ].join('\n') + '\n');
-
-                if (process.env.EVAL_UPDATE_BASELINE === '1' || base === null) {
-                    await writeFile(BASELINE, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-                    process.stdout.write(`baseline written → ${BASELINE}\n\n`);
-                    return;
-                }
-
-                expect(regressions(base, report), 'regressions against eval/baseline.json').toEqual([]);
+                return await fn(client);
             } finally {
                 await client.close();
                 await service.stop();
             }
+        };
+
+        try {
+            const results: QuestionResult[] = [];
+            for (const q of EVAL_QUESTIONS) results.push(await session((client) => answer(client, q)));
+            const context = await session(async (client) => ({
+                toolListTokens: tokens(JSON.stringify((await client.listTools()).tools)),
+                instructionsTokens: tokens(client.getInstructions() ?? ''),
+                primeTokens: tokens(textOf(await client.callTool({name: 'synaipse_prime', arguments: {}})))
+            }));
+
+            const categories = [...new Set(EVAL_QUESTIONS.map((q) => q.category))];
+            const report: EvalReport = {
+                fixture: {notes: EVAL_NOTES.length, questions: EVAL_QUESTIONS.length},
+                context,
+                overall: summarize(results, EVAL_QUESTIONS),
+                byCategory: Object.fromEntries(categories.map((c) => [c, summarize(results.filter((r) => r.category === c), EVAL_QUESTIONS)])),
+                questions: results
+            };
+
+            const base = await readFile(BASELINE, 'utf8').then((raw) => JSON.parse(raw) as EvalReport, () => null);
+            const misses = results.filter((r) => r.rank !== 1).map((r) => `${r.id}${r.rank === 0 ? '✗' : `@${r.rank}`}${r.outdatedAbove ? '!' : ''}`);
+
+            process.stdout.write([
+                '',
+                `Synaipse LLM eval: ${report.fixture.questions} questions, ${report.fixture.notes} notes (baseline values in brackets)`,
+                '',
+                table(report, base),
+                '',
+                `context tokens: tool list ${report.context.toolListTokens}, instructions ${report.context.instructionsTokens}, prime ${report.context.primeTokens}`,
+                `not first (rank, ✗ = missing, ! = outdated above): ${misses.join(' ') || 'none'}`,
+                ''
+            ].join('\n') + '\n');
+
+            if (process.env.EVAL_UPDATE_BASELINE === '1' || base === null) {
+                await writeFile(BASELINE, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+                process.stdout.write(`baseline written → ${BASELINE}\n\n`);
+                return;
+            }
+
+            expect(regressions(base, report), 'regressions against eval/baseline.json').toEqual([]);
         } finally {
-            await rm(vaultDir, {recursive: true, force: true});
+            await rm(root, {recursive: true, force: true});
         }
     }, 120_000);
 });
