@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
 import {buildLinkKeyMap, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
@@ -55,7 +56,7 @@ import {
 import type {ChatAdapter} from '@synaipse/core';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
-import {HashCache} from '@synaipse/vault';
+import {EntryStore} from '@synaipse/vault';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, ChatPrivacyStats, SummarizeEvent} from './Chat.js';
 export type {RedactionHit, RedactionResult} from './Privacy.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
@@ -373,7 +374,7 @@ export class SynaipseService {
         });
         this.notes = overrides.notes ?? new FilesystemNoteAdapter(
             this.vault,
-            new HashCache(config.indexCachePath)
+            new EntryStore(config.statePath ?? path.join(config.vaultPath, '.synaipse', 'state.db'), {legacyJsonPath: config.indexCachePath})
         );
         this.history = overrides.history ?? new VaultHistory(this.vault);
         this.assetStore = overrides.assetStore ?? new FilesystemAssetStore(this.vault.root);
@@ -703,6 +704,7 @@ export class SynaipseService {
     public async stop(): Promise<void> {
         await this.watcher.stop();
         await this.notes.flushEntries();
+        this.notes.closeLocal?.();
     }
 
     public getLastIndexingStats(): IndexingStats {
@@ -718,13 +720,11 @@ export class SynaipseService {
     }
 
     public async search(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
-        const hits = await this.runSearch(query, mode, limit);
-
-        for (const hit of hits) {
-            this.touchAccess(hit.noteId);
-        }
-
-        return hits;
+        // A search hit is not an access: counting every hit made notes that
+        // rank well rank better (they also became graph seeds of the next
+        // search) and kept them out of `stale` without anyone reading them.
+        // Reads (readNote, related, backlinks) still count.
+        return this.runSearch(query, mode, limit);
     }
 
     private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {

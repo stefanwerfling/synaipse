@@ -243,7 +243,9 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
     // docker-compose creates it for the Qdrant / Ollama volumes.
     const base = {
         vaultPath,
+        // Legacy JSON index cache — only read once to migrate into statePath.
         indexCachePath: path.resolve(env.SYNAIPSE_INDEX_CACHE ?? path.join(vaultPath, '.synaipse-index.json')),
+        statePath: path.resolve(env.SYNAIPSE_STATE_DB ?? path.join(vaultPath, '.synaipse', 'state.db')),
         chatStoreDir: path.resolve(env.SYNAIPSE_CHAT_STORE_DIR ?? path.join(vaultPath, '.synaipse-chats')),
         auditLogPath: path.resolve(env.SYNAIPSE_AUDIT_LOG ?? path.join(vaultPath, '.synaipse-audit.jsonl')),
         schedulesPath: path.resolve(env.SYNAIPSE_SCHEDULES ?? path.join(vaultPath, '.synaipse-schedules.json')),

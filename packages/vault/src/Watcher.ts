@@ -19,7 +19,7 @@ export class VaultWatcher extends EventEmitter {
             // initial scan must also be excluded from live events, or the
             // chat sidecar (`.synaipse-chats/`) gets pulled into the vault
             // state every time we write a chat file.
-            ignored: (p) => /(?:^|[\\/])(?:\.git|\.obsidian|node_modules|\.trash|\.synaipse-chats)(?:[\\/]|$)/.test(p),
+            ignored: (p) => /(?:^|[\\/])(?:\.git|\.ngit|\.synaipse|\.obsidian|node_modules|\.trash|\.synaipse-chats)(?:[\\/]|$)/.test(p),
             ignoreInitial: true,
             persistent: true,
             awaitWriteFinish: {stabilityThreshold: 200, pollInterval: 50}

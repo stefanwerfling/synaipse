@@ -1,5 +1,5 @@
 import type {Note, NoteAdapter, NoteEntry, NoteId, NoteWriteContext, NoteWriteInput, WriteBatchChanges} from '@synaipse/core';
-import {HashCache} from './Cache.js';
+import type {EntryCache} from './EntryStore.js';
 import {Vault} from './Vault.js';
 
 /**
@@ -18,7 +18,7 @@ import {Vault} from './Vault.js';
 export class FilesystemNoteAdapter implements NoteAdapter {
     public constructor(
         private readonly vault: Vault,
-        private readonly cache: HashCache
+        private readonly cache: EntryCache
     ) {}
 
     public async load(): Promise<void> {
@@ -56,6 +56,10 @@ export class FilesystemNoteAdapter implements NoteAdapter {
         await this.vault.delete(id, ctx);
         this.cache.delete(id);
         await this.cache.flush();
+    }
+
+    public closeLocal(): void {
+        this.cache.close?.();
     }
 
     public commitBatch(changes: WriteBatchChanges, ctx: NoteWriteContext = {}): Promise<void> {

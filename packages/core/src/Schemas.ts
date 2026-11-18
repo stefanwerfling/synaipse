@@ -108,6 +108,8 @@ export const RuntimeModeSchema = Vts.or([
 export const ConfigSchema = Vts.object({
     vaultPath: Vts.string(),
     indexCachePath: Vts.string(),
+    /** SQLite state DB (index entries, access journal). Default `<vault>/.synaipse/state.db`. */
+    statePath: Vts.optional(Vts.string()),
     chatStoreDir: Vts.string(),
     auditLogPath: Vts.string(),
     schedulesPath: Vts.string(),

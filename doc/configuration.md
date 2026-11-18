@@ -11,7 +11,8 @@ cp .env.example .env
 | Variable | Default | Purpose |
 |---|---|---|
 | `SYNAIPSE_VAULT_PATH`  | `./vault`                                       | Folder Synaipse reads/writes Markdown from. |
-| `SYNAIPSE_INDEX_CACHE` | `<SYNAIPSE_VAULT_PATH>/.synaipse-index.json`    | Cache file for the in-memory note index. Sits inside the vault as a hidden sidecar — the walker only picks up `.md`, so it stays out of the notes list. |
+| `SYNAIPSE_STATE_DB`    | `<SYNAIPSE_VAULT_PATH>/.synaipse/state.db`     | SQLite state of the vault (`node:sqlite`, WAL): per-note hash, embedding state and access journal. Only changed rows are written. Local mode only — server mode keeps this in MariaDB. |
+| `SYNAIPSE_INDEX_CACHE` | `<SYNAIPSE_VAULT_PATH>/.synaipse-index.json`    | **Legacy.** The former JSON index cache. Read once on the first start with an empty state DB, imported without re-embedding, then renamed to `*.migrated-<ts>`. |
 
 The vault path is interpreted relative to the directory that the process is started from. For absolute portability use an absolute path.
 
@@ -270,7 +271,8 @@ WEB_API_PORT=3001
 | Variable                | Used by                          |
 |---|---|
 | `SYNAIPSE_VAULT_PATH`   | `@synaipse/vault`, MCP server, web API |
-| `SYNAIPSE_INDEX_CACHE`  | `@synaipse/service`              |
+| `SYNAIPSE_STATE_DB`     | `@synaipse/vault` (`EntryStore`) |
+| `SYNAIPSE_INDEX_CACHE`  | `@synaipse/vault` (one-time migration) |
 | `EMBEDDINGS_PROVIDER`   | `@synaipse/service`              |
 | `VOYAGE_*`              | `@synaipse/vector`               |
 | `OLLAMA_*`              | `@synaipse/vector`               |

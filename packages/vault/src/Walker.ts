@@ -1,7 +1,9 @@
 import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 
-const IGNORED_DIRS = new Set(['.git', '.obsidian', 'node_modules', '.trash', '.synaipse-chats']);
+// Keep in sync with Watcher.ts. `.synaipse/` holds the SQLite state DB,
+// `.ngit/` the version history — neither contains notes.
+const IGNORED_DIRS = new Set(['.git', '.ngit', '.synaipse', '.obsidian', 'node_modules', '.trash', '.synaipse-chats']);
 
 export async function* walkMarkdown(root: string): AsyncIterableIterator<string> {
     const entries = await readdir(root, {withFileTypes: true});

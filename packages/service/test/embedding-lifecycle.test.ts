@@ -1,5 +1,6 @@
 import {describe, it, expect, beforeEach, afterEach} from 'vitest';
-import {mkdtemp, rm, writeFile, mkdir, readFile} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile, mkdir, readdir} from 'node:fs/promises';
+import {StateDb} from '@synaipse/vault';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
@@ -161,16 +162,16 @@ describe('embedding lifecycle', () => {
         expect(second.getLastIndexingStats().reindexed).toBe(1);
     });
 
-    it('adopts legacy cache entries (no fingerprint) without re-embedding', async () => {
+    it('migrates a pre-upgrade JSON cache (no fingerprint) into the state DB without re-embedding', async () => {
         await writeNote(vaultDir, 'a.md', 'alpha');
         const first = await boot();
+        const note = first.readNote('a.md');
         await first.stop();
 
-        // Rewrite the cache as a pre-upgrade sidecar: hash/mtime only.
+        // Simulate the pre-upgrade layout: no state DB, JSON sidecar with hash/mtime only.
+        await rm(path.join(vaultDir, '.synaipse'), {recursive: true, force: true});
         const cacheFile = path.join(vaultDir, '.cache.json');
-        const legacy = JSON.parse(await readFile(cacheFile, 'utf8')) as Record<string, {hash: string; mtime: number}>;
-        for (const k of Object.keys(legacy)) legacy[k] = {hash: legacy[k]!.hash, mtime: legacy[k]!.mtime};
-        await writeFile(cacheFile, JSON.stringify(legacy), 'utf8');
+        await writeFile(cacheFile, JSON.stringify({'a.md': {hash: note.hash, mtime: note.mtime}}), 'utf8');
 
         const before = embedder.embeddedTexts;
         const second = await boot();
@@ -178,8 +179,14 @@ describe('embedding lifecycle', () => {
         expect(embedder.embeddedTexts).toBe(before);
         await second.stop();
 
-        const stamped = JSON.parse(await readFile(cacheFile, 'utf8')) as Record<string, {embedModel?: string}>;
-        expect(stamped['a.md']?.embedModel).toBe('voyage:voyage-test:3');
+        const files = await readdir(vaultDir);
+        expect(files).not.toContain('.cache.json');
+        expect(files.some((f) => f.startsWith('.cache.json.migrated-'))).toBe(true);
+
+        const state = new StateDb(path.join(vaultDir, '.synaipse', 'state.db'));
+        const row = state.db.prepare('SELECT embed_model FROM entries WHERE id = ?').get('a.md') as {embed_model: string};
+        state.close();
+        expect(row.embed_model).toBe('voyage:voyage-test:3');
     });
 
     it('B9: a corrupt cache is kept as backup and triggers a (logged) full re-embed', async () => {
@@ -188,7 +195,6 @@ describe('embedding lifecycle', () => {
 
         const svc = await boot();
         expect(svc.getLastIndexingStats().reindexed).toBe(1);
-        const {readdir} = await import('node:fs/promises');
         const files = await readdir(vaultDir);
         expect(files.some((f) => f.startsWith('.cache.json.corrupt-'))).toBe(true);
     });

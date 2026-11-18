@@ -74,6 +74,8 @@ export interface NoteAdapter {
      * per-write versioning omit it.
      */
     commitBatch?(changes: WriteBatchChanges, ctx?: NoteWriteContext): Promise<void>;
+    /** Release local resources (state DB handle). Called from SynaipseService.stop(). */
+    closeLocal?(): void;
     backlinksOf(id: NoteId): NoteId[];
     tags(): Map<string, NoteId[]>;
 

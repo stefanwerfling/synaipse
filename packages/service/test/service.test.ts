@@ -404,16 +404,19 @@ describe('SynaipseService.staleNotes', () => {
         expect(service.staleNotes({olderThanDays: 90}).length).toBe(0);
     });
 
-    it('search bumps lastAccessed for every hit', async () => {
+    it('a search hit alone does not count as access (only reads do)', async () => {
         await writeNote(vaultDir, 'old.md', '---\ntitle: Old\n---\nunique-token body');
         await ageFile(vaultDir, 'old.md', 200);
 
         service = new SynaipseService(buildConfig(vaultDir, cacheFile));
         await service.start();
 
-        await service.search('unique-token', 'fulltext', 5);
+        const hits = await service.search('unique-token', 'fulltext', 5);
+        expect(hits.map((h) => h.noteId)).toEqual(['old.md']);
+        expect(service.staleNotes({olderThanDays: 90}).map((n) => n.id)).toEqual(['old.md']);
 
-        expect(service.staleNotes({olderThanDays: 90}).length).toBe(0);
+        service.readNote('old.md');
+        expect(service.staleNotes({olderThanDays: 90})).toEqual([]);
     });
 
     it('respects pathPrefix', async () => {
