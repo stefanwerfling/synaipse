@@ -3,7 +3,7 @@
  * packages (e.g. @synaipse/web) when mounting MCP inside another process —
  * importing the CLI entrypoint `Index.js` would also start the server.
  */
-export {buildMcpHttpHandler, startServer, type StartServerOptions, type TransportMode} from './Server.js';
+export {buildMcpHttpHandler, startServer, type McpHttpHandler, type StartServerOptions, type TransportMode} from './Server.js';
 export {CachedUserStore} from './CachedUserStore.js';
 export {
     parseBearer,

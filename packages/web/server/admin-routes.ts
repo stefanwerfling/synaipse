@@ -2,6 +2,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {AccountRecord} from '@synaipse/core';
 import type {AuthContext} from './auth-routes.js';
 import {resolveCurrentAccount} from './auth-routes.js';
+import {readJsonBody} from './body.js';
 
 const MAX_EMAIL_LEN = 255;
 const MIN_PASSWORD_LEN = 8;
@@ -13,13 +14,7 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
     res.end(JSON.stringify(body));
 };
 
-const readJson = async (req: IncomingMessage): Promise<unknown> => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-    const raw = Buffer.concat(chunks).toString('utf8');
-    if (raw.length === 0) throw new Error('empty body');
-    return JSON.parse(raw);
-};
+const readJson = (req: IncomingMessage): Promise<unknown> => readJsonBody<unknown>(req);
 
 const accountForWire = (a: AccountRecord): Record<string, unknown> => ({
     id: a.id,

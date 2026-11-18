@@ -55,6 +55,18 @@ export class EventBroadcaster {
         }
     }
 
+    /** End every SSE stream (embed close): clients reconnect elsewhere or stop. */
+    public close(): void {
+        for (const client of this.clients) {
+            try {
+                client.end();
+            } catch {
+                // already gone
+            }
+        }
+        this.clients.clear();
+    }
+
     public clientCount(): number {
         return this.clients.size;
     }

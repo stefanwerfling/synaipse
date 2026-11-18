@@ -18,6 +18,7 @@ import {handleAdminRoute} from './admin-routes.js';
 import {handleConsentRoute} from './consent-routes.js';
 import {handleSchedulesRoute} from './schedules-routes.js';
 import type {Scheduler} from './scheduler.js';
+import {BodyTooLargeError, readJsonBody, readRawBody} from './body.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -67,21 +68,7 @@ const notFound = (res: ServerResponse): void => json(res, 404, {error: 'not foun
 
 const methodNotAllowed = (res: ServerResponse): void => json(res, 405, {error: 'method not allowed'});
 
-const readJson = async <T>(req: IncomingMessage): Promise<T> => {
-    const chunks: Buffer[] = [];
-
-    for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-    }
-
-    const raw = Buffer.concat(chunks).toString('utf8');
-
-    if (raw.length === 0) {
-        throw new Error('empty body');
-    }
-
-    return JSON.parse(raw) as T;
-};
+const readJson = <T>(req: IncomingMessage): Promise<T> => readJsonBody<T>(req);
 
 interface WriteNoteBody {
     content?: unknown;
@@ -728,23 +715,16 @@ export const routes = (
             return;
         }
 
-        const chunks: Buffer[] = [];
-        let total = 0;
-        const MAX_BYTES = 25 * 1024 * 1024;
-
-        for await (const chunk of req) {
-            const buf = chunk as Buffer;
-            total += buf.length;
-
-            if (total > MAX_BYTES) {
+        let body: Buffer;
+        try {
+            body = await readRawBody(req, 25 * 1024 * 1024);
+        } catch (error) {
+            if (error instanceof BodyTooLargeError) {
                 json(res, 413, {error: 'asset exceeds 25 MB limit'});
                 return;
             }
-
-            chunks.push(buf);
+            throw error;
         }
-
-        const body = Buffer.concat(chunks, total);
         const contentType = (req.headers['content-type'] as string | undefined) ?? null;
 
         if (body.length === 0) {

@@ -173,11 +173,14 @@ const readSessionIdHeader = (req: http.IncomingMessage): string | undefined => {
     return undefined;
 };
 
+/** The MCP Streamable-HTTP request listener plus session teardown. */
+export type McpHttpHandler = http.RequestListener & {closeAll(): Promise<void>};
+
 export const buildMcpHttpHandler = (
     config: Config,
     service: SynaipseService,
     options: {basePath: string; eventsUrl: string | null; userStore?: UserStore | null}
-): http.RequestListener => {
+): McpHttpHandler => {
     const publisher = new EventPublisher(options.eventsUrl);
     const tools = buildTools(service);
     const userStore = options.userStore ?? null;
@@ -196,7 +199,7 @@ export const buildMcpHttpHandler = (
             + 'Safe only for localhost; set auth before exposing the port to LAN / remote.');
     }
 
-    return (req, res) => {
+    const handler: http.RequestListener = (req, res) => {
         if (req.url === undefined || !req.url.startsWith(options.basePath)) {
             res.statusCode = 404;
             res.end('not found');
@@ -332,6 +335,15 @@ export const buildMcpHttpHandler = (
             }
         })();
     };
+
+    return Object.assign(handler, {
+        /** Close every open MCP session (embed close / shutdown). */
+        closeAll: async (): Promise<void> => {
+            const open = [...sessions.values()];
+            sessions.clear();
+            await Promise.allSettled(open.map((entry) => entry.server.close()));
+        }
+    });
 };
 
 interface OverridesResult {

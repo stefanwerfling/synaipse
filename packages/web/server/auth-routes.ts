@@ -1,6 +1,7 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {AccountRecord, AccountStore} from '@synaipse/core';
 import type {LoginRateLimit} from './login-rate-limit.js';
+import {readJsonBody} from './body.js';
 import {
     clearSessionCookieHeader,
     parseSessionCookie,
@@ -44,13 +45,7 @@ const clientKey = (req: IncomingMessage): string => {
     return req.socket?.remoteAddress ?? 'unknown';
 };
 
-const readJson = async (req: IncomingMessage): Promise<unknown> => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-    const raw = Buffer.concat(chunks).toString('utf8');
-    if (raw.length === 0) throw new Error('empty body');
-    return JSON.parse(raw);
-};
+const readJson = (req: IncomingMessage): Promise<unknown> => readJsonBody<unknown>(req);
 
 export interface AuthRouteResult {
     /** True if the route fully handled the request. */

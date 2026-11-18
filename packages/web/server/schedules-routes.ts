@@ -4,6 +4,7 @@ import type {JobType} from './jobs.js';
 import type {Scheduler} from './scheduler.js';
 import {parseCron, nextFireTime} from './cron.js';
 import {ALLOWED_JOB_TYPES, validateJobParams} from './job-validation.js';
+import {readJsonBody} from './body.js';
 
 const json = (res: ServerResponse, status: number, body: unknown): void => {
     res.writeHead(status, {'Content-Type': 'application/json'});
@@ -14,14 +15,7 @@ const notFound = (res: ServerResponse): void => json(res, 404, {error: 'not foun
 const methodNotAllowed = (res: ServerResponse): void => json(res, 405, {error: 'method not allowed'});
 const badRequest = (res: ServerResponse, msg: string): void => json(res, 400, {error: msg});
 
-const readJsonBody = async <T>(req: IncomingMessage): Promise<T> => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk as Buffer);
-    }
-    const raw = Buffer.concat(chunks).toString('utf8');
-    return raw.length > 0 ? JSON.parse(raw) as T : ({} as T);
-};
+const readBody = <T>(req: IncomingMessage): Promise<T> => readJsonBody<T>(req, {emptyAs: {} as T});
 
 interface Result {
     handled: boolean;
@@ -109,7 +103,7 @@ export const handleSchedulesRoute = async (
         }
 
         if (method === 'POST') {
-            const body = await readJsonBody<unknown>(req);
+            const body = await readBody<unknown>(req);
             const validation = validateCreateBody(body);
             if (!validation.ok) {
                 badRequest(res, validation.message);
@@ -168,7 +162,7 @@ export const handleSchedulesRoute = async (
             const current = await store.get(id);
             if (current === null) { notFound(res); return done; }
 
-            const body = await readJsonBody<Record<string, unknown>>(req);
+            const body = await readBody<Record<string, unknown>>(req);
             const patch: SchedulePatch = {};
 
             if (typeof body.name === 'string' && body.name.trim().length > 0) {

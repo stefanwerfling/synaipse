@@ -4,6 +4,16 @@
   "private": true,
   "description": "Synaipse web UI (vanilla TS + DOM)",
   "type": "module",
+  "exports": {
+    "./embed": {
+      "types": "./dist/server/embed.d.ts",
+      "import": "./dist/server/embed.js"
+    },
+    "./mount": {
+      "types": "./src/mount.ts",
+      "default": "./src/mount.ts"
+    }
+  },
   "scripts": {
     "build": "tsc --build && vite build",
     "clean": "tsc --build --clean && rimraf dist",

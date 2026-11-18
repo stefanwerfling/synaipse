@@ -1,22 +1,22 @@
 import type {IncomingMessage, RequestListener, ServerResponse} from 'node:http';
 import type {URL} from 'node:url';
-import type {AccountStore, ScheduleStore, UserStore} from '@synaipse/core';
+import type {AccountStore, Config, ScheduleStore, UserStore} from '@synaipse/core';
 import type {ServiceOverrides} from '@synaipse/service';
 import type {SynaipseService as SynaipseServiceType} from '@synaipse/service';
 import type {AuthContext} from './auth-routes.js';
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
-const resolveAuthCacheTtlMs = (): number => {
-    const raw = process.env.SYNAIPSE_AUTH_CACHE_TTL_MS;
+const resolveAuthCacheTtlMs = (env: NodeJS.ProcessEnv): number => {
+    const raw = env.SYNAIPSE_AUTH_CACHE_TTL_MS;
     if (raw === undefined || raw.trim() === '') return DEFAULT_AUTH_CACHE_TTL_MS;
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AUTH_CACHE_TTL_MS;
     return parsed;
 };
 
-const resolveSecureCookie = (): boolean => {
-    const raw = process.env.SYNAIPSE_COOKIE_SECURE;
+const resolveSecureCookie = (env: NodeJS.ProcessEnv): boolean => {
+    const raw = env.SYNAIPSE_COOKIE_SECURE;
     if (raw === undefined) return false;
     const lower = raw.trim().toLowerCase();
     return lower === '1' || lower === 'true' || lower === 'yes';
@@ -24,22 +24,52 @@ const resolveSecureCookie = (): boolean => {
 
 /**
  * Everything the embedding host (standalone `index.ts`, or an in-process
- * host like pkgstudio) needs to wire Synaipse into an HTTP surface:
+ * host like PKG Studio) needs to wire Synaipse into an HTTP surface:
  * two plain Node request handlers sharing one started `SynaipseService`.
  * The factory never calls `listen` and installs no signal handlers — the
  * caller owns the transport and lifecycle (see `close`).
+ *
+ * Import the types from `@synaipse/web/embed` instead of copying them.
  */
 export interface SynaipseEmbed {
-    /** Handles `/api/*` (the full REST surface). `url.pathname` is matched. */
+    /**
+     * Handles `/api/*` (the full REST surface). `url.pathname` is matched.
+     * Works whether or not the host already parsed the body (express.json()).
+     */
     apiHandle: (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
     /** Handles the MCP Streamable-HTTP endpoint (stateful sessions). */
     mcpHandler: RequestListener;
     /** The MCP base path this embed answers on (e.g. "/mcp"). */
     mcpBasePath: string;
+    mode: 'local' | 'server';
     /** The shared, already-started service (vault + vector + scheduler). */
     service: SynaipseServiceType;
-    /** Tears down scheduler, schedule store, service and adapters. */
+    /**
+     * Tears down everything this embed started: scheduler and schedule
+     * store, running jobs, SSE clients, MCP sessions, the service (watcher,
+     * state DB) and the storage adapters. Idempotent.
+     */
     close: () => Promise<void>;
+}
+
+export type SynaipseHealth =
+    | {status: 'starting'}
+    | {status: 'ready'; notes: number; mode: 'local' | 'server'}
+    | {status: 'failed'; error: string}
+    | {status: 'closed'};
+
+/**
+ * Returned synchronously by {@link startSynaipseEmbed}: the handlers work
+ * immediately and answer 503 + `Retry-After` until `ready` resolves — the
+ * host needs no "is it up yet" heuristic of its own.
+ */
+export interface SynaipseEmbedHandle {
+    ready: Promise<SynaipseEmbed>;
+    health(): SynaipseHealth;
+    apiHandle: SynaipseEmbed['apiHandle'];
+    mcpHandler: RequestListener;
+    mcpBasePath: string;
+    close(): Promise<void>;
 }
 
 interface OverridesResult {
@@ -51,8 +81,18 @@ interface OverridesResult {
 }
 
 export interface CreateSynaipseEmbedOptions {
-    /** Override the MCP base path (default: SYNAIPSE_MCP_PATH env or "/mcp"). */
+    /** Override the MCP base path (default: SYNAIPSE_MCP_PATH or "/mcp"). */
     mcpBasePath?: string;
+    /**
+     * Explicit configuration. When omitted it is built from `env` — so a
+     * host passes its settings here instead of mutating `process.env`.
+     */
+    config?: Config;
+    /**
+     * Environment for everything not in `config` (MCP path, cookie flag,
+     * auth-cache TTL, crawler API keys). Default: `process.env`.
+     */
+    env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -76,8 +116,9 @@ export const createSynaipseEmbed = async (
     const {InMemorySessionStore} = await import('./sessions.js');
     const {LoginRateLimit} = await import('./login-rate-limit.js');
 
-    const config = loadConfigFromEnv();
-    const mcpBasePath = (options.mcpBasePath ?? process.env.SYNAIPSE_MCP_PATH ?? '/mcp')
+    const env = options.env ?? process.env;
+    const config = options.config ?? loadConfigFromEnv(env);
+    const mcpBasePath = (options.mcpBasePath ?? env.SYNAIPSE_MCP_PATH ?? '/mcp')
         .replace(/\/+$/, '') || '/mcp';
 
     const buildOverrides = async (): Promise<OverridesResult> => {
@@ -98,7 +139,7 @@ export const createSynaipseEmbed = async (
         const {createServerAdapters} = await import('@synaipse/server-storage');
         const bundle = await createServerAdapters(config.mariadb);
 
-        const cacheTtl = resolveAuthCacheTtlMs();
+        const cacheTtl = resolveAuthCacheTtlMs(env);
         const userStore: UserStore = cacheTtl > 0
             ? new CachedUserStore(bundle.users, cacheTtl)
             : bundle.users;
@@ -127,7 +168,7 @@ export const createSynaipseEmbed = async (
             sessions: new InMemorySessionStore(),
             accounts: accountStore,
             rateLimit: new LoginRateLimit(),
-            secureCookie: resolveSecureCookie()
+            secureCookie: resolveSecureCookie(env)
         };
     }
 
@@ -135,7 +176,7 @@ export const createSynaipseEmbed = async (
     await service.start();
 
     const broadcaster = new EventBroadcaster();
-    const jobs = new JobManager(service);
+    const jobs = new JobManager(service, env);
 
     const scheduleStore: ScheduleStore = mariaScheduleStore ?? new LocalScheduleStore(config.schedulesPath);
     const scheduler = new Scheduler(scheduleStore, jobs);
@@ -165,12 +206,88 @@ export const createSynaipseEmbed = async (
         userStore
     });
 
-    const close = async (): Promise<void> => {
-        scheduler.stop();
-        await scheduleStore.close();
-        await service.stop();
-        await closeAdapters();
+    let closed: Promise<void> | null = null;
+    const close = (): Promise<void> => {
+        closed ??= (async () => {
+            scheduler.stop();
+            jobs.stopAll();
+            broadcaster.close();
+            await mcpHandler.closeAll();
+            await scheduleStore.close();
+            await service.stop();
+            await closeAdapters();
+        })();
+        return closed;
     };
 
-    return {apiHandle, mcpHandler, mcpBasePath, service, close};
+    return {apiHandle, mcpHandler, mcpBasePath, mode: config.mode === 'server' ? 'server' : 'local', service, close};
+};
+
+/**
+ * Start Synaipse in the background and hand back working handlers at once
+ * (plan P3 / E2). Until startup finished they answer 503 with
+ * `Retry-After`; after a failed start, 500 with the reason.
+ */
+export const startSynaipseEmbed = (options: CreateSynaipseEmbedOptions = {}): SynaipseEmbedHandle => {
+    const mcpBasePath = (options.mcpBasePath ?? (options.env ?? process.env).SYNAIPSE_MCP_PATH ?? '/mcp')
+        .replace(/\/+$/, '') || '/mcp';
+    let state: SynaipseHealth = {status: 'starting'};
+    let embed: SynaipseEmbed | null = null;
+
+    const ready = createSynaipseEmbed({...options, mcpBasePath});
+    ready.then(
+        (e) => {
+            embed = e;
+            if (state.status === 'starting') {
+                state = {status: 'ready', notes: e.service.listNotes().length, mode: e.mode};
+            } else {
+                // close() was called while starting: tear down right away.
+                void e.close();
+            }
+        },
+        (error: unknown) => {
+            state = {status: 'failed', error: error instanceof Error ? error.message : String(error)};
+        }
+    );
+
+    const notReady = (res: ServerResponse): void => {
+        if (state.status === 'starting') {
+            res.statusCode = 503;
+            res.setHeader('Retry-After', '1');
+            res.end('synaipse is starting');
+            return;
+        }
+        res.statusCode = state.status === 'failed' ? 500 : 503;
+        res.end(state.status === 'failed' ? `synaipse failed to start: ${state.error}` : 'synaipse is closed');
+    };
+
+    return {
+        ready,
+        mcpBasePath,
+        health: () => {
+            if (state.status === 'ready' && embed !== null) {
+                return {...state, notes: embed.service.listNotes().length};
+            }
+            return state;
+        },
+        apiHandle: async (req, res, url) => {
+            if (embed === null || state.status !== 'ready') {
+                notReady(res);
+                return;
+            }
+            await embed.apiHandle(req, res, url);
+        },
+        mcpHandler: (req, res) => {
+            if (embed === null || state.status !== 'ready') {
+                notReady(res);
+                return;
+            }
+            embed.mcpHandler(req, res);
+        },
+        close: async () => {
+            const wasReady = state.status === 'ready';
+            state = {status: 'closed'};
+            if (wasReady && embed !== null) await embed.close();
+        }
+    };
 };

@@ -2,6 +2,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {UserRecord} from '@synaipse/core';
 import type {AuthContext} from './auth-routes.js';
 import {resolveCurrentAccount} from './auth-routes.js';
+import {readJsonBody} from './body.js';
 
 const MAX_LABEL_LEN = 64;
 const LABEL_RE = /^[a-zA-Z0-9_.\- ]+$/;
@@ -12,13 +13,7 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
     res.end(JSON.stringify(body));
 };
 
-const readJson = async (req: IncomingMessage): Promise<unknown> => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-    const raw = Buffer.concat(chunks).toString('utf8');
-    if (raw.length === 0) throw new Error('empty body');
-    return JSON.parse(raw);
-};
+const readJson = (req: IncomingMessage): Promise<unknown> => readJsonBody<unknown>(req);
 
 /** Sanitized token DTO — same shape as UserRecord minus path/tool restrictions which are admin-only for v1. */
 const tokenForWire = (u: UserRecord): Record<string, unknown> => ({

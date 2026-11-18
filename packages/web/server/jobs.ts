@@ -138,7 +138,18 @@ export class JobManager {
     private readonly aborts = new Map<string, AbortController>();
     private readonly subscribers = new Map<string, Set<Listener>>();
 
-    public constructor(private readonly service: SynaipseService) {}
+    public constructor(
+        private readonly service: SynaipseService,
+        /** Source of DEVTO_API_KEY / GITHUB_TOKEN fallbacks (embed: explicit, not process.env). */
+        private readonly env: NodeJS.ProcessEnv = process.env
+    ) {}
+
+    /** Abort every running job (embed close). */
+    public stopAll(): void {
+        for (const [id, abort] of this.aborts) {
+            if (this.jobs.get(id)?.status === 'running') abort.abort();
+        }
+    }
 
     public startJob(type: JobType, params: JobParams, opts?: {scheduleId?: string}): JobRecord {
         const id = randomUUID();
@@ -514,7 +525,7 @@ export class JobManager {
      */
     private async runDevtoCrawl(job: JobRecord): Promise<void> {
         const params = job.params as CrawlDevtoJobParams;
-        const apiKey = (params.apiKey ?? process.env.DEVTO_API_KEY ?? '').trim();
+        const apiKey = (params.apiKey ?? this.env.DEVTO_API_KEY ?? '').trim();
         if (apiKey === '') {
             this.fail(job.id, 'dev.to API key missing — set DEVTO_API_KEY or provide one in the job');
             return;
@@ -538,7 +549,7 @@ export class JobManager {
 
     private async runGithubStarsCrawl(job: JobRecord): Promise<void> {
         const params = job.params as CrawlGithubStarsJobParams;
-        const token = (params.token ?? process.env.GITHUB_TOKEN ?? '').trim();
+        const token = (params.token ?? this.env.GITHUB_TOKEN ?? '').trim();
         if (token === '') {
             this.fail(job.id, 'GitHub token missing — set GITHUB_TOKEN or provide one in the job');
             return;
