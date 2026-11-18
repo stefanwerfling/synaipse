@@ -9,7 +9,8 @@ import type {Config, UserStore} from '@synaipse/core';
 import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
-import {buildTools, type ToolHandler, type ToolContext} from './Tools.js';
+import {buildTools, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
+import {buildInstructions} from './Instructions.js';
 import {resolveContextFromRequest} from './Project.js';
 import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
@@ -49,18 +50,19 @@ export const resolvePathArg = (tool: ToolHandler, args: Record<string, unknown>)
     return Array.isArray(required) && required.includes(tool.pathArg) ? '' : undefined;
 };
 
-const buildMcpServer = (
+export const buildMcpServer = (
     config: Config,
     tools: ToolHandler[],
     publisher: EventPublisher,
+    project: string | null,
     ctx: ToolContext = {},
     scope: TokenScope = NO_AUTH_SCOPE
 ): Server => {
     const byName = new Map(tools.map((t) => [t.definition.name, t]));
 
     const server = new Server(
-        {name: config.server.name, version: config.server.version},
-        {capabilities: {tools: {}}}
+        {name: config.server.name, title: 'Synaipse', version: config.server.version},
+        {capabilities: {tools: {}}, instructions: buildInstructions(project)}
     );
 
     // ListTools filters by tool whitelist when the scope has one set —
@@ -78,11 +80,16 @@ const buildMcpServer = (
             .map((t) => t.definition)
     }));
 
-    server.setRequestHandler(CallToolRequestSchema, async (request): Promise<{content: Array<{type: 'text'; text: string}>; isError?: boolean}> => {
+    server.setRequestHandler(CallToolRequestSchema, async (request): Promise<ToolResponse> => {
         const tool = byName.get(request.params.name);
 
+        // Tool-level error, not a protocol error: the model sees it and can
+        // correct itself instead of the client aborting the turn.
         if (!tool) {
-            throw new Error(`Unknown tool: ${request.params.name}`);
+            return {
+                isError: true,
+                content: [{type: 'text', text: `Unknown tool: ${request.params.name}. Call tools/list for the available synaipse_* tools.`}]
+            };
         }
 
         const args = (request.params.arguments ?? {}) as Record<string, unknown>;
@@ -291,7 +298,7 @@ export const buildMcpHttpHandler = (
                 headers: req.headers,
                 basePath: options.basePath
             });
-            const server = buildMcpServer(config, tools, publisher, ctx, scope);
+            const server = buildMcpServer(config, tools, publisher, service.getProject(ctx.project), ctx, scope);
             const tokenLabel = scope.label;
 
             const transport = new StreamableHTTPServerTransport({
@@ -398,7 +405,7 @@ export const startServer = async (config: Config, options: StartServerOptions): 
     } else {
         const publisher = new EventPublisher(options.eventsUrl);
         const tools = buildTools(service);
-        const server = buildMcpServer(config, tools, publisher);
+        const server = buildMcpServer(config, tools, publisher, service.getProject());
         const transport = new StdioServerTransport();
         await server.connect(transport);
     }

@@ -34,7 +34,7 @@
     "@synaipse/service": "*",
     "@synaipse/vault": "*",
     "@synaipse/vector": "*",
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.7"
   }
 }

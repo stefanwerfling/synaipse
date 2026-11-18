@@ -14,7 +14,7 @@ import {
     upsertStep
 } from '@synaipse/core';
 import {getAuditTokenLabel, type SynaipseService} from '@synaipse/service';
-import {asNumber, asString, ok, type ToolContext, type ToolHandler} from './Shared.js';
+import {asLimit, asString, ok, type ToolContext, type ToolHandler} from './Shared.js';
 
 /** Who is mutating the roadmap — the auth token label, or "claude" in dev. */
 const roadmapActor = (): string => getAuditTokenLabel() ?? 'claude';
@@ -62,7 +62,18 @@ const resolveNoteLinks = (
 };
 
 /** Apply an update_step field patch to a step, returning a new step. */
+/** Reject a present-but-invalid enum value instead of silently ignoring it. */
+const assertEnum = (args: Record<string, unknown>, field: string, allowed: readonly string[]): void => {
+    const value = args[field];
+    if (value !== undefined && value !== null && !(typeof value === 'string' && allowed.includes(value))) {
+        throw new Error(`Invalid ${field} "${String(value)}" — expected one of: ${allowed.join(', ')}`);
+    }
+};
+
 const patchStep = (step: RoadmapStep, args: Record<string, unknown>): RoadmapStep => {
+    assertEnum(args, 'status', ROADMAP_STATUSES);
+    assertEnum(args, 'owner', ['ai', 'human']);
+    assertEnum(args, 'priority', ['low', 'med', 'high']);
     const next: RoadmapStep = {...step};
     if (typeof args.title === 'string' && args.title.length > 0) next.title = args.title;
     if (isRoadmapStatus(args.status)) next.status = args.status;
@@ -213,13 +224,13 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
                 type: 'object',
                 properties: {
                     stepId: {type: 'string', description: 'Id of the step to update.'},
-                    status: {type: 'string', description: 'New status: backlog|planned|in_progress|ai_active|review|blocked|done|cancelled'},
+                    status: {type: 'string', enum: [...ROADMAP_STATUSES], description: 'New status.'},
                     title: {type: 'string'},
                     plannedHours: {type: 'number', description: 'Planned implementation time in hours.'},
                     actualHours: {type: 'number', description: 'Actual time spent in hours.'},
-                    progress: {type: 'number', description: '0-100.'},
-                    owner: {type: 'string', description: '"ai" or "human".'},
-                    priority: {type: 'string', description: '"low", "med" or "high".'},
+                    progress: {type: 'number', minimum: 0, maximum: 100},
+                    owner: {type: 'string', enum: ['ai', 'human']},
+                    priority: {type: 'string', enum: ['low', 'med', 'high']},
                     acceptance: {type: 'string', description: 'Definition of done.'},
                     evaluation: {type: 'string', description: 'Your assessment / rationale / remaining-estimate for this step.'},
                     dependsOn: {type: 'array', items: {type: 'string'}, description: 'Step ids this step depends on.'},
@@ -340,7 +351,7 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
         },
         handle: async (args, ctx) => {
             const project = requireRoadmapProject(service, ctx);
-            const limit = asNumber(args.limit, 30);
+            const limit = asLimit(args.limit, 30);
             const history = await service.roadmapHistory(project, limit);
             return {
                 response: ok({project, history}),

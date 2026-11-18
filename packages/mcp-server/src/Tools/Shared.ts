@@ -96,10 +96,12 @@ const filterNotesByConsent = (
     return {items: kept, skipped};
 };
 
-export interface ToolResponse {
+// A type alias (not an interface) so it stays assignable to the SDK's
+// index-signature CallToolResult.
+export type ToolResponse = {
     content: Array<{type: 'text'; text: string}>;
     isError?: boolean;
-}
+};
 
 export interface ToolEventInfo {
     kind: EventKind;
@@ -120,8 +122,12 @@ export interface ToolContext {
 
 const EMPTY_CTX: ToolContext = {};
 
+/**
+ * Compact JSON: the result is read by a model, not a human, and
+ * pretty-printing costs 20-30 % extra tokens for nothing.
+ */
 const ok = (data: unknown): ToolResponse => ({
-    content: [{type: 'text', text: JSON.stringify(data, null, 2)}]
+    content: [{type: 'text', text: JSON.stringify(data)}]
 });
 
 const asString = (value: unknown, field: string): string => {
@@ -132,20 +138,31 @@ const asString = (value: unknown, field: string): string => {
     return value;
 };
 
-const asNumber = (value: unknown, fallback: number): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return value;
+/** Upper bound for every `limit` argument (mirrored into the schemas by applyAcl). */
+const LIMIT_MAX = 500;
+
+/** Integer limit in [1, LIMIT_MAX]; missing/invalid → fallback. */
+const asLimit = (value: unknown, fallback: number): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return fallback;
     }
 
-    return fallback;
+    return Math.min(LIMIT_MAX, Math.max(1, Math.trunc(value)));
 };
 
+const SEARCH_MODES: readonly SearchMode[] = ['fulltext', 'semantic', 'hybrid'];
+
+/** Omitted → hybrid. An unknown value is rejected instead of silently replaced. */
 const asSearchMode = (value: unknown): SearchMode => {
-    if (value === 'fulltext' || value === 'semantic' || value === 'hybrid') {
-        return value;
+    if (value === undefined || value === null) {
+        return 'hybrid';
     }
 
-    return 'hybrid';
+    if (!(SEARCH_MODES as readonly unknown[]).includes(value)) {
+        throw new Error(`Invalid mode "${String(value)}" — expected one of: ${SEARCH_MODES.join(', ')}`);
+    }
+
+    return value as SearchMode;
 };
 
 export interface ToolHandler {
@@ -172,4 +189,4 @@ export interface ToolHandler {
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 
-export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asNumber, asSearchMode, EMPTY_CTX};
+export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asLimit, asSearchMode, EMPTY_CTX, LIMIT_MAX};

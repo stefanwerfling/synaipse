@@ -1,6 +1,6 @@
 import {extractTypedLinks} from '@synaipse/core';
 import {isPathInScope, type SynaipseService} from '@synaipse/service';
-import {asNumber, asString, enforceReadConsent, filterByConsent, ok, type ToolHandler} from './Shared.js';
+import {asLimit, asString, enforceReadConsent, filterByConsent, ok, type ToolHandler} from './Shared.js';
 
 /** Link topology: backlinks, outgoing links, graph, link suggestions. */
 export const graphTools = (service: SynaipseService): ToolHandler[] => [
@@ -80,7 +80,7 @@ export const graphTools = (service: SynaipseService): ToolHandler[] => [
             }
         },
         handle: async (args) => {
-            const limit = asNumber(args.limit, 20);
+            const limit = asLimit(args.limit, 20);
             const minScore = typeof args.minScore === 'number' ? args.minScore : 0.65;
             const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
             const suggestions = (await service.suggestLinks({limit, minScore, pathPrefix}))

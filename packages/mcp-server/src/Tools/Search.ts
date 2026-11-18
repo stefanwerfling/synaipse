@@ -1,5 +1,5 @@
 import {isPathInScope, type SynaipseService} from '@synaipse/service';
-import {asNumber, asSearchMode, asString, filterByConsent, filterNotesByConsent, ok, type ToolHandler} from './Shared.js';
+import {asLimit, asSearchMode, asString, filterByConsent, filterNotesByConsent, ok, type ToolHandler} from './Shared.js';
 
 /** Retrieval, listing and the session primer. */
 export const searchTools = (service: SynaipseService): ToolHandler[] => [
@@ -21,7 +21,8 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
         handle: async (args) => {
             const query = asString(args.query, 'query');
             const explain = args.explain === true;
-            const raw = await service.search(query, asSearchMode(args.mode), asNumber(args.limit, 10));const stripped = explain
+            const raw = await service.search(query, asSearchMode(args.mode), asLimit(args.limit, 10));
+            const stripped = explain
                 ? raw
                 : raw.map(({components: _components, ...rest}) => rest);
             const filtered = filterByConsent(service, stripped, (h) => h.noteId);
@@ -48,7 +49,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
         },
         handle: async (args) => {
             const prefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
-            const limit = asNumber(args.limit, 200);
+            const limit = asLimit(args.limit, 200);
 
             const raw = service.listNotes().filter((n) => n.id.startsWith(prefix));
             const filtered = filterNotesByConsent(raw);
@@ -120,7 +121,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             }
         },
         handle: async (args) => {
-            const limit = asNumber(args.limit, 20);
+            const limit = asLimit(args.limit, 20);
             const sorted = [...service.listNotes()]
                 .sort((a, b) => b.mtime - a.mtime);
             const filtered = filterNotesByConsent(sorted);
@@ -150,7 +151,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             }
         },
         handle: async (args, ctx) => {
-            const limit = asNumber(args.limit, 15);
+            const limit = asLimit(args.limit, 15);
             const topic = typeof args.topic === 'string' ? args.topic : '';
             const includeCrawler = args.includeCrawler === true;
             const result = await service.prime({project: ctx?.project ?? null, limit, topic, includeCrawler});
@@ -184,7 +185,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
         },
         handle: async (args) => {
             const id = asString(args.id, 'id');
-            const raw = await service.related(id, asNumber(args.limit, 10));
+            const raw = await service.related(id, asLimit(args.limit, 10));
             const filtered = filterByConsent(service, raw, (r) => r.id);
             return {
                 response: ok({
@@ -238,7 +239,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
         handle: async (args) => {
             const olderThanDays = typeof args.olderThanDays === 'number' ? args.olderThanDays : 90;
             const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
-            const limit = asNumber(args.limit, 100);
+            const limit = asLimit(args.limit, 100);
             const raw = service.staleNotes({olderThanDays, pathPrefix, limit});
             const filtered = filterByConsent(service, raw, (n) => n.id);
             return {
