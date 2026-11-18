@@ -15,7 +15,7 @@ import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {Search} from './Search.js';
 import {Settings} from './Settings.js';
-import {TagBar, TagEntry} from './TagBar.js';
+import {TagBar, TagEntry, viewModeCodec, type ViewMode} from './TagBar.js';
 import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 import {Disposables} from './Disposables.js';
 import type {ChatPanel} from './ChatPanel.js';
@@ -33,14 +33,12 @@ const STORAGE_VIEW_MODE = 'synaipse.graph.viewMode';
 const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
-// Node-count thresholds that gate which renderer the UI is allowed to
-// choose. The 2D view places notes on the client and has no zoomed-out
-// overview; the 3D view (three.js) simulates every frame. The Atlas uses
-// the server layout and jsNGraph's cluster LOD, so from 20k it is forced;
-// the softer warning at 5k gives users a heads-up that they're in
-// expensive territory but doesn't take the choice away.
-const HUGE_GRAPH_FORCE_ATLAS = 20_000;
-const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
+// Node-count thresholds for the 3D view (three.js simulates every frame).
+// The 2D view scales on its own: from a few thousand notes it switches to
+// the server layout with a community overview (see Graph.ts), so only 3D
+// is limited: a warning from 5k, from 20k the 2D view is forced.
+const HUGE_GRAPH_FORCE_2D = 20_000;
+const HUGE_GRAPH_WARN_3D = 5_000;
 
 
 export class App {
@@ -56,7 +54,7 @@ export class App {
     private notesPanel: NotesPanel;
     private tagBar: TagBar | null = null;
     private graphView: GraphRenderer | null = null;
-    private graphViewMode: '2d' | '3d' | 'atlas' | null = null;
+    private graphViewMode: ViewMode | null = null;
     private search: Search | null = null;
     private activityLog: ActivityLog;
     private events: EventStream;
@@ -86,7 +84,7 @@ export class App {
     private showRoomGrid: PersistentValue<boolean>;
     private showCluster: PersistentValue<boolean>;
     private showCommunities: PersistentValue<boolean>;
-    private viewMode: PersistentValue<'2d' | '3d' | 'atlas'>;
+    private viewMode: PersistentValue<ViewMode>;
     private heatRaf: number | null = null;
     private reloadTimer: number | null = null;
     /** Everything the app starts; released by destroy() (plan P3 / D1). */
@@ -108,7 +106,7 @@ export class App {
         this.showRoomGrid = new PersistentValue<boolean>(STORAGE_SHOW_ROOM_GRID, false);
         this.showCluster = new PersistentValue<boolean>(STORAGE_SHOW_CLUSTER, false);
         this.showCommunities = new PersistentValue<boolean>(STORAGE_SHOW_COMMUNITIES, false);
-        this.viewMode = new PersistentValue<'2d' | '3d' | 'atlas'>(STORAGE_VIEW_MODE, '2d');
+        this.viewMode = new PersistentValue<ViewMode>(STORAGE_VIEW_MODE, '2d', viewModeCodec);
 
         this.notesPanel = new NotesPanel({
             onNotesChanged: () => {
@@ -772,9 +770,6 @@ export class App {
         if (effectiveMode === '3d') {
             const {GraphView3D} = await import('./Graph3D.js');
             this.graphView = new GraphView3D(state, callbacks);
-        } else if (effectiveMode === 'atlas') {
-            const {GraphAtlasView} = await import('./GraphAtlas.js');
-            this.graphView = new GraphAtlasView(state, callbacks);
         } else {
             const {GraphView} = await import('./Graph.js');
             this.graphView = new GraphView(state, callbacks);
@@ -814,7 +809,7 @@ export class App {
             onToggleRoomGrid: () => this.showRoomGrid.update((v) => !v),
             onToggleCluster: () => this.showCluster.update((v) => !v),
             onToggleCommunities: () => this.showCommunities.update((v) => !v),
-            onSetViewMode: (mode: '2d' | '3d' | 'atlas') => this.viewMode.set(mode)
+            onSetViewMode: (mode: ViewMode) => this.viewMode.set(mode)
         };
 
         const state = {
@@ -847,15 +842,15 @@ export class App {
 
     /**
      * Effective render mode = user preference clamped to what the current
-     * graph size can actually support. Anything past 20k nodes is forced
-     * to Atlas (server layout + cluster overview), see the thresholds above.
+     * graph size can actually support. Past 20k nodes 3D is replaced by
+     * 2D (server layout + community overview), see the thresholds above.
      */
-    private effectiveViewMode(): '2d' | '3d' | 'atlas' {
+    private effectiveViewMode(): ViewMode {
         const requested = this.viewMode.get();
         const nodeCount = this.graph?.nodes.length ?? 0;
 
-        if (nodeCount >= HUGE_GRAPH_FORCE_ATLAS && requested !== 'atlas') {
-            return 'atlas';
+        if (nodeCount >= HUGE_GRAPH_FORCE_2D && requested === '3d') {
+            return '2d';
         }
 
         return requested;
@@ -864,11 +859,11 @@ export class App {
     private viewModeOverrideReason(): {kind: 'forced' | 'warned'; nodeCount: number} | null {
         const nodeCount = this.graph?.nodes.length ?? 0;
 
-        if (nodeCount >= HUGE_GRAPH_FORCE_ATLAS) {
+        if (nodeCount >= HUGE_GRAPH_FORCE_2D) {
             return {kind: 'forced', nodeCount};
         }
 
-        if (nodeCount >= HUGE_GRAPH_WARN_INTERACTIVE && this.viewMode.get() !== 'atlas') {
+        if (nodeCount >= HUGE_GRAPH_WARN_3D && this.viewMode.get() === '3d') {
             return {kind: 'warned', nodeCount};
         }
 

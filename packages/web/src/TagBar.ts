@@ -1,9 +1,19 @@
 import {clear, el} from './Dom.js';
 import {tagColor} from './Colors.js';
+import type {StorageCodec} from './Persistence.js';
 import {TagPicker} from './TagPicker.js';
 import type {TagEntry} from './TagGroups.js';
 
 export type {TagEntry};
+
+/** 2D (jsNGraph, every vault size) or 3D (three.js). */
+export type ViewMode = '2d' | '3d';
+
+/** Stored view mode; anything else (e.g. the former 'atlas') reads as 2D. */
+export const viewModeCodec: StorageCodec<ViewMode> = {
+    serialize: (mode) => JSON.stringify(mode),
+    deserialize: (raw) => (JSON.parse(raw) === '3d' ? '3d' : '2d')
+};
 
 export interface TagBarState {
     tags: TagEntry[];
@@ -15,17 +25,17 @@ export interface TagBarState {
     showCluster: boolean;
     showCommunities: boolean;
     /** The user's persisted preference — what the buttons show as "pressed". */
-    viewMode: '2d' | '3d' | 'atlas';
+    viewMode: ViewMode;
     /**
      * What the App actually renders. Diverges from `viewMode` when the
      * graph is too large for the requested renderer. Defaults to viewMode
      * if omitted so older callers keep working.
      */
-    effectiveViewMode?: '2d' | '3d' | 'atlas';
+    effectiveViewMode?: ViewMode;
     /**
-     * Set when the graph is big enough that the App overrode the user's
-     * chosen renderer (`forced`) or is close to that limit (`warned`).
-     * Used to disable/annotate the mode buttons.
+     * Set when the graph is too big for 3D (`forced`: 3D is off) or close
+     * to that limit while 3D is chosen (`warned`). Used to disable/annotate
+     * the 3D button.
      */
     modeOverride?: {kind: 'forced' | 'warned'; nodeCount: number} | null;
     project: string | null;
@@ -40,7 +50,7 @@ export interface TagBarCallbacks {
     onToggleRoomGrid: () => void;
     onToggleCluster: () => void;
     onToggleCommunities: () => void;
-    onSetViewMode: (mode: '2d' | '3d' | 'atlas') => void;
+    onSetViewMode: (mode: ViewMode) => void;
 }
 
 export class TagBar {
@@ -93,44 +103,36 @@ export class TagBar {
 
         const override = this.state.modeOverride ?? null;
         const forced = override !== null && override.kind === 'forced';
-        // Interactive renderers (2D/3D) are locked out only when we're past
-        // the hard cap; the softer 'warned' state keeps them clickable but
-        // adds a tooltip so users know why the page might chug.
-        const interactiveDisabled = forced;
-        const interactiveTitle = forced
-            ? `Graph has ${override!.nodeCount.toLocaleString()} nodes — Atlas is the only renderer that scales here.`
+        // 2D scales to any vault size (it switches to the server layout and
+        // a community overview on its own). 3D is locked out past the hard
+        // cap; the softer 'warned' state keeps it clickable with a tooltip.
+        const title3d = forced
+            ? `Graph has ${override!.nodeCount.toLocaleString()} nodes — too many for 3D, showing 2D.`
             : override !== null
-                ? `Graph has ${override.nodeCount.toLocaleString()} nodes — 2D/3D will be slow. Atlas recommended.`
+                ? `Graph has ${override.nodeCount.toLocaleString()} nodes — 3D will be slow, 2D recommended.`
                 : undefined;
 
         // "Active" reflects what's actually being rendered, which differs
-        // from the user's preference when we've forced Atlas. That way the
-        // glowing button matches the picture on screen instead of teasing
-        // an unavailable renderer.
+        // from the user's preference when 3D was replaced by 2D.
         const activeMode = this.state.effectiveViewMode ?? this.state.viewMode;
 
         const modeToggle = el('div', {class: 'mode-switch', attrs: {role: 'group', 'aria-label': 'view mode'}},
-            this.modeButton('2D', activeMode === '2d', interactiveDisabled, interactiveTitle, () => {
+            this.modeButton('2D', activeMode === '2d', false, undefined, () => {
                 if (this.state.viewMode !== '2d') this.cb.onSetViewMode('2d');
             }),
-            this.modeButton('3D', activeMode === '3d', interactiveDisabled, interactiveTitle, () => {
+            this.modeButton('3D', activeMode === '3d', forced, title3d, () => {
                 if (this.state.viewMode !== '3d') this.cb.onSetViewMode('3d');
-            }),
-            this.modeButton('Atlas', activeMode === 'atlas', false, undefined, () => {
-                if (this.state.viewMode !== 'atlas') this.cb.onSetViewMode('atlas');
             })
         );
 
-        // Visible note next to the mode switch when we've overridden the
-        // user's choice. Without this the picture just silently changes
-        // to Atlas and it's not obvious why 2D/3D suddenly aren't options.
-        if (override !== null) {
+        // Visible note when 3D was replaced, so it is clear why it is off.
+        if (override !== null && (!forced || this.state.viewMode === '3d')) {
             const noteText = forced
-                ? `Atlas · ${override.nodeCount.toLocaleString()} nodes`
-                : `${override.nodeCount.toLocaleString()} nodes · Atlas recommended`;
+                ? `${override.nodeCount.toLocaleString()} nodes · 3D off`
+                : `${override.nodeCount.toLocaleString()} nodes · 2D recommended`;
             const note = el('span', {
                 class: forced ? 'mode-switch-note forced' : 'mode-switch-note warned',
-                attrs: {title: interactiveTitle ?? ''},
+                attrs: {title: title3d ?? ''},
                 text: noteText
             });
             modeToggle.appendChild(note);

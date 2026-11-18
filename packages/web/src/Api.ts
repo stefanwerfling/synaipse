@@ -59,7 +59,7 @@ export interface AuditEntry {
 }
 
 // Client-side layout cache. The Louvain layout is stable within a short
-// window (server recomputes on write) and mode-switches 2D→Atlas→3D would
+// window (server recomputes on write) and switching 2D→3D→2D would
 // otherwise refetch several MB per hop. TTL is short so writes propagate
 // naturally; writeNote/deleteNote also invalidate explicitly.
 const LAYOUT_CACHE_TTL_MS = 60_000;
