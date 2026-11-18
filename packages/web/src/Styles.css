@@ -4,33 +4,39 @@
  * the portal layer for overlays. Tokens and theme sit on that element,
  * never on :root/<html>/<body>, so nothing leaks into an embedding host.
  */
+/*
+ * Design tokens (plan P9 / E3). Every value reads the matching PKG Studio
+ * shell token first: var(--sh-*, own value). Standalone no --sh-* is set,
+ * so Synaipse looks as before; embedded, the host theme wins. The token
+ * contract is listed in doc/embedding.md ("Design-Tokens").
+ */
 .synaipse-root,
 .synaipse-root[data-theme='dark'] {
-    --bg-0: #0b0d12;
-    --bg-1: #11141a;
-    --bg-2: #161a22;
-    --bg-3: #1d2230;
+    --bg-0: var(--sh-ground, #0b0d12);
+    --bg-1: var(--sh-surface, #11141a);
+    --bg-2: var(--sh-surface-2, #161a22);
+    --bg-3: var(--sh-surface-3, #1d2230);
     --bg-elev: rgba(13, 16, 22, 0.94);
 
-    --border-soft: #1d222b;
-    --border: #262d3a;
-    --border-strong: #364153;
+    --border-soft: var(--sh-border-soft, #1d222b);
+    --border: var(--sh-border, #262d3a);
+    --border-strong: var(--sh-border-strong, #364153);
 
-    --text-0: #f5f6f8;
-    --text-1: #d6d9e1;
-    --text-2: #9aa0ac;
-    --text-3: #6b7280;
+    --text-0: var(--sh-text-strong, #f5f6f8);
+    --text-1: var(--sh-text, #d6d9e1);
+    --text-2: var(--sh-muted, #9aa0ac);
+    --text-3: var(--sh-faint, #6b7280);
 
-    --accent: #6c9aff;
-    --accent-hover: #84acff;
-    --accent-press: #5b8def;
-    --accent-soft: rgba(108, 154, 255, 0.14);
-    --accent-glow: 0 0 0 3px rgba(108, 154, 255, 0.24);
+    --accent: var(--sh-accent, #6c9aff);
+    --accent-hover: var(--sh-accent-hover, #84acff);
+    --accent-press: var(--sh-accent-press, #5b8def);
+    --accent-soft: var(--sh-accent-soft, color-mix(in srgb, var(--accent) 14%, transparent));
+    --accent-glow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
 
-    --gold: #ffd166;
-    --gold-soft: rgba(255, 209, 102, 0.14);
-    --green: #34d399;
-    --red: #f87171;
+    --gold: var(--sh-warn, #ffd166);
+    --gold-soft: color-mix(in srgb, var(--gold) 14%, transparent);
+    --green: var(--sh-ok, #34d399);
+    --red: var(--sh-down, #f87171);
     --purple: #a78bfa;
     --pink: #f472b6;
 
@@ -51,8 +57,8 @@
     --space-8: 32px;
 
     --r-1: 4px;
-    --r-2: 6px;
-    --r-3: 8px;
+    --r-2: var(--sh-r-sm, 6px);
+    --r-3: var(--sh-r, 8px);
     --r-4: 12px;
     --r-pill: 999px;
 
@@ -63,8 +69,8 @@
     --t-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
     --t-base: 180ms cubic-bezier(0.4, 0, 0.2, 1);
 
-    --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
-    --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Mono', monospace;
+    --font-sans: var(--sh-font-sans, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif);
+    --font-mono: var(--sh-font-mono, 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Mono', monospace);
 
     color-scheme: dark;
     background: var(--bg-0);
@@ -75,31 +81,31 @@
 }
 
 .synaipse-root[data-theme='light'] {
-    --bg-0: #f7f8fa;
-    --bg-1: #ffffff;
-    --bg-2: #eef0f4;
-    --bg-3: #e2e6ee;
+    --bg-0: var(--sh-ground, #f7f8fa);
+    --bg-1: var(--sh-surface, #ffffff);
+    --bg-2: var(--sh-surface-2, #eef0f4);
+    --bg-3: var(--sh-surface-3, #e2e6ee);
     --bg-elev: rgba(255, 255, 255, 0.96);
 
-    --border-soft: #e3e6ec;
-    --border: #cdd2dc;
-    --border-strong: #a9b0bf;
+    --border-soft: var(--sh-border-soft, #e3e6ec);
+    --border: var(--sh-border, #cdd2dc);
+    --border-strong: var(--sh-border-strong, #a9b0bf);
 
-    --text-0: #0f172a;
-    --text-1: #1f2937;
-    --text-2: #4b5563;
-    --text-3: #6b7280;
+    --text-0: var(--sh-text-strong, #0f172a);
+    --text-1: var(--sh-text, #1f2937);
+    --text-2: var(--sh-muted, #4b5563);
+    --text-3: var(--sh-faint, #6b7280);
 
-    --accent: #2f5fcc;
-    --accent-hover: #2b55ba;
-    --accent-press: #244aa3;
-    --accent-soft: rgba(47, 95, 204, 0.10);
-    --accent-glow: 0 0 0 3px rgba(47, 95, 204, 0.20);
+    --accent: var(--sh-accent, #2f5fcc);
+    --accent-hover: var(--sh-accent-hover, #2b55ba);
+    --accent-press: var(--sh-accent-press, #244aa3);
+    --accent-soft: var(--sh-accent-soft, color-mix(in srgb, var(--accent) 10%, transparent));
+    --accent-glow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 
-    --gold: #b8860b;
-    --gold-soft: rgba(184, 134, 11, 0.12);
-    --green: #047857;
-    --red: #b91c1c;
+    --gold: var(--sh-warn, #b8860b);
+    --gold-soft: color-mix(in srgb, var(--gold) 12%, transparent);
+    --green: var(--sh-ok, #047857);
+    --red: var(--sh-down, #b91c1c);
     --purple: #6d28d9;
     --pink: #be185d;
 

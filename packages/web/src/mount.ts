@@ -3,7 +3,7 @@ import {App} from './App.js';
 import {setApiBase} from './ApiBase.js';
 import {fetchAuthMode} from './Auth.js';
 import {mountLoginScreen} from './Login.js';
-import {initTheme, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
+import {getTheme, initTheme, onThemeChange, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
 
 /**
  * The one entry point for the Synaipse web UI (plan P3 / E1) — used by
@@ -30,11 +30,18 @@ export interface SynaipseMountOptions {
     authGate?: boolean;
     /** Initial route: a tab name ("graph") or a note id. */
     route?: string;
+    /**
+     * Called with the active theme once after mount and whenever it changes
+     * (the user's toggle or handle.setTheme), so the host can switch its own
+     * shell tokens (--sh-*) along — Synaipse reads them first (plan P9 / E3).
+     */
+    onThemeChange?: (theme: Theme) => void;
 }
 
 export interface SynaipseMountHandle {
     unmount(): Promise<void>;
     setTheme(theme: Theme): void;
+    getTheme(): Theme;
     navigate(route: string): void;
     /** Host tab became visible / hidden. */
     onShow(): void;
@@ -49,6 +56,9 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
     container.classList.add(ROOT_CLASS);
     if (opts.theme !== undefined) setTheme(opts.theme);
     else initTheme();
+    const notify = opts.onThemeChange;
+    const offTheme = notify === undefined ? undefined : onThemeChange(notify);
+    notify?.(getTheme());
 
     let app: App | null = null;
     let unmounted = false;
@@ -95,6 +105,7 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
     return {
         unmount: async () => {
             unmounted = true;
+            offTheme?.();
             app?.destroy();
             app = null;
             container.replaceChildren();
@@ -106,6 +117,7 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
             }
         },
         setTheme: (theme) => setTheme(theme),
+        getTheme: () => getTheme(),
         navigate: (route) => app?.navigate(route),
         onShow: () => app?.onShow(),
         onHide: () => app?.onHide()

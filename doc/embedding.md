@@ -21,6 +21,7 @@ handle.onHide();            // host tab hidden
 handle.onShow();            // host tab visible again
 handle.navigate('Memory/demo/note.md');
 handle.setTheme('light');
+handle.getTheme();          // 'light'
 await handle.unmount();     // stops SSE, timers, listeners; removes DOM and overlays
 ```
 
@@ -28,7 +29,8 @@ await handle.unmount();     // stops SSE, timers, listeners; removes DOM and ove
 |---|---|
 | `apiBase` | URL prefix for the backend. All API calls go through `apiUrl()`. The host needs **no** global `window.fetch` or `EventSource` rewrite; a rewrite that only touches `/api/...` leaves the prefixed URLs alone. |
 | `theme` | `'dark'` or `'light'`. The theme is set as `data-theme` on the container, never on `<html>`. |
-| `route` | Initial tab (`notes`, `graph`, `canvas`, `roadmap`, `benchmarks`, `chat`, `jobs`, `activity`, `audit`, `consent`) or a note id. |
+| `route` | Initial tab (`notes`, `graph`, `canvas`, `inbox`, `roadmap`, `benchmarks`, `chat`, `jobs`, `activity`, `audit`, `consent`) or a note id. |
+| `onThemeChange` | Called with the active theme once after mount and on every change (the user's toggle, `setTheme`). The host switches its shell tokens along, see below. |
 | `authGate` | Standalone only: show the login screen in server mode. A host owns authentication and leaves it off. |
 
 What the host can rely on:
@@ -40,6 +42,37 @@ What the host can rely on:
 - **Teardown.** `unmount()` closes both SSE streams and a running chat stream. It clears every interval and animation frame and removes global listeners. A fresh `mount()` into the same container afterwards works.
 
 Known limit: the API base and the theme are page-wide. Two Synaipse instances on one page share them, which is fine as long as they talk to one backend.
+
+## Design tokens
+
+Synaipse reads the host's shell tokens first and falls back to its own
+values: `--bg-1: var(--sh-surface, #11141a)`. Standalone no `--sh-*` is set,
+so nothing changes; embedded, the host's palette wins. Define the tokens on
+`:root` (they inherit into the container) **for the theme Synaipse shows**:
+use `onThemeChange` to switch the host palette when the user toggles the
+theme, otherwise a light Synaipse would get dark borders.
+
+| Host token | Synaipse token | Used for |
+|---|---|---|
+| `--sh-ground` | `--bg-0` | page background |
+| `--sh-surface` | `--bg-1` | panels, cards |
+| `--sh-surface-2` | `--bg-2` | inputs, hover |
+| `--sh-surface-3` | `--bg-3` | pressed, selected |
+| `--sh-border-soft`, `--sh-border`, `--sh-border-strong` | `--border-soft`, `--border`, `--border-strong` | lines |
+| `--sh-text-strong` | `--text-0` | headings |
+| `--sh-text` | `--text-1` | body text |
+| `--sh-muted`, `--sh-faint` | `--text-2`, `--text-3` | secondary text |
+| `--sh-accent`, `--sh-accent-hover`, `--sh-accent-press` | `--accent`, `--accent-hover`, `--accent-press` | links, primary buttons |
+| `--sh-accent-soft` | `--accent-soft` | selection, soft highlight (default: accent at 14 % / 10 %) |
+| `--sh-ok`, `--sh-warn`, `--sh-down` | `--green`, `--gold`, `--red` | states |
+| `--sh-r-sm`, `--sh-r` | `--r-2`, `--r-3` | radii |
+| `--sh-font-sans`, `--sh-font-mono` | `--font-sans`, `--font-mono` | type |
+
+Every token is optional; a host can start with a few (PKG Studio today sets
+`--sh-border`, `--sh-accent`, `--sh-accent-soft`). The focus ring and the soft
+gold are derived from accent and warn, so they follow the host too. The graph
+reads its colours from the same variables. Roadmap status hues, shadows and
+motion stay Synaipse's own.
 
 ## Backend: `startSynaipseEmbed()`
 

@@ -277,6 +277,18 @@ S8 (`061a09c`): Das Plugin registriert den MCP-Server selbst (`.mcp.json`): URL 
 
 P8-Bilanz (Eval, ohne Embeddings): veraltete Notiz vor der Antwort 45 % → 0, hit@1 0,75 → 0,83 (bei 35 statt 32 Fragen), MRR 0,84 → 0,89, Duplikat-Erkennung Recall 1 ohne Fehlalarm, Prime 1019 → 824 Tokens. Offen aus P8: Claude Code live prüfen, ob `structuredContent` zusätzlich zum Text beim Modell landet (S5); Graph-Seeds aus kürzlich gelesenen Notizen nach Thema filtern (S1-Befund).
 
+
+### Status P9 (2026-11-18): begonnen
+
+| Slice | Inhalt | Stand |
+|---|---|---|
+| S1 E3 Tokens | `var(--sh-*, eigener Wert)` für Flächen, Linien, Text, Akzent, Status, Radien, Schrift; `onThemeChange` im Mount-Vertrag | erledigt |
+| S2 E2 MCP-Registrar | Tools, Resources und Prompts auf das `McpServer` des Host-Gateways | offen |
+| S3 E4 Lib-Build | `mount` als ESM-Library mit eigener CSS-Datei aus `dist/`, Export statt Source-Alias | offen |
+| S4 E4 Manifest | `pkgstudio.module.json` (id, label, color, entries, capabilities) | offen |
+| S5 E4 Paket-Split | `@synaipse/web-client` und `@synaipse/web-api`, Server-Image ohne Browser-Abhängigkeiten | offen |
+
+S1: Alle Grund-Tokens in `Styles.css` lesen zuerst den Host-Token (`--bg-1: var(--sh-surface, #11141a)`); Fokusring, `--accent-soft` und `--gold-soft` werden per `color-mix` aus Akzent bzw. Warnfarbe abgeleitet und folgen damit dem Host. Standalone ist nichts gesetzt: Im Browser geprüft, dass alle abgeleiteten Farben exakt den alten `rgba`-Werten entsprechen; mit gesetzten `--sh-accent`/`--sh-surface` übernimmt Synaipse sie, ohne sie wieder die eigenen. `mount()` hat jetzt `onThemeChange` (einmal nach dem Mount und bei jedem Wechsel) und `handle.getTheme()`, damit der Host seine Shell-Tokens zum gezeigten Theme passend setzt. Vertrag mit Token-Tabelle in `doc/embedding.md`.
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.
@@ -631,7 +643,7 @@ Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größ
 ## 13. Offene Entscheidungen
 
 1. ~~**SQLite-State:** `node:sqlite` oder `better-sqlite3`?~~ Entschieden: `node:sqlite` (2026-11-18), `engines >=22.13`.
-2. **MCP im Embed:** Tools beim PKG-Studio-Gateway registrieren (E2) oder `/synaipse/mcp` beibehalten? Das hat Auswirkungen auf Token und ACL.
+2. ~~**MCP im Embed:** Tools beim PKG-Studio-Gateway registrieren (E2) oder `/synaipse/mcp` beibehalten?~~ Entschieden (2026-11-18): beides. Synaipse liefert einen Registrar für das Gateway (Projekt fest aus der Host-Config, volle Rechte); `/synaipse/mcp` bleibt für Clients mit Projekt-URL oder Token-ACL.
 3. **Tool-Konsolidierung (B2):** Wie lange bleiben die alten Tool-Namen als Aliase bestehen (eine Version oder dauerhaft)?
-4. **Shared Tokens (E3):** eigenes Paket `pkg-tokens` oder Teil des PKG-Studio-Shells?
+4. ~~**Shared Tokens (E3):** eigenes Paket `pkg-tokens` oder Teil des PKG-Studio-Shells?~~ Entschieden (2026-11-18): Teil des PKG-Studio-Shells. Synaipse liest `var(--sh-*, eigener Wert)`; das vollständige `--sh-*`-Set definiert der Gegenplan im PKG-Studio-Repo.
 5. **i18n-Default:** UI-Default Deutsch oder Englisch? Die Doku ist überwiegend Englisch.
