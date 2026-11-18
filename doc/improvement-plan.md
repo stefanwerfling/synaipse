@@ -146,6 +146,18 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 
 ---
 
+### Status P4 (2026-11-18): begonnen
+
+| Punkt | Stand |
+|---|---|
+| A3 Louvain/Layout im Worker, stale-while-revalidate | erledigt (`f9e62fa`). `LayoutComputer` mit `worker_threads`, Fallback in-process. Nach Topologie-Änderung wird das alte Layout mit `stale: true` ausgeliefert, Neuberechnung debounced (750 ms). Atlas pollt nach, ohne den Viewport zurückzusetzen. 30k Knoten: max. Event-Loop-Verzögerung 1256 → 5 ms |
+| A5 ETag/304 + vorkomprimierte Buffer für `/api/graph`, `/api/graph/layout` | erledigt (`e469062`, `cached-json.ts`): einmal stringify + gzip pro Objekt-Version, `Cache-Control: no-cache` |
+| A5 Limits clampen | erledigt: `intParam` für search, history, activity, prime, local graph |
+| A3 `suggestLinks` als Hintergrund-Job, HF-Embedder/Reranker im Worker-Pool | offen |
+| A4 Chunk-Diff-Embedding, Qdrant `query`-API, Query-Embedding-Cache, paralleles `Vault.load`, Watcher-Ignores, Speicher | offen |
+| A5 Router-Table, Cursor-Pagination, Graph-Deltas per SSE, JobManager | offen |
+| D4/D5 Bundle-Budget, Chat-Streaming, Listen-Virtualisierung | offen |
+
 ### Status P5 (2026-11-18): umgesetzt (jsNGraph 0.2.0 + S1 lokaler Graph)
 
 Im jsNGraph-Repo (`9022c86`, `cc8b858`, Release `815e977`; `main` gepusht, der Tag `v0.2.0` liegt nur lokal, Synaipse pinnt deshalb den Commit-SHA):
