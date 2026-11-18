@@ -59,7 +59,7 @@ Web browser  ──http──▶   @synaipse/web (API)  ──▶  @synaipse/ser
 - [Qdrant](https://qdrant.tech/) — vector DB
 - [Voyage AI](https://www.voyageai.com/) / [Ollama](https://ollama.com/) — embeddings
 - [marked](https://marked.js.org/) — Markdown rendering in the UI
-- [Cytoscape.js](https://js.cytoscape.org/) — graph view (lazy chunk)
+- [jsNGraph](https://github.com/stefanwerfling/jsNGraph) — 2D graph view and local graph (lazy chunk)
 - [chokidar](https://github.com/paulmillr/chokidar) — file watcher
 - [MCP](https://modelcontextprotocol.io/) — Claude Code integration
 - Vite — bundler for the web UI

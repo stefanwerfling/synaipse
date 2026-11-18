@@ -88,7 +88,7 @@ For shared multi-project vaults, set `SYNAIPSE_PROJECT=<name>` per Claude Code s
 - [Qdrant](https://qdrant.tech/) — vector DB (optional, Docker)
 - Embeddings: [Voyage AI](https://www.voyageai.com/) (hosted) **or** [Ollama](https://ollama.com/) (local) **or** disabled
 - [marked](https://marked.js.org/) — Markdown rendering
-- [Cytoscape.js](https://js.cytoscape.org/) — graph visualization (lazy-loaded chunk)
+- [jsNGraph](https://github.com/stefanwerfling/jsNGraph) — 2D graph visualization (lazy-loaded chunk)
 - [MCP](https://modelcontextprotocol.io/) — Claude Code integration
 - Vite — bundler
 

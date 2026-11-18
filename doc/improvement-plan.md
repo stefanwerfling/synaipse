@@ -164,10 +164,10 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 | A5 Router-Table | erledigt: `server/router.ts` (Muster mit `:id` / `:id+`, 405 bei falscher Methode, zentrales Fehler-Mapping `HttpError`→Status, zu großer Body→413, kaputtes JSON→400, Rest→500 mit Log). `routes.ts` von 1444 auf ~110 Zeilen, Routen in `server/routes/` pro Domäne (notes, graph, project, chat, memory, ingest, system). Auth/Tokens/Admin/Consent/Schedules bleiben eigene Module. **Offen:** Schema-Validierung (VTS ist nicht im Stack) |
 | A5 `readJson` mit Byte-Limit | erledigt: 8 MiB Default für alle JSON-Bodies inkl. Auth/Admin/Tokens, 413 |
 | A5 Cursor-Pagination | erledigt: `/api/notes?limit&cursor&prefix` (Keyset nach id, ohne Parameter weiter das volle Array für den Baum), `/api/audit?cursor` (Zeilennummer im append-only Log, nur `limit+1` Einträge im Speicher, Default 200 statt unbegrenzt), neu `/api/activity/commits?cursor` (Keyset nach sha, stabil bei neuen Commits). UI: „Ältere laden“ in Audit und Activity. Cursor sind opak (base64url-JSON), kaputte → 400 |
-| A5 Graph-Deltas per SSE | erledigt: `server/graph-deltas.ts` diff't nach Writes (Debounce 250 ms, spätestens nach 1 s) den alten gegen den neuen Stand (Knoten, Kanten, Notiz-Übersichten) und sendet `event: graph-delta` mit `from`/`to`. Versionen kommen als `X-Synaipse-Version` mit `/api/notes` und `/api/graph`; bei Lücke, Reconnect oder > 5000 Änderungen lädt der Client neu (`graph-reset`). Ohne SSE-Client keine Arbeit. Die 2D-Ansicht gleicht Cytoscape-Elemente ab statt neu aufzubauen (stabile Kanten-IDs): Kamera und Positionen bleiben bei Writes stehen. Browser geprüft: nach einem Write nur noch der PUT, kein Nachladen. **Offen:** 3D-Ansicht baut weiter neu auf (kommt mit P6) |
+| A5 Graph-Deltas per SSE | erledigt: `server/graph-deltas.ts` diff't nach Writes (Debounce 250 ms, spätestens nach 1 s) den alten gegen den neuen Stand (Knoten, Kanten, Notiz-Übersichten) und sendet `event: graph-delta` mit `from`/`to`. Versionen kommen als `X-Synaipse-Version` mit `/api/notes` und `/api/graph`; bei Lücke, Reconnect oder > 5000 Änderungen lädt der Client neu (`graph-reset`). Ohne SSE-Client keine Arbeit. Die 2D-Ansicht gleicht Graph-Elemente ab (seit P6 in jsNGraph) statt neu aufzubauen (stabile Kanten-IDs): Kamera und Positionen bleiben bei Writes stehen. Browser geprüft: nach einem Write nur noch der PUT, kein Nachladen. **Offen:** 3D-Ansicht baut weiter neu auf (kommt mit P6) |
 | A5 JobManager in SQLite | erledigt: Tabelle `jobs` in `state.db` (StateDb-Migration 2), `server/job-store.ts`. Höchstens ein laufender Job pro Typ, weitere warten als `queued` und starten nach dem Ende des Batches. Jeder Lauf in `service.batch()` (ein Commit, gebündeltes Embedding). Historie (30) übersteht Neustarts; was beim Absturz lief oder wartete, wird als `failed` geschlossen, nicht neu gestartet. Tokens/API-Keys in den Parametern werden nicht gespeichert (`***`). Live geprüft inkl. `kill -9`. Server-Mode hält Jobs weiter im Speicher |
 | D5 Chat-Streaming | erledigt: Tokens patchen nur noch den Text der laufenden Antwortblase, höchstens einmal pro Frame mit adaptiver Drossel (`FrameThrottle`, Render ≤ 1/3 der Zeit), ohne antv-/Floorplan-Hydration bis zum Ende. Senden hängt neue Nachrichten an statt den Verlauf neu zu bauen; Auto-Scroll nur, wenn man unten ist; Footer (aufgeklappte Quellen) bleibt stehen. Browser mit Fake-LLM (18 000 Zeichen, 2 900 Tokens, 40 Codeblöcke): vorher Tab > 45 s blockiert, jetzt so schnell wie der Stream (≈ 6 s), 10–12 Renders statt 2 900 |
-| D4 Bundle-Budget | erledigt: Entry-Chunk 506 → 244 KB (gzip 155 → 70 KB), Ziel < 250 KB erreicht. highlight.js als Hydration-Pass (`CodeHighlight.ts`, lädt beim ersten Codeblock; PDF-Export wartet darauf), marked-highlight entfernt; jszip erst beim ChatGPT-Import. `scripts/check-bundle-budget.mjs` (`npm run bundle:check`, in CI): Initial-JS ≤ 260 KB / 80 KB gzip, jeder Lazy-Chunk ≤ 1,6 MB. Browser: Notizvorschau und Chat-Stream (40 Blöcke) gefärbt, beim Start weder hljs noch jszip geladen. **Offen:** cytoscape (455 KB, lazy) → jsNGraph, @antv (808 KB, lazy) |
+| D4 Bundle-Budget | erledigt: Entry-Chunk 506 → 244 KB (gzip 155 → 70 KB), Ziel < 250 KB erreicht. highlight.js als Hydration-Pass (`CodeHighlight.ts`, lädt beim ersten Codeblock; PDF-Export wartet darauf), marked-highlight entfernt; jszip erst beim ChatGPT-Import. `scripts/check-bundle-budget.mjs` (`npm run bundle:check`, in CI): Initial-JS ≤ 260 KB / 80 KB gzip, jeder Lazy-Chunk ≤ 1,6 MB. Browser: Notizvorschau und Chat-Stream (40 Blöcke) gefärbt, beim Start weder hljs noch jszip geladen. cytoscape (455 KB) seit P6 S2 durch jsNGraph (≈ 112 KB) ersetzt. **Offen:** @antv (808 KB, lazy) |
 | D5 Listen-Virtualisierung | bewusst nicht gebaut: Jobs halten höchstens 30 Einträge, Activity (50) und Audit (200) laden seitenweise per Klick, echte Vault hat 5 Audit-Einträge und 2 Chats. Browser-Messung mit 2 000 synthetischen Audit-Einträgen: Scrollen im Median 60 fps, Nachladen ≈ 100 ms pro Seite. Stattdessen Audit-Details erst beim Aufklappen gebaut: 56 500 → 24 000 DOM-Knoten. Neu bewerten, wenn eine Liste ohne Pagination wächst (Server-Mode) |
 
 ### Status P5 (2026-11-18): umgesetzt (jsNGraph 0.2.0 + S1 lokaler Graph)
@@ -201,6 +201,31 @@ Offen bzw. Folgearbeit:
 - Mindest-Trefferfläche kleiner Punkte (6 px) ist knapp.
 - Subpath-Exports in jsNGraph, damit der Lazy-Chunk nicht den Rect-Kit und ModelView mitschleppt.
 - Tag `v0.2.0` pushen.
+
+### Status P6 (2026-11-18): begonnen (J4/J5/J6/J8 + S2)
+
+Im jsNGraph-Repo (`1f8a191`, `07715fb`, gepusht):
+
+- J5 nur als `layoutMode: 'static'` (vorberechnete Server-Positionen). Barnes-Hut und Worker bewusst nicht gebaut (Nutzer-Entscheidung).
+- J4 Label-Kollision und Kanten-Batching. Pfeilspitzen werden in 64er-Chunks gefüllt, unter 2 px weggelassen (ein `fill()` über 5000 Teilpfade kostete in Chrome ≈ 250 ms). LOD-Aggregation folgt mit S3.
+- J6 `setHulls`/`hullsAt` (Cluster-Hüllen), `NodeStyle.ring`.
+- J8 `addOverlay` plus Effekte `pulse`/`trail`/`ripple`; Beispiel `examples/vault.html`.
+
+S2 in Synaipse (`0c3acd0`):
+
+- `Graph.ts` rendert über jsNGraph. Positionen kommen aus `GraphPositions.ts` (resolvePositions + gespeicherte Drag-Positionen).
+- Hüllen, Heat-Ring und SSE-Effekte laufen über jsNGraph; `Hulls.ts` und das SVG-Overlay sind weg.
+- `GraphStyle.ts` (Lazy-Loader, Kanten-Arten, Theme) teilen sich Graph und `LocalGraphPanel`.
+- Fix: Der Heat-Schalter kommt jetzt über `applyGraphFilter` im View-State an (vorher nie, betraf alle Ansichten).
+- cytoscape und `@types/cytoscape` sind entfernt. Der jsNGraph-Chunk hat ≈ 112 KB statt 455 KB für cytoscape.
+- Browser: 3120 Notizen ≈ 15 ms pro Frame.
+- 1212 Tests grün, Bundle-Budget ok.
+
+Offen bzw. Folgearbeit:
+
+- S3: Atlas auf jsNGraph (LOD, Aggregation).
+- Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
+- Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 
@@ -492,6 +517,7 @@ Heute hat Synaipse **drei** Graph-Engines: cytoscape (2D), 3d-force-graph/three 
 
 ### G5. Dependencies
 - Git-Dependencies (`ngit`, `vts`, `mdfloor`, künftig `jsngraph`) auf **Tags oder Commit-SHA pinnen**.
+  - Ausnahme: `jsngraph` steht bewusst **ungepinnt** in `packages/web/package.json` (Nutzer-Entscheidung 2026-11-18). Den genauen Stand hält `package-lock.json` fest.
 - `@modelcontextprotocol/sdk` auf `^1.29`, `vitest` auf eine aktuelle Major-Version, Qdrant-Client auf die `query`-API.
 - `gray-matter` (unmaintained, js-yaml 3) durch `yaml` plus einen schlanken Frontmatter-Splitter ersetzen. Mit Round-Trip-Tests, weil Frontmatter-Treue für Obsidian-Kompatibilität kritisch ist.
 
