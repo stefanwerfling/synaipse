@@ -376,6 +376,9 @@ export class SynaipseService {
     private layoutJob: Promise<GraphLayout> | null = null;
     private layoutTimer: NodeJS.Timeout | null = null;
     private readonly layoutComputer = new LayoutComputer();
+    /** suggestLinks results per option set, tagged with the topology generation. */
+    private readonly suggestCache = new Map<string, {gen: number; value: LinkSuggestion[]}>();
+    private readonly suggestJobs = new Map<string, Promise<LinkSuggestion[]>>();
     private cachedGraph: Graph | null = null;
     private cachedAdjacency: AdjacencyMap | null = null;
     private cachedLinkKeys: Map<string, NoteId> | null = null;
@@ -2881,7 +2884,57 @@ export class SynaipseService {
             .slice(0, limit);
     }
 
+    /**
+     * Unlinked note pairs that look related. Results are cached per
+     * options and vault generation (plan P4 / A3): after a write the
+     * previous result is returned right away, minus pairs that are now
+     * linked, while a recompute runs in the background. Only the first
+     * call for a given option set waits.
+     */
     public async suggestLinks(opts: SuggestLinksOptions = {}): Promise<LinkSuggestion[]> {
+        const key = JSON.stringify([opts.limit ?? 20, opts.minScore ?? 0.65, opts.pathPrefix ?? '']);
+        const cached = this.suggestCache.get(key);
+
+        if (cached !== undefined && cached.gen === this.topologyGen) {
+            return cached.value.map((s) => ({...s, reasons: [...s.reasons]}));
+        }
+
+        const job = this.suggestJobs.get(key) ?? this.startSuggestJob(key, opts);
+
+        if (cached === undefined) {
+            return (await job).map((s) => ({...s, reasons: [...s.reasons]}));
+        }
+
+        void job.catch(() => undefined);
+        return cached.value
+            .filter((s) => !this.isLinkedPair(s.a, s.b))
+            .map((s) => ({...s, reasons: [...s.reasons]}));
+    }
+
+    private startSuggestJob(key: string, opts: SuggestLinksOptions): Promise<LinkSuggestion[]> {
+        const gen = this.topologyGen;
+        const started = Date.now();
+        const job = this.computeLinkSuggestions(opts).then((value) => {
+            this.suggestCache.set(key, {gen, value});
+            log.debug('link suggestions computed', {ms: Date.now() - started, count: value.length});
+            return value;
+        }).finally(() => {
+            this.suggestJobs.delete(key);
+        });
+
+        this.suggestJobs.set(key, job);
+        return job;
+    }
+
+    /** True when either note wikilinks the other (resolved through titles/aliases). */
+    private isLinkedPair(a: NoteId, b: NoteId): boolean {
+        const keyToId = this.linkKeyMap();
+        const links = (from: NoteId, to: NoteId): boolean =>
+            (this.notes.tryGet(from)?.wikilinks ?? []).some((link) => keyToId.get(link) === to);
+        return links(a, b) || links(b, a);
+    }
+
+    private async computeLinkSuggestions(opts: SuggestLinksOptions): Promise<LinkSuggestion[]> {
         const limit = opts.limit ?? 20;
         const minScore = opts.minScore ?? 0.65;
         const prefix = opts.pathPrefix ?? '';
@@ -2969,21 +3022,32 @@ export class SynaipseService {
             const embedSourceNotes: NoteId[] = [];
             const embedStart = Date.now();
             let embedCalls = 0;
+            const withContent = scoped.filter((n) => n.content.length > 0);
 
-            for (const note of scoped) {
-                if (note.content.length === 0) {
-                    continue;
+            // Stored first-chunk vectors answer most notes without any
+            // embedding call (one batched Qdrant request per 64 notes).
+            let stored = new Map<NoteId, SearchHit[]>();
+            try {
+                stored = await this.index.similarToNotes(withContent.map((n) => n.id), 20);
+            } catch (error) {
+                log.warn('stored-vector similarity failed, embedding samples instead', {error});
+            }
+
+            for (const note of withContent) {
+                const linked = linkedSet(note);
+                let hits = stored.get(note.id);
+
+                if (hits === undefined) {
+                    // Not embedded yet (or no store support): embed a sample.
+                    hits = await this.index.semanticSearch(note.content.slice(0, SEMANTIC_SAMPLE_CHARS), 20);
+                    embedCalls += 1;
+                    embedSourceNotes.push(note.id);
                 }
 
-                const linked = linkedSet(note);
-                const sample = note.content.slice(0, SEMANTIC_SAMPLE_CHARS);
-                const hits = await this.index.semanticSearch(sample, 20);
-                embedCalls += 1;
-                embedSourceNotes.push(note.id);
                 const seen = new Set<NoteId>();
 
                 for (const hit of hits) {
-                    if (seen.has(hit.noteId)) {
+                    if (seen.has(hit.noteId) || hit.noteId === note.id) {
                         continue;
                     }
 
@@ -3075,29 +3139,57 @@ export class SynaipseService {
             }
         }
 
-        for (let i = 0; i < scoped.length; i++) {
-            const a = scoped[i];
+        // Tag overlap via an inverted index (plan P4 / A3): only pairs that
+        // actually share a tag are visited, instead of all N² pairs. Pairs
+        // are recorded in the same (i, j) order as the old double loop, so
+        // ties sort identically.
+        {
+            const byTag = new Map<string, number[]>();
 
-            if (a === undefined || a.tags.length < 2) {
-                continue;
+            scoped.forEach((note, i) => {
+                if (note.tags.length < 2) return;
+                for (const tag of new Set(note.tags)) {
+                    const list = byTag.get(tag) ?? [];
+                    list.push(i);
+                    byTag.set(tag, list);
+                }
+            });
+
+            const sharedCount = new Map<number, number>();
+            const n = scoped.length;
+
+            for (const indices of byTag.values()) {
+                for (let x = 0; x < indices.length; x++) {
+                    for (let y = x + 1; y < indices.length; y++) {
+                        const pair = indices[x]! * n + indices[y]!;
+                        sharedCount.set(pair, (sharedCount.get(pair) ?? 0) + 1);
+                    }
+                }
             }
 
-            const aLinked = linkedSet(a);
-            const aTagSet = new Set(a.tags);
+            const pairs = [...sharedCount.entries()]
+                .filter(([, count]) => count >= 2)
+                .map(([pair]) => pair)
+                .sort((x, y) => x - y);
+            const linkedCache = new Map<number, Set<NoteId>>();
 
-            for (let j = i + 1; j < scoped.length; j++) {
-                const b = scoped[j];
+            for (const pair of pairs) {
+                const i = Math.floor(pair / n);
+                const a = scoped[i]!;
+                const b = scoped[pair % n]!;
+                let aLinked = linkedCache.get(i);
 
-                if (b === undefined || aLinked.has(b.id)) {
+                if (aLinked === undefined) {
+                    aLinked = linkedSet(a);
+                    linkedCache.set(i, aLinked);
+                }
+
+                if (aLinked.has(b.id)) {
                     continue;
                 }
 
+                const aTagSet = new Set(a.tags);
                 const shared = b.tags.filter((t) => aTagSet.has(t));
-
-                if (shared.length < 2) {
-                    continue;
-                }
-
                 const score = Math.min(0.95, 0.5 + 0.1 * shared.length);
                 recordPair(a.id, b.id, score, 'tag-overlap', shared);
             }

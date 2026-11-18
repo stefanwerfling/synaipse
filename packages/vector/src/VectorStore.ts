@@ -26,4 +26,10 @@ export interface VectorStore {
     chunkHashes?(noteIds: readonly NoteId[]): Promise<Map<string, string>>;
     /** Optional: stored vectors by chunk id, to move an unchanged chunk to a new index without re-embedding. */
     vectorsOf?(chunkIds: readonly string[]): Promise<Map<string, number[]>>;
+    /**
+     * Optional (plan P4 / A3): nearest chunks of OTHER notes for each
+     * stored chunk, using its stored vector, so no embedding call is
+     * needed. Chunk ids that are not stored are absent from the result.
+     */
+    similarToChunks?(chunkIds: readonly string[], limit: number): Promise<Map<string, SearchHit[]>>;
 }

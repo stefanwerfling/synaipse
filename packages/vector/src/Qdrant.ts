@@ -140,6 +140,9 @@ const STALE_DELETE_GROUP = 256;
 /** Notes per hash-lookup scroll filter. */
 const HASH_LOOKUP_GROUP = 256;
 
+/** Queries per queryBatch request in similarToChunks. */
+const SIMILAR_BATCH = 64;
+
 /** Search needs only these fields; the stored hash stays on the server. */
 const SEARCH_PAYLOAD = ['noteId', 'path', 'text', 'index', 'chunkId'];
 
@@ -392,6 +395,54 @@ export class QdrantStore implements VectorStore {
 
                 offset = page.next_page_offset;
             } while (offset !== undefined && offset !== null);
+        }
+
+        return out;
+    }
+
+    public async similarToChunks(chunkIds: readonly string[], limit: number): Promise<Map<string, SearchHit[]>> {
+        const out = new Map<string, SearchHit[]>();
+
+        if (chunkIds.length === 0) {
+            return out;
+        }
+
+        await this.ensureCollection();
+
+        // A query by a missing point id fails the whole batch, so look up
+        // which chunks exist first (ids only, no payload or vectors).
+        const byPoint = new Map(chunkIds.map((id) => [toPointId(id), id]));
+        const existing = await this.withRetry(() => this.client.retrieve(this.options.collection, {
+            ids: [...byPoint.keys()],
+            with_payload: false,
+            with_vector: false
+        }));
+        const present = existing.map((p) => String(p.id)).filter((id) => byPoint.has(id));
+
+        for (let i = 0; i < present.length; i += SIMILAR_BATCH) {
+            const group = present.slice(i, i + SIMILAR_BATCH);
+            const searches = group.map((pointId) => {
+                const chunkId = byPoint.get(pointId)!;
+                const noteId = chunkId.slice(0, chunkId.lastIndexOf('::'));
+                return {
+                    query: pointId,
+                    filter: {must_not: [{key: 'noteId', match: {value: noteId}}]},
+                    // several chunks per note may come back; de-duplicated below
+                    limit: limit * 3,
+                    with_payload: SEARCH_PAYLOAD
+                };
+            });
+            const results = await this.withRetry(() => this.client.queryBatch(this.options.collection, {searches}));
+
+            results.forEach((result, idx) => {
+                const seen = new Set<string>();
+                const hits = this.toHits(result.points).filter((hit) => {
+                    if (seen.has(hit.noteId)) return false;
+                    seen.add(hit.noteId);
+                    return true;
+                }).slice(0, limit);
+                out.set(byPoint.get(group[idx]!)!, hits);
+            });
         }
 
         return out;

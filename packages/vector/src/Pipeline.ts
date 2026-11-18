@@ -292,6 +292,27 @@ export class VectorIndex {
         return this.store.search(await this.embedQuery(query), limit);
     }
 
+    /**
+     * Notes similar to each given note, from the note's stored first
+     * chunk; no embedding call. Notes without a stored first chunk (or a
+     * store without support) are absent; callers embed those themselves.
+     */
+    public async similarToNotes(noteIds: readonly NoteId[], limit: number): Promise<Map<NoteId, SearchHit[]>> {
+        const out = new Map<NoteId, SearchHit[]>();
+
+        if (this.store.similarToChunks === undefined || noteIds.length === 0) {
+            return out;
+        }
+
+        const byChunk = await this.store.similarToChunks(noteIds.map((id) => `${id}::0`), limit);
+
+        for (const [chunkId, hits] of byChunk) {
+            out.set(chunkId.slice(0, chunkId.lastIndexOf('::')), hits);
+        }
+
+        return out;
+    }
+
     /** Query embedding through the LRU cache. */
     public async embedQuery(query: string): Promise<number[]> {
         const cached = this.queryCache.get(query);
