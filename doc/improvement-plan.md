@@ -160,7 +160,10 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 | A4 Query-Embedding-Cache | erledigt als In-Memory-LRU (256). **Offen:** Persistenz in SQLite |
 | A4 paralleles `Vault.load`, Watcher-Ignores | erledigt (`c62c4bd`): 32 parallele Reads, gemeinsame Ignore-Regel für Walker und Watcher. Nicht gemessen |
 | A4 Speicher (Body lazy laden) | offen |
-| A5 Router-Table, Cursor-Pagination, Graph-Deltas per SSE, JobManager | offen |
+| A5 Router-Table | erledigt: `server/router.ts` (Muster mit `:id` / `:id+`, 405 bei falscher Methode, zentrales Fehler-Mapping `HttpError`→Status, zu großer Body→413, kaputtes JSON→400, Rest→500 mit Log). `routes.ts` von 1444 auf ~110 Zeilen, Routen in `server/routes/` pro Domäne (notes, graph, project, chat, memory, ingest, system). Auth/Tokens/Admin/Consent/Schedules bleiben eigene Module. **Offen:** Schema-Validierung (VTS ist nicht im Stack) |
+| A5 `readJson` mit Byte-Limit | erledigt: 8 MiB Default für alle JSON-Bodies inkl. Auth/Admin/Tokens, 413 |
+| A5 Cursor-Pagination | erledigt: `/api/notes?limit&cursor&prefix` (Keyset nach id, ohne Parameter weiter das volle Array für den Baum), `/api/audit?cursor` (Zeilennummer im append-only Log, nur `limit+1` Einträge im Speicher, Default 200 statt unbegrenzt), neu `/api/activity/commits?cursor` (Keyset nach sha, stabil bei neuen Commits). UI: „Ältere laden“ in Audit und Activity. Cursor sind opak (base64url-JSON), kaputte → 400 |
+| A5 Graph-Deltas per SSE, JobManager in SQLite | offen |
 | D4/D5 Bundle-Budget, Chat-Streaming, Listen-Virtualisierung | offen |
 
 ### Status P5 (2026-11-18): umgesetzt (jsNGraph 0.2.0 + S1 lokaler Graph)
