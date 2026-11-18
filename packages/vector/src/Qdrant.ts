@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {QdrantClient} from '@qdrant/js-client-rest';
-import {VectorError} from '@synaipse/core';
-import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
+import {ROOT_DIR, VectorError, createLogger, dirPrefixes, folderOf, inScope, isUnscoped} from '@synaipse/core';
+import type {Chunk, NoteId, SearchHit, SearchScope} from '@synaipse/core';
 import type {VectorStore} from './VectorStore.js';
 
 export interface QdrantRetryInfo {
@@ -97,6 +97,8 @@ interface ChunkPayload {
     index: number;
     chunkId: string;
     hash?: string;
+    /** Folder prefixes of the note (`dirPrefixes`), for server-side scope filters. */
+    dirs?: string[];
 }
 
 const isChunkPayload = (value: unknown): value is ChunkPayload => {
@@ -146,12 +148,51 @@ const SIMILAR_BATCH = 64;
 /** Search needs only these fields; the stored hash stays on the server. */
 const SEARCH_PAYLOAD = ['noteId', 'path', 'text', 'index', 'chunkId'];
 
+const log = createLogger('vector');
+
+/** Points without `dirs` (written before plan P4 / A4) are tagged in groups of this size. */
+const DIRS_BACKFILL_PAGE = 256;
+
+type QdrantFilter = {must?: object[]; must_not?: object[]};
+
+/**
+ * Server-side part of a scope: folder matches on the `dirs` keyword.
+ * Includes use their folder (`Memory/dec` → `Memory/`), excludes only
+ * when they end at a folder boundary; the rest is left to `inScope`.
+ */
+export const scopeToFilter = (scope: SearchScope | undefined): {filter: QdrantFilter | null; exact: boolean} => {
+    if (scope === undefined || isUnscoped(scope)) return {filter: null, exact: true};
+
+    const filter: QdrantFilter = {};
+    let exact = true;
+    const include = scope.include ?? [];
+
+    if (include.length > 0) {
+        const folders = [...new Set(include.map(folderOf))];
+        if (include.some((p) => folderOf(p) !== p)) exact = false;
+        if (!folders.includes(ROOT_DIR)) {
+            filter.must = [{key: 'dirs', match: {any: folders}}];
+        }
+    }
+
+    const exclude = scope.exclude ?? [];
+    const folderExcludes = exclude.filter((p) => p.endsWith('/'));
+    if (folderExcludes.length !== exclude.length) exact = false;
+    if (folderExcludes.length > 0) {
+        filter.must_not = [{key: 'dirs', match: {any: folderExcludes}}];
+    }
+
+    return {filter: filter.must === undefined && filter.must_not === undefined ? null : filter, exact};
+};
+
 export class QdrantStore implements VectorStore {
     private readonly client: QdrantClient;
     private readonly retry: ResolvedRetry;
     private ready = false;
     /** Cleared once the server turns out not to support the Query API. */
     private queryApi = true;
+    /** Whether every point carries `dirs`; scoped search falls back to over-fetching until then. */
+    private dirsState: 'unknown' | 'checking' | 'backfilling' | 'ready' = 'unknown';
 
     public constructor(private readonly options: QdrantStoreOptions) {
         this.client = new QdrantClient({
@@ -202,11 +243,95 @@ export class QdrantStore implements VectorStore {
                 field_name: 'noteId',
                 field_schema: 'keyword'
             }));
+            await this.withRetry(() => this.client.createPayloadIndex(this.options.collection, {
+                field_name: 'dirs',
+                field_schema: 'keyword'
+            }));
+            this.dirsState = 'ready';
         } else {
             await this.assertDimension();
+            // Collections from before plan P4 / A4 lack the index; creating
+            // an existing one is a no-op on current servers.
+            try {
+                await this.withRetry(() => this.client.createPayloadIndex(this.options.collection, {
+                    field_name: 'dirs',
+                    field_schema: 'keyword'
+                }));
+            } catch (error) {
+                log.warn('could not create the dirs payload index; scoped search stays client-side', {error});
+            }
         }
 
         this.ready = true;
+    }
+
+    /**
+     * True once every point has `dirs`. The first call on an older
+     * collection starts a one-off background backfill and answers false,
+     * so scoped searches over-fetch and filter client-side meanwhile.
+     */
+    private async dirsReady(): Promise<boolean> {
+        if (this.dirsState === 'ready') return true;
+        if (this.dirsState !== 'unknown') return false;
+
+        this.dirsState = 'checking';
+        try {
+            const missing = await this.withRetry(() => this.client.count(this.options.collection, {
+                filter: {must: [{is_empty: {key: 'dirs'}}]},
+                exact: true
+            }));
+
+            if (missing.count === 0) {
+                this.dirsState = 'ready';
+                return true;
+            }
+
+            this.dirsState = 'backfilling';
+            log.info('tagging stored vectors with folder prefixes for scoped search', {points: missing.count});
+            void this.backfillDirs().then(
+                () => {
+                    this.dirsState = 'ready';
+                    log.info('scoped search now filters in Qdrant');
+                },
+                (error: unknown) => {
+                    this.dirsState = 'unknown';
+                    log.warn('dirs backfill failed; retried on the next scoped search', {error});
+                }
+            );
+        } catch (error) {
+            this.dirsState = 'unknown';
+            log.warn('could not check dirs payload; scoped search stays client-side', {error});
+        }
+
+        return false;
+    }
+
+    /** Set `dirs` on every point that lacks it, one `setPayload` per note. */
+    private async backfillDirs(): Promise<void> {
+        while (true) {
+            const page = await this.withRetry(() => this.client.scroll(this.options.collection, {
+                filter: {must: [{is_empty: {key: 'dirs'}}]},
+                limit: DIRS_BACKFILL_PAGE,
+                with_payload: ['noteId'],
+                with_vector: false
+            }));
+
+            const noteIds = new Set<string>();
+            for (const point of page.points) {
+                const noteId = (point.payload as {noteId?: unknown} | null | undefined)?.noteId;
+                if (typeof noteId === 'string') noteIds.add(noteId);
+            }
+
+            if (noteIds.size === 0) return;
+
+            for (const noteId of noteIds) {
+                await this.withRetry(() => this.client.setPayload(this.options.collection, {
+                    wait: true,
+                    payload: {dirs: dirPrefixes(noteId)},
+                    filter: {must: [{key: 'noteId', match: {value: noteId}}]}
+                }));
+            }
+        }
     }
 
     /**
@@ -253,7 +378,8 @@ export class QdrantStore implements VectorStore {
                     text: sanitiseText(chunk.text),
                     index: chunk.index,
                     chunkId: chunk.id,
-                    ...(chunk.hash !== undefined ? {hash: chunk.hash} : {})
+                    ...(chunk.hash !== undefined ? {hash: chunk.hash} : {}),
+                    dirs: dirPrefixes(chunk.noteId)
                 } satisfies ChunkPayload
             }))
         }));
@@ -309,8 +435,20 @@ export class QdrantStore implements VectorStore {
      * Servers without the Query API (< 1.10) fall back to `search` with
      * client-side de-duplication.
      */
-    public async search(vector: number[], limit: number): Promise<SearchHit[]> {
+    public async search(vector: number[], limit: number, scope?: SearchScope): Promise<SearchHit[]> {
         await this.ensureCollection();
+
+        // Scope (plan P4 / A4): folders are filtered in Qdrant, so a scoped
+        // search gets `limit` hits from inside the scope instead of the
+        // global top-N with the out-of-scope ones dropped afterwards.
+        const scoped = !isUnscoped(scope);
+        const pushed = scoped ? scopeToFilter(scope) : {filter: null, exact: true};
+        const useFilter = pushed.filter !== null && await this.dirsReady();
+        const filter = useFilter ? pushed.filter : null;
+        const exact = !scoped || (useFilter && pushed.exact);
+        const fetch = exact ? limit : limit * (useFilter ? 3 : 6);
+        const finish = (hits: SearchHit[]): SearchHit[] =>
+            (exact ? hits : hits.filter((h) => inScope(h.noteId, scope))).slice(0, limit);
 
         if (this.queryApi) {
             try {
@@ -318,11 +456,12 @@ export class QdrantStore implements VectorStore {
                     query: vector,
                     group_by: 'noteId',
                     group_size: 1,
-                    limit,
-                    with_payload: SEARCH_PAYLOAD
+                    limit: fetch,
+                    with_payload: SEARCH_PAYLOAD,
+                    ...(filter !== null ? {filter} : {})
                 }));
 
-                return this.toHits(result.groups.flatMap((g) => g.hits.slice(0, 1)));
+                return finish(this.toHits(result.groups.flatMap((g) => g.hits.slice(0, 1))));
             } catch (error) {
                 if (isRetryableNetworkError(error)) throw error;
                 this.queryApi = false;
@@ -331,16 +470,17 @@ export class QdrantStore implements VectorStore {
 
         const results = await this.withRetry(() => this.client.search(this.options.collection, {
             vector,
-            limit: limit * 3,
-            with_payload: SEARCH_PAYLOAD
+            limit: fetch * 3,
+            with_payload: SEARCH_PAYLOAD,
+            ...(filter !== null ? {filter} : {})
         }));
 
         const seen = new Set<string>();
-        return this.toHits(results).filter((hit) => {
+        return finish(this.toHits(results).filter((hit) => {
             if (seen.has(hit.noteId)) return false;
             seen.add(hit.noteId);
             return true;
-        }).slice(0, limit);
+        }));
     }
 
     private toHits(points: ReadonlyArray<{score: number; payload?: Record<string, unknown> | null | undefined}>): SearchHit[] {

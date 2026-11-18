@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Note, NoteId, SearchHit} from '@synaipse/core';
+import type {Note, NoteId, SearchHit, SearchScope} from '@synaipse/core';
 import type {Embedder} from './Embedder.js';
 import type {VectorStore} from './VectorStore.js';
 import {chunkNote, CHUNK_DEFAULTS, ChunkOptions} from './Chunker.js';
@@ -288,8 +288,8 @@ export class VectorIndex {
         await this.store.deleteByNotes(noteIds);
     }
 
-    public async semanticSearch(query: string, limit: number): Promise<SearchHit[]> {
-        return this.store.search(await this.embedQuery(query), limit);
+    public async semanticSearch(query: string, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
+        return this.store.search(await this.embedQuery(query), limit, scope);
     }
 
     /**

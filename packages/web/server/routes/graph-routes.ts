@@ -31,6 +31,8 @@ export const registerGraphRoutes = (router: Router, {service}: RouteDeps): void 
         const q = url.searchParams.get('q') ?? '';
         const rawMode = url.searchParams.get('mode') ?? 'hybrid';
         const mode = (SEARCH_MODES.has(rawMode) ? rawMode : 'hybrid') as 'fulltext' | 'semantic' | 'hybrid';
-        json(res, 200, await service.search(q, mode, intParam(url, 'limit', 20, 1, 200)));
+        // ?prefix= (repeatable) limits the search to these folders (plan P4 / A4).
+        const prefixes = url.searchParams.getAll('prefix').filter((p) => p.length > 0);
+        json(res, 200, await service.search(q, mode, intParam(url, 'limit', 20, 1, 200), prefixes.length > 0 ? {include: prefixes} : undefined));
     });
 };

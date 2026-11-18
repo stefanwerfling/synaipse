@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
-import {buildLinkKeyMap, createLogger, extractTypedLinks, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
+import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, SearchScope, Graph, VaultEvent} from '@synaipse/core';
+import {buildLinkKeyMap, createLogger, extractTypedLinks, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap, inScope, intersectScopes, isUnscoped} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, currentWriteBatch, runWriteBatch, type History, type WriteBatch} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
@@ -25,7 +25,7 @@ import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
 import {stripContainers} from './Containers.js';
 import {AuditLog, type AuditEntry} from './AuditLog.js';
 import {extractEntitySpans} from './EntityLinker.js';
-import {getAuditTokenLabel} from './AuditContext.js';
+import {auditContextStorage, getAuditTokenLabel} from './AuditContext.js';
 import {ConsentStore, type ConsentDecision, type ConsentRequest} from './ConsentStore.js';
 import {
     renderRelatedSection,
@@ -767,17 +767,30 @@ export class SynaipseService {
         return this.index !== null;
     }
 
-    public async search(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
+    /**
+     * Search, optionally inside a path scope (plan P4 / A4). The scope is
+     * applied inside every signal (BM25, titles, Qdrant filter) before the
+     * cut to `limit`, so a scoped search returns up to `limit` hits from
+     * the scope instead of the global top-N minus everything outside.
+     * An MCP token's path restriction is added automatically.
+     */
+    public async search(query: string, mode: SearchMode, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
         // A search hit is not an access: counting every hit made notes that
         // rank well rank better (they also became graph seeds of the next
         // search) and kept them out of `stale` without anyone reading them.
         // Reads (readNote, related, backlinks) still count.
-        return this.runSearch(query, mode, limit);
+        const tokenPrefixes = auditContextStorage.getStore()?.pathPrefixes;
+        const effective = intersectScopes(scope, tokenPrefixes !== undefined && tokenPrefixes.length > 0 ? {include: tokenPrefixes} : undefined);
+        if (effective === null) return [];
+
+        return this.runSearch(query, mode, limit, isUnscoped(effective) ? undefined : effective);
     }
 
-    private async runSearch(query: string, mode: SearchMode, limit: number): Promise<SearchHit[]> {
+    private async runSearch(query: string, mode: SearchMode, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
+        const accept = scope === undefined ? undefined : (id: NoteId): boolean => inScope(id, scope);
+
         if (mode === 'fulltext') {
-            return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
+            return annotateSingleSignal(this.fulltextIndex.search(query, limit, accept), 'fulltext');
         }
 
         if (mode === 'semantic') {
@@ -785,10 +798,10 @@ export class SynaipseService {
             // embeddings-disabled service — better to return fulltext hits
             // than an empty list.
             if (this.index === null) {
-                return annotateSingleSignal(this.fulltextIndex.search(query, limit), 'fulltext');
+                return annotateSingleSignal(this.fulltextIndex.search(query, limit, accept), 'fulltext');
             }
             const semStart = Date.now();
-            const hits = await this.index.semanticSearch(query, limit);
+            const hits = await this.index.semanticSearch(query, limit, scope);
             void this.recordExternalEmbed({
                 source: 'search',
                 noteIds: [],
@@ -799,12 +812,12 @@ export class SynaipseService {
         }
 
         // hybrid: title + fulltext + (semantic if available) + (graph if seeds)
-        const ft = this.fulltextIndex.search(query, limit);
-        const titles = this.fulltextIndex.searchTitle(query, limit);
+        const ft = this.fulltextIndex.search(query, limit, accept);
+        const titles = this.fulltextIndex.searchTitle(query, limit, accept);
         let sem: SearchHit[] = [];
         if (this.index !== null) {
             const semStart = Date.now();
-            sem = await this.index.semanticSearch(query, limit);
+            sem = await this.index.semanticSearch(query, limit, scope);
             void this.recordExternalEmbed({
                 source: 'search',
                 noteIds: [],
@@ -1209,8 +1222,10 @@ export class SynaipseService {
         const externalProvider = !provider.isLocal();
         const limit = options.limit ?? 12;
         const prefix = options.pathPrefix;
-        const scoped = prefix !== undefined && prefix.length > 0;
-        const overFetch = (scoped || externalProvider) ? Math.max(limit * 6, 60) : limit;
+        const scope = prefix !== undefined && prefix.length > 0 ? {include: [prefix]} : undefined;
+        // The prefix is applied inside the search; over-fetching is only
+        // needed when the DSGVO filter may still drop private notes.
+        const overFetch = externalProvider ? Math.max(limit * 6, 60) : limit;
 
         let filteredPrivate = 0;
         const redactCounts = new Map<string, number>();
@@ -1220,7 +1235,7 @@ export class SynaipseService {
             }
         };
 
-        const rawHits = await this.search(options.question, 'hybrid', overFetch);
+        const rawHits = await this.search(options.question, 'hybrid', overFetch, scope);
 
         const dsgvoFiltered = externalProvider
             ? rawHits.filter((h) => {
@@ -1233,9 +1248,7 @@ export class SynaipseService {
             })
             : rawHits;
 
-        const sliced = scoped
-            ? dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix as string)).slice(0, limit)
-            : dsgvoFiltered.slice(0, limit);
+        const sliced = dsgvoFiltered.slice(0, limit);
 
         const sources: ChatSource[] = sliced.map((hit, i) => {
             let snippet = hit.snippet;
@@ -1520,12 +1533,12 @@ export class SynaipseService {
 
         const stream = runChat({
             search: async (q, prefix, limit) => {
-                const scoped = prefix !== undefined && prefix.length > 0;
-                // Over-fetch when scoping by prefix OR when DSGVO filtering may
-                // drop hits, so the filter still has enough candidates to keep
-                // `limit` strong post-filter.
-                const overFetch = (scoped || externalProvider) ? Math.max(limit * 6, 60) : limit;
-                const hits = await this.search(q, 'hybrid', overFetch);
+                const scope = prefix !== undefined && prefix.length > 0 ? {include: [prefix]} : undefined;
+                // The prefix is applied inside the search. Over-fetch only
+                // when DSGVO filtering may drop hits, so `limit` stays
+                // strong after the filter.
+                const overFetch = externalProvider ? Math.max(limit * 6, 60) : limit;
+                const hits = await this.search(q, 'hybrid', overFetch, scope);
 
                 const dsgvoFiltered = externalProvider
                     ? hits.filter((h) => {
@@ -1541,9 +1554,7 @@ export class SynaipseService {
                 // Slice first, then redact — otherwise the over-fetch pool
                 // would inflate redaction counts with snippets that never
                 // reach the LLM.
-                const sliced = scoped
-                    ? dsgvoFiltered.filter((h) => h.noteId.startsWith(prefix as string)).slice(0, limit)
-                    : dsgvoFiltered.slice(0, limit);
+                const sliced = dsgvoFiltered.slice(0, limit);
 
                 // Strip container fences always (LLM noise reduction);
                 // Layer 3 redaction only when external. readNote-derived
@@ -1905,10 +1916,11 @@ export class SynaipseService {
         }
 
         const excludePrefixes = opts.excludePrefixes ?? ['chatgpt-import/', 'Clipped/'];
-        // Over-fetch because we'll filter out exclude-prefix hits before LLM/ranking.
+        // Excluded folders are filtered inside the search (plan P4 / A4);
+        // the margin covers the note itself and duplicate titles.
         const fetchLimit = Math.max(opts.limit ?? 20, 40);
         const query = `${note.title}\n${note.content.replace(/^---[\s\S]*?---\n?/, '').slice(0, 400)}`;
-        const hits = await this.search(query, 'hybrid', fetchLimit);
+        const hits = await this.search(query, 'hybrid', fetchLimit, {exclude: excludePrefixes});
 
         const candidates: RelinkCandidate[] = [];
         const titlesSeen = new Set<string>([note.title]);

@@ -1,4 +1,4 @@
-import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
+import type {Chunk, NoteId, SearchHit, SearchScope} from '@synaipse/core';
 
 /**
  * Storage port for chunk vectors. `QdrantStore` is the production
@@ -17,7 +17,12 @@ export interface VectorStore {
      * `index >= keep`. `keep = 0` removes all chunks of that note.
      */
     deleteStaleChunks(keep: ReadonlyMap<NoteId, number>): Promise<void>;
-    search(vector: number[], limit: number): Promise<SearchHit[]>;
+    /**
+     * Nearest notes, one hit per note. With `scope`, only notes inside it
+     * (plan P4 / A4); a store that cannot filter must over-fetch and
+     * apply `inScope` itself, so callers always get up to `limit` hits.
+     */
+    search(vector: number[], limit: number, scope?: SearchScope): Promise<SearchHit[]>;
     /**
      * Optional, for diff-embedding (plan P4 / A4): chunk ids and content
      * hashes currently stored for these notes. Chunks without a stored

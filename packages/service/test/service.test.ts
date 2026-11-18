@@ -1871,3 +1871,47 @@ describe('SynaipseService.archiveStaleNotes', () => {
         expect(ids).not.toContain('Archive/forgotten.md');
     });
 });
+describe('SynaipseService.search with a path scope', () => {
+    const seed = async (): Promise<void> => {
+        for (let i = 0; i < 6; i++) {
+            await writeNote(vaultDir, `Other/o${i}.md`, `# O${i}\nalpha alpha alpha alpha`);
+        }
+        for (let i = 0; i < 3; i++) {
+            await writeNote(vaultDir, `Memory/p/m${i}.md`, `# M${i}\nalpha and something else entirely`);
+        }
+        await writeNote(vaultDir, 'Memory/q/x.md', '# X\nalpha alpha');
+    };
+
+    it('returns limit hits from inside the scope, not the global top-N filtered', async () => {
+        await seed();
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        const global = await service.search('alpha', 'hybrid', 3);
+        expect(global.every((h) => !h.noteId.startsWith('Memory/p/'))).toBe(true);
+
+        const scoped = await service.search('alpha', 'hybrid', 3, {include: ['Memory/p/']});
+        expect(scoped.map((h) => h.noteId).sort()).toEqual(['Memory/p/m0.md', 'Memory/p/m1.md', 'Memory/p/m2.md']);
+
+        const excluded = await service.search('alpha', 'fulltext', 20, {exclude: ['Other/']});
+        expect(excluded.some((h) => h.noteId.startsWith('Other/'))).toBe(false);
+        expect(excluded).toHaveLength(4);
+    });
+
+    it('narrows to the MCP token scope and returns nothing outside it', async () => {
+        await seed();
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        await auditContextStorage.run({tokenLabel: 't', pathPrefixes: ['Memory/']}, async () => {
+            const hits = await service.search('alpha', 'fulltext', 20);
+            expect(hits.map((h) => h.noteId).every((id) => id.startsWith('Memory/'))).toBe(true);
+            expect(hits).toHaveLength(4);
+
+            const inner = await service.search('alpha', 'fulltext', 20, {include: ['Memory/q/']});
+            expect(inner.map((h) => h.noteId)).toEqual(['Memory/q/x.md']);
+
+            expect(await service.search('alpha', 'fulltext', 20, {include: ['Other/']})).toEqual([]);
+        });
+    });
+});

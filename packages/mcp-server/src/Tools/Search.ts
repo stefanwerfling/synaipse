@@ -60,6 +60,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
                     query: {type: 'string'},
                     mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid']},
                     limit: {type: 'number', description: 'Default 10'},
+                    pathPrefix: {type: 'string', description: 'Only notes under this path, e.g. "Memory/<project>/"'},
                     explain: {type: 'boolean'}
                 },
                 required: ['query']
@@ -68,7 +69,13 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
         handle: async (args) => {
             const query = asString(args.query, 'query');
             const explain = args.explain === true;
-            const raw = await service.search(query, asSearchMode(args.mode), asLimit(args.limit, 10));
+            const prefix = typeof args.pathPrefix === 'string' && args.pathPrefix.length > 0 ? args.pathPrefix : undefined;
+            const raw = await service.search(
+                query,
+                asSearchMode(args.mode),
+                asLimit(args.limit, 10),
+                prefix !== undefined ? {include: [prefix]} : undefined
+            );
             // Brief hits: `path` duplicates noteId and chunkId is internal;
             // both (and the score breakdown) only come back with explain.
             const stripped = explain

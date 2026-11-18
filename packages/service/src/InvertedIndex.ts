@@ -148,7 +148,8 @@ export class InvertedIndex {
         return this.postings.size;
     }
 
-    public search(query: string, limit: number): SearchHit[] {
+    /** BM25 ranking. `accept` drops notes before the cut to `limit` (search scope). */
+    public search(query: string, limit: number, accept?: (id: NoteId) => boolean): SearchHit[] {
         const terms = tokenise(query);
 
         if (terms.length === 0) return [];
@@ -194,6 +195,7 @@ export class InvertedIndex {
 
         for (const [noteId, score] of scores) {
             if (score <= 0) continue;
+            if (accept !== undefined && !accept(noteId)) continue;
 
             hits.push({
                 noteId,
@@ -209,7 +211,7 @@ export class InvertedIndex {
     }
 
     /** Title-only ranking — used as a third RRF input. */
-    public searchTitle(query: string, limit: number): SearchHit[] {
+    public searchTitle(query: string, limit: number, accept?: (id: NoteId) => boolean): SearchHit[] {
         const terms = tokenise(query);
 
         if (terms.length === 0) return [];
@@ -229,6 +231,7 @@ export class InvertedIndex {
         const hits: SearchHit[] = [];
 
         for (const [noteId, score] of counts) {
+            if (accept !== undefined && !accept(noteId)) continue;
             hits.push({
                 noteId,
                 path: this.paths.get(noteId) ?? noteId,
