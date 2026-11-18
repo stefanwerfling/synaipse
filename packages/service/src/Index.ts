@@ -41,4 +41,5 @@ export {
     BENCHMARK_FILENAME
 } from './Benchmark.js';
 export {ConsentStore} from './ConsentStore.js';
-export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';
+export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';export {buildLocalGraph} from './LocalGraph.js';
+export type {LocalGraph, LocalGraphNode, LocalGraphEdge, LocalGraphEdgeKind, LocalGraphOptions} from './LocalGraph.js';

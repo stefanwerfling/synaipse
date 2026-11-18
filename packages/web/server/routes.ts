@@ -1402,6 +1402,29 @@ export const routes = (
         return;
     }
 
+    if (path === '/api/graph/local') {
+        if (method !== 'GET') {
+            methodNotAllowed(res);
+            return;
+        }
+
+        const id = url.searchParams.get('id') ?? '';
+        const depth = Number.parseInt(url.searchParams.get('depth') ?? '1', 10);
+        const limit = Number.parseInt(url.searchParams.get('limit') ?? '60', 10);
+        const local = service.localGraph(id, {
+            depth: Number.isFinite(depth) ? depth : 1,
+            limit: Number.isFinite(limit) ? limit : 60
+        });
+
+        if (local === null) {
+            json(res, 404, {error: `note not found: ${id}`});
+            return;
+        }
+
+        json(res, 200, local);
+        return;
+    }
+
     if (path === '/api/graph/layout') {
         if (method !== 'GET') {
             methodNotAllowed(res);

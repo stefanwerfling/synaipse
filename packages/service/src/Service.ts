@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
-import {buildLinkKeyMap, createLogger, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
+import {buildLinkKeyMap, createLogger, extractTypedLinks, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, currentWriteBatch, runWriteBatch, type History, type WriteBatch} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
@@ -82,6 +82,7 @@ export interface SnapshotEntry {
 import {createEmbedder, createReranker, embedderFingerprint, QdrantStore, VectorIndex, type Embedder, type Reranker, type VectorStore} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
+import {buildLocalGraph, type LocalGraph, type LocalGraphOptions} from './LocalGraph.js';
 import {InvertedIndex} from './InvertedIndex.js';
 import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
@@ -2672,6 +2673,24 @@ export class SynaipseService {
 
         this.cachedGraph = built;
         return built;
+    }
+
+    /**
+     * Ego network of a note for the viewer's local graph: wikilinks in both
+     * directions plus outgoing typed frontmatter links, bounded by depth and
+     * node count. A UI read — it does not count as an access (decay), like
+     * the whole-graph endpoint. Null for an unknown id.
+     */
+    public localGraph(id: NoteId, options: LocalGraphOptions = {}): LocalGraph | null {
+        const keys = this.linkKeyMap();
+
+        return buildLocalGraph(this.graph(), (noteId) => {
+            const note = this.notes.tryGet(noteId);
+            if (note === undefined) return [];
+            return extractTypedLinks(note.frontmatter)
+                .map((link) => ({to: keys.get(link.target), kind: link.kind}))
+                .filter((link): link is {to: NoteId; kind: typeof link.kind} => link.to !== undefined);
+        }, id, options);
     }
 
     public graphLayout(): GraphLayout {
