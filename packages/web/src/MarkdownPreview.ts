@@ -1,8 +1,7 @@
 import {marked} from 'marked';
-import {markedHighlight} from 'marked-highlight';
-import hljs from 'highlight.js/lib/common';
 import type {TypedLink, TypedLinkKind} from '@synaipse/core';
 import {resolveAssetUrl} from './AssetUrl.js';
+import {highlightCodeIn} from './CodeHighlight.js';
 import {clear, el, portalHost} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
@@ -24,27 +23,21 @@ const sameTypedLinks = (a: readonly TypedLink[], b: readonly TypedLink[]): boole
     return true;
 };
 
-let highlightConfigured = false;
+let markedConfigured = false;
 
-const configureHighlight = (): void => {
-    if (highlightConfigured) {
+const configureMarked = (): void => {
+    if (markedConfigured) {
         return;
     }
 
-    marked.use(markedHighlight({
-        langPrefix: 'hljs language-',
-        highlight: (code, lang) => {
-            const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-            return hljs.highlight(code, {language, ignoreIllegals: true}).value;
-        }
-    }));
-
+    // Code highlighting is a hydration pass (CodeHighlight.ts), so
+    // highlight.js stays out of the entry chunk.
     setupContainerExtension(marked);
 
-    highlightConfigured = true;
+    markedConfigured = true;
 };
 
-configureHighlight();
+configureMarked();
 
 export interface NoteSnippet {
     title: string;
@@ -113,6 +106,7 @@ const renderMarkdown = (content: string): string => {
 export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: string): void => {
     host.innerHTML = renderMarkdown(content);
     rewriteAssetImages(host, noteId);
+    void highlightCodeIn(host);
     void applyAntvInfographicsTo(host);
     void applyMdFloorTo(host);
 };
@@ -126,6 +120,7 @@ export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: 
 export const renderMarkdownDraftInto = (host: HTMLElement, content: string): void => {
     host.innerHTML = renderMarkdown(content);
     rewriteAssetImages(host, undefined);
+    void highlightCodeIn(host);
 };
 
 /**
@@ -143,6 +138,7 @@ export const hydrateMarkdownForExport = async (
 ): Promise<void> => {
     host.innerHTML = renderMarkdown(content);
     rewriteAssetImages(host, noteId);
+    await highlightCodeIn(host);
     await applyAntvInfographicsTo(host);
     await applyMdFloorTo(host);
 };
@@ -444,6 +440,7 @@ export class MarkdownPreview {
 
         this.transformWikilinks();
         rewriteAssetImages(body, this.noteId);
+        void highlightCodeIn(body);
         void applyAntvInfographicsTo(this.element);
         void applyMdFloorTo(this.element);
     }

@@ -1,4 +1,5 @@
-import JSZip from 'jszip';
+// Type only: the 95 KB library itself is loaded when an export is parsed (plan P4 / D4).
+import type JSZip from 'jszip';
 import type {ChatgptImportAttachment, ChatgptImportConversation, ChatgptImportMessage} from './Api.js';
 
 interface RawNode {
@@ -317,7 +318,8 @@ const loadAssetFileNames = async (zip: JSZip): Promise<Map<string, string>> => {
 };
 
 export const parseChatgptExport = async (file: File): Promise<ParsedExport> => {
-    const zip = await JSZip.loadAsync(file);
+    const {default: JSZipLib} = await import('jszip');
+    const zip = await JSZipLib.loadAsync(file);
     const convFiles = collectConversationFiles(zip);
 
     if (convFiles.length === 0) {

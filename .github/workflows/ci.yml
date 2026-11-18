@@ -28,6 +28,7 @@ jobs:
       - run: npm run build
       - run: npm run lint
       - run: npm test
+      - run: npm run bundle:check
 
   mariadb:
     name: server-mode integration (MariaDB)
