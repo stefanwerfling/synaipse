@@ -19,3 +19,4 @@ export * from './Log.js';
 // build. Server-side consumers import the subpaths directly:
 //   import {generateToken} from '@synaipse/core/token-hash';
 //   import {generatePasswordHash} from '@synaipse/core/password-hash';
+// Same for WorkerRpc (node:worker_threads): '@synaipse/core/worker-rpc'.

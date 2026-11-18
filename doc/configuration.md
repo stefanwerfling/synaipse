@@ -70,6 +70,8 @@ npm install @huggingface/transformers
 
 The first call downloads the model weights (~80 MB for MiniLM-L6) into `~/.cache/huggingface/`; subsequent calls are local and offline. The model namespace stays `Xenova/*` — that is the HF Hub account hosting the ONNX-converted weights.
 
+The embedder and the HuggingFace reranker run in one shared worker thread, so inference does not block the server's event loop: in a 64-chunk batch the loop was blocked for the whole ~1.6 s in-process and stayed free with the worker. Each model is loaded once per process. Set `SYNAIPSE_TRANSFORMERS_WORKER=0` to run them in-process as before.
+
 Built-in dimension lookup table (see `packages/vector/src/Factory.ts`):
 
 | Model                              | Dim  | Note                        |

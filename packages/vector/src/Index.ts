@@ -14,4 +14,4 @@ export type {VectorStore} from './VectorStore.js';
 export type {QdrantStoreOptions, QdrantRetryOptions, QdrantRetryInfo} from './Qdrant.js';
 export {VectorIndex, partitionChunks} from './Pipeline.js';
 export type {ChunkOptions} from './Chunker.js';
-export type {BatchInfo, IndexBatchResult, VectorIndexOptions} from './Pipeline.js';
+export type {BatchInfo, IndexBatchResult, VectorIndexOptions} from './Pipeline.js';export {TransformersHost, WorkerHuggingFaceEmbedder, WorkerHuggingFaceReranker} from './TransformersWorker.js';

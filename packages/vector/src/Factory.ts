@@ -5,6 +5,7 @@ import {OllamaEmbedder} from './Ollama.js';
 import {VoyageEmbedder} from './Embeddings.js';
 import {HuggingFaceEmbedder} from './HuggingFace.js';
 import type {Reranker} from './Reranker.js';
+import {TransformersHost, WorkerHuggingFaceEmbedder, WorkerHuggingFaceReranker} from './TransformersWorker.js';
 import {HuggingFaceReranker} from './Reranker.js';
 
 const log = createLogger('vector');
@@ -39,6 +40,34 @@ const HUGGINGFACE_DIMS: Record<string, number> = {
 };
 
 const stripTag = (model: string): string => model.split(':')[0] ?? model;
+
+/**
+ * One {@link TransformersHost} per config, shared by the HuggingFace
+ * embedder and reranker so both models live in the same worker thread.
+ * `SYNAIPSE_TRANSFORMERS_WORKER=0` keeps them in-process (old behaviour).
+ */
+const hosts = new WeakMap<Config, TransformersHost>();
+
+const transformersHost = (config: Config): TransformersHost | null => {
+    if (process.env.SYNAIPSE_TRANSFORMERS_WORKER === '0') return null;
+
+    let host = hosts.get(config);
+    if (host === undefined) {
+        const embedderModel = config.embeddings.provider === 'huggingface' ? config.huggingface?.model : undefined;
+        const embedderDim = embedderModel === undefined ? undefined : HUGGINGFACE_DIMS[embedderModel];
+        const rerankerModel = config.reranker?.provider === 'huggingface'
+            ? config.reranker.model ?? 'Xenova/ms-marco-MiniLM-L-6-v2'
+            : undefined;
+
+        host = new TransformersHost({
+            ...(embedderModel !== undefined && embedderDim !== undefined ? {embedder: {model: embedderModel, dimension: embedderDim}} : {}),
+            ...(rerankerModel !== undefined ? {reranker: {model: rerankerModel}} : {})
+        });
+        hosts.set(config, host);
+    }
+
+    return host;
+};
 
 export const createEmbedder = (config: Config): Embedder | null => {
     const provider = config.embeddings.provider;
@@ -91,10 +120,10 @@ export const createEmbedder = (config: Config): Embedder | null => {
             );
         }
 
-        return new HuggingFaceEmbedder({
-            model: config.huggingface.model,
-            dimension
-        });
+        const host = transformersHost(config);
+        return host === null
+            ? new HuggingFaceEmbedder({model: config.huggingface.model, dimension})
+            : new WorkerHuggingFaceEmbedder(host, dimension);
     }
 
     throw new ConfigError(`unknown embeddings provider: ${String(provider)}`);
@@ -113,9 +142,9 @@ export const createReranker = (config: Config): Reranker | null => {
     if (cfg.provider === 'none') return null;
 
     if (cfg.provider === 'huggingface') {
-        return new HuggingFaceReranker({
-            model: cfg.model ?? 'Xenova/ms-marco-MiniLM-L-6-v2'
-        });
+        const model = cfg.model ?? 'Xenova/ms-marco-MiniLM-L-6-v2';
+        const host = transformersHost(config);
+        return host === null ? new HuggingFaceReranker({model}) : new WorkerHuggingFaceReranker(host, model);
     }
 
     throw new ConfigError(`unknown reranker provider: ${String(cfg.provider)}`);

@@ -26,6 +26,10 @@
     "./password-hash": {
       "types": "./dist/PasswordHash.d.ts",
       "import": "./dist/PasswordHash.js"
+    },
+    "./worker-rpc": {
+      "types": "./dist/WorkerRpc.d.ts",
+      "import": "./dist/WorkerRpc.js"
     }
   },
   "scripts": {
