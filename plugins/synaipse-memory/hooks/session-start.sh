@@ -20,11 +20,16 @@ ensure_gitignore "$SYNAIPSE_LOG_DIR" || exit 0
 
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-if [[ ! -f "$SYNAIPSE_META_PATH" ]]; then
-  CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
-  [[ -z "$CWD" ]] && CWD="$CLAUDE_PROJECT_DIR"
-  PROJECT_NAME="${SYNAIPSE_PROJECT:-$(basename "$CWD")}"
+CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
+[[ -z "$CWD" ]] && CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_NAME="${SYNAIPSE_PROJECT:-$(basename "$CWD")}"
+# On resume the meta file already exists — keep the project recorded there.
+if [[ -f "$SYNAIPSE_META_PATH" ]]; then
+  META_PROJECT="$(jq -r '.project // empty' "$SYNAIPSE_META_PATH" 2>/dev/null || true)"
+  [[ -n "$META_PROJECT" ]] && PROJECT_NAME="$META_PROJECT"
+fi
 
+if [[ ! -f "$SYNAIPSE_META_PATH" ]]; then
   jq -nc \
     --arg sid "$SESSION_ID" \
     --arg proj "$PROJECT_NAME" \
@@ -46,8 +51,12 @@ if command -v curl >/dev/null 2>&1; then
 
   mkdir -p "$PRIMER_DIR" 2>/dev/null || true
 
-  if curl --silent --show-error --fail --max-time 5 \
-      "http://localhost:${PORT}/api/prime?format=markdown" \
+  # Pass the project explicitly — otherwise the server falls back to its
+  # own env project and every repo gets the same primer.
+  if curl --silent --show-error --fail --max-time 5 --get \
+      --data-urlencode "format=markdown" \
+      --data-urlencode "project=${PROJECT_NAME}" \
+      "http://localhost:${PORT}/api/prime" \
       -o "$PRIMER_TMP" 2>/dev/null; then
     mv -f "$PRIMER_TMP" "$PRIMER_PATH" 2>/dev/null || rm -f "$PRIMER_TMP" 2>/dev/null
   else
