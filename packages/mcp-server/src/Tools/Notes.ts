@@ -1,7 +1,7 @@
 import {canonicalNoteLink, resolveNoteRefTarget} from '@synaipse/core';
 import {isAllowedAssetMime, isPathInScope, MIME_TO_EXT, type SynaipseService} from '@synaipse/service';
 import {extractSection, headingsOf, modifiedOf, resolveNoteId, writeResult} from './Format.js';
-import {asString, enforceReadConsent, ok, type ToolHandler} from './Shared.js';
+import {asString, asWriteMode, enforceReadConsent, ok, type ToolHandler} from './Shared.js';
 
 /** Default cap for read_note bodies; long notes are cut with a hint how to page. */
 const READ_DEFAULT_MAX_CHARS = 20_000;
@@ -116,7 +116,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_write_note',
-            description: 'Create or overwrite a note; relative paths land in the project folder. Search first to avoid duplicates. Returns {id, hash, warnings?} — warnings name dead wikilinks.',
+            description: 'Create or overwrite a note; relative paths land in the project folder. Search first to avoid duplicates. Returns {id, hash, created?, possibleDuplicates?, warnings?}: possibleDuplicates lists existing notes with the same knowledge (merge into one and delete the other), warnings name dead wikilinks.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -124,21 +124,37 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                     content: {type: 'string', description: 'Markdown body without frontmatter'},
                     frontmatter: {
                         type: 'object',
-                        description: 'title, tags, aliases, …',
+                        description: 'title, tags, aliases, supersedes, …',
                         additionalProperties: true
-                    }
+                    },
+                    mode: {type: 'string', enum: ['upsert', 'create', 'overwrite'], description: 'create: fail if it exists; overwrite: fail if missing. Default upsert'},
+                    expectedHash: {type: 'string', description: 'Fail unless the note still has this hash (from read_note)'}
                 },
                 required: ['path', 'content']
             }
         },
         handle: async (args, ctx) => {
             const frontmatter = args.frontmatter as Record<string, unknown> | undefined;
+            const path = asString(args.path, 'path');
+            const mode = asWriteMode(args.mode);
+            const created = service.tryReadNote(service.writePathFor(path, ctx)) === undefined;
             const note = await service.writeNote({
-                path: asString(args.path, 'path'),
+                path,
                 content: asString(args.content, 'content'),
-                ...(frontmatter ? {frontmatter} : {})
+                ...(frontmatter ? {frontmatter} : {}),
+                ...(mode !== undefined ? {mode} : {}),
+                ...(typeof args.expectedHash === 'string' ? {expectedHash: args.expectedHash} : {})
             }, ctx);
-            return {response: ok(writeResult(service, note)), event: {kind: 'write', touched: [note.id]}};
+            // Only a new note can duplicate another one; overwrites are deliberate.
+            const duplicates = created ? await service.possibleDuplicates({title: note.title, content: note.content}, [note.id]) : [];
+            return {
+                response: ok({
+                    ...writeResult(service, note),
+                    ...(created ? {created: true} : {}),
+                    ...(duplicates.length > 0 ? {possibleDuplicates: duplicates} : {})
+                }),
+                event: {kind: 'write', touched: [note.id]}
+            };
         }
     },
     {
@@ -229,7 +245,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_remember',
-            description: 'Append a one-line insight to today\'s inbox (Memory/<project>/inbox/YYYY-MM-DD.md) — for captures not yet worth a curated note.',
+            description: 'Append a one-line insight to today\'s inbox (Memory/<project>/inbox/YYYY-MM-DD.md) — for captures not yet worth a curated note. possibleDuplicates in the result names notes that already say this.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -249,9 +265,11 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 ? args.tags.filter((t): t is string => typeof t === 'string')
                 : [];
 
+            // Checked before appending, so the entry does not find itself.
+            const duplicates = await service.possibleDuplicates({title: '', content: text});
             const noteId = await service.appendInboxEntry(text, tags, ctx);
             return {
-                response: ok({noteId, tags, time: new Date().toISOString()}),
+                response: ok({noteId, tags, time: new Date().toISOString(), ...(duplicates.length > 0 ? {possibleDuplicates: duplicates} : {})}),
                 event: {kind: 'write', touched: [noteId]}
             };
         }
@@ -323,14 +341,19 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                     frontmatterPatch: {
                         type: 'object',
                         additionalProperties: true
-                    }
+                    },
+                    expectedHash: {type: 'string', description: 'Fail unless the note still has this hash'}
                 },
                 required: ['id']
             }
         },
         handle: async (args, ctx) => {
             const id = asString(args.id, 'id');
-            const patch: {content?: string; frontmatterPatch?: Record<string, unknown>} = {};
+            const patch: {content?: string; frontmatterPatch?: Record<string, unknown>; expectedHash?: string} = {};
+
+            if (typeof args.expectedHash === 'string') {
+                patch.expectedHash = args.expectedHash;
+            }
 
             if (typeof args.content === 'string') {
                 patch.content = args.content;
@@ -365,7 +388,8 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                             required: ['oldString', 'newString']
                         },
                         minItems: 1
-                    }
+                    },
+                    expectedHash: {type: 'string', description: 'Fail unless the note still has this hash'}
                 },
                 required: ['id', 'edits']
             }
@@ -381,6 +405,9 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
             // Same consent gate as read_note: edit_note returns the note,
             // so a pending/denied note must not leak through here.
             const existing = await enforceReadConsent(service, id);
+            if (typeof args.expectedHash === 'string' && args.expectedHash !== existing.hash) {
+                throw new Error(`${id} changed since you read it (expected hash ${args.expectedHash}, now ${existing.hash}). Read it again and reapply your edits.`);
+            }
             let body = existing.content;
 
             for (let i = 0; i < rawEdits.length; i++) {
@@ -416,7 +443,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 body = body.slice(0, first) + newString + body.slice(first + oldString.length);
             }
 
-            const note = await service.updateNote(id, {content: body}, ctx);
+            const note = await service.updateNote(id, {content: body, expectedHash: existing.hash}, ctx);
             return {response: ok(writeResult(service, note, existing.hash)), event: {kind: 'write', touched: [note.id]}};
         }
     }

@@ -9,8 +9,8 @@ import {SynaipseService} from '@synaipse/service';
 import {buildTools} from '../src/Tools.js';
 import {buildMcpServer} from '../src/Server.js';
 import {EventPublisher} from '../src/EventPublisher.js';
-import {EVAL_NOTES, EVAL_QUESTIONS, type EvalNote, type EvalQuestion} from './fixture.js';
-import {regressions, type EvalReport, type QuestionResult, type Summary} from './Report.js';
+import {EVAL_DRAFTS, EVAL_NOTES, EVAL_QUESTIONS, type EvalDraft, type EvalNote, type EvalQuestion} from './fixture.js';
+import {regressions, type DedupeSummary, type EvalReport, type QuestionResult, type Summary} from './Report.js';
 
 /**
  * LLM-usability eval (plan P8 / B7). A scripted agent answers each fixture
@@ -93,6 +93,28 @@ const answer = async (client: Client, q: EvalQuestion): Promise<QuestionResult> 
     };
 };
 
+/** Write the draft like an agent would and return the notes the duplicate check named. */
+const attemptWrite = async (client: Client, draft: EvalDraft): Promise<string[]> => {
+    const result = draft.tool === 'remember'
+        ? await client.callTool({name: 'synaipse_remember', arguments: {text: draft.content}})
+        : await client.callTool({name: 'synaipse_write_note', arguments: {path: `eval/${draft.id}.md`, content: draft.content, frontmatter: {title: draft.title}}});
+    const parsed = JSON.parse(textOf(result)) as {possibleDuplicates?: Array<{id: string}>};
+    return (parsed.possibleDuplicates ?? []).map((d) => d.id);
+};
+
+const summarizeDedupe = (flagged: Record<string, string[]>): DedupeSummary => {
+    const dups = EVAL_DRAFTS.filter((d) => d.duplicateOf.length > 0);
+    const fresh = EVAL_DRAFTS.filter((d) => d.duplicateOf.length === 0);
+    const round = (x: number): number => Math.round(x * 1000) / 1000;
+
+    return {
+        drafts: EVAL_DRAFTS.length,
+        recall: round(dups.filter((d) => (flagged[d.id] ?? []).some((id) => d.duplicateOf.includes(id))).length / Math.max(1, dups.length)),
+        falseAlarms: round(fresh.filter((d) => (flagged[d.id] ?? []).length > 0).length / Math.max(1, fresh.length)),
+        flagged
+    };
+};
+
 const summarize = (results: readonly QuestionResult[], questions: readonly EvalQuestion[]): Summary => {
     const n = results.length;
     const withOutdated = results.filter((r) => (questions.find((q) => q.id === r.id)?.outdated ?? []).length > 0);
@@ -160,6 +182,8 @@ describe('LLM usability eval', () => {
         try {
             const results: QuestionResult[] = [];
             for (const q of EVAL_QUESTIONS) results.push(await session((client) => answer(client, q)));
+            const flagged: Record<string, string[]> = {};
+            for (const draft of EVAL_DRAFTS) flagged[draft.id] = await session((client) => attemptWrite(client, draft));
             const context = await session(async (client) => ({
                 toolListTokens: tokens(JSON.stringify((await client.listTools()).tools)),
                 instructionsTokens: tokens(client.getInstructions() ?? ''),
@@ -170,6 +194,7 @@ describe('LLM usability eval', () => {
             const report: EvalReport = {
                 fixture: {notes: EVAL_NOTES.length, questions: EVAL_QUESTIONS.length},
                 context,
+                dedupe: summarizeDedupe(flagged),
                 overall: summarize(results, EVAL_QUESTIONS),
                 byCategory: Object.fromEntries(categories.map((c) => [c, summarize(results.filter((r) => r.category === c), EVAL_QUESTIONS)])),
                 questions: results
@@ -185,6 +210,7 @@ describe('LLM usability eval', () => {
                 table(report, base),
                 '',
                 `context tokens: tool list ${report.context.toolListTokens}, instructions ${report.context.instructionsTokens}, prime ${report.context.primeTokens}`,
+                `duplicate check: recall ${report.dedupe!.recall}${base?.dedupe ? ` (${base.dedupe.recall})` : ''}, false alarms ${report.dedupe!.falseAlarms}${base?.dedupe ? ` (${base.dedupe.falseAlarms})` : ''}; flagged ${Object.entries(flagged).map(([id, ids]) => `${id}:${ids.length > 0 ? ids.map((x) => x.split('/').pop()).join('+') : '-'}`).join(' ')}`,
                 `not first (rank, ✗ = missing, ! = outdated above): ${misses.join(' ') || 'none'}`,
                 ''
             ].join('\n') + '\n');

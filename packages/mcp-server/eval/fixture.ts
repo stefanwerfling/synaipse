@@ -351,3 +351,33 @@ export const EVAL_QUESTIONS: readonly EvalQuestion[] = [
     {id: 'L13', category: 'lookup', question: 'How long are old invoice file versions kept?', query: 'invoice bucket versioning lifecycle', relevant: [`${K}/inbox/2025-11-10.md`]},
     {id: 'L14', category: 'lookup', question: 'When are dunning emails sent?', query: 'dunning emails', relevant: [`${K}/inbox/2025-11-12.md`]}
 ];
+
+/**
+ * Writes an agent might attempt (plan P8 S3): the duplicate check should
+ * name `duplicateOf` and stay quiet for new knowledge, even when it shares
+ * vocabulary with an existing note.
+ */
+export interface EvalDraft {
+    id: string;
+    /** `note` = synaipse_write_note to a new path, `remember` = synaipse_remember. */
+    tool: 'note' | 'remember';
+    title?: string;
+    content: string;
+    /** Existing notes that already hold this knowledge; empty = genuinely new. */
+    duplicateOf: readonly string[];
+}
+
+export const EVAL_DRAFTS: readonly EvalDraft[] = [
+    // ---- duplicates --------------------------------------------------------
+    {id: 'D1', tool: 'note', title: 'Public API rate limit', content: 'Each API key may send 600 requests per minute. A token bucket allows bursts of 100 more; above that the API answers 429 with Retry-After.', duplicateOf: [`${K}/notes/rate-limits.md`, `${K}/notes/rate-limiting-public-api.md`]},
+    {id: 'D2', tool: 'note', title: 'Webhook retry backoff', content: 'After a customer endpoint failed for two hours, webhook retries now back off exponentially from 30 s up to 6 h with jitter; endpoints are paused after 50 failures in a row.', duplicateOf: [`${K}/bugs/webhook-retry-storm.md`]},
+    {id: 'D3', tool: 'remember', content: 'Invoice S3 bucket: versioning on, old versions deleted by lifecycle after 30 days.', duplicateOf: [`${K}/inbox/2025-11-10.md`]},
+    {id: 'D4', tool: 'remember', content: 'Production Postgres max_connections is 400; PgBouncer transaction pool of 40 per API node.', duplicateOf: [`${K}/notes/postgres-connections.md`]},
+    {id: 'D5', tool: 'note', title: 'CSV import encoding', content: 'Excel saves CSV in Windows-1252, which broke umlauts. The importer detects the encoding with chardet and converts to UTF-8 first.', duplicateOf: [`${K}/bugs/csv-import-encoding.md`]},
+    // ---- new knowledge with shared vocabulary ------------------------------
+    {id: 'N1', tool: 'note', title: 'Error tracking with Sentry', content: 'Kestrel reports API and worker exceptions to Sentry; the release tag is set from the image version so errors map to deploys.', duplicateOf: []},
+    {id: 'N2', tool: 'remember', content: 'Harbor push payloads must stay below 4 KB, larger data is fetched by the app after the notification.', duplicateOf: []},
+    {id: 'N3', tool: 'note', title: 'December release freeze', content: 'No Kestrel production releases between December 15 and January 5; hotfixes need approval from Maria.', duplicateOf: []},
+    {id: 'N4', tool: 'remember', content: 'The Postgres sessions table needs an index on expires_at, the cleanup cron was doing a sequential scan.', duplicateOf: []},
+    {id: 'N5', tool: 'note', title: 'API key scopes', content: 'Public API keys carry scopes (invoices:read, invoices:write, customers:read); a request outside its scopes gets 403.', duplicateOf: []}
+];

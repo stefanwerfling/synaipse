@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, SearchScope, Graph, VaultEvent} from '@synaipse/core';
-import {buildLinkKeyMap, createLogger, extractTypedLinks, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap, inScope, intersectScopes, isUnscoped} from '@synaipse/core';
+import {buildLinkKeyMap, createLogger, extractTypedLinks, LEGACY_EMBED_MODEL, ProjectScopeError, WriteConflictError, parseRoadmap, inScope, intersectScopes, isUnscoped} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, currentWriteBatch, runWriteBatch, type History, type WriteBatch} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
@@ -85,6 +85,7 @@ import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSi
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {buildLocalGraph, type LocalGraph, type LocalGraphOptions} from './LocalGraph.js';
 import {InvertedIndex} from './InvertedIndex.js';
+import {duplicateQuery, pickDuplicates, type DuplicateCandidate, type DuplicateText} from './Duplicates.js';
 import {applyKnowledgeState, buildSuccessors, isOutdated, knowledgeStateOf, type KnowledgeState} from './KnowledgeState.js';
 import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
@@ -221,7 +222,22 @@ export interface PrimeResult {
 export interface UpdateNoteInput {
     content?: string;
     frontmatterPatch?: Frontmatter;
+    /** Only apply when the note still has this hash (optimistic lock). */
+    expectedHash?: string;
 }
+
+/**
+ * Guards for a write (plan P8 / B4). `mode`: `create` fails when the note
+ * exists, `overwrite` when it does not, `upsert` (default) never.
+ * `expectedHash`: fail unless the note exists with exactly this hash.
+ * A failed guard throws WriteConflictError and writes nothing.
+ */
+export interface WriteGuard {
+    mode?: WriteMode;
+    expectedHash?: string;
+}
+
+export type WriteMode = 'create' | 'overwrite' | 'upsert';
 
 export interface ProjectOpts {
     project?: string | null;
@@ -390,6 +406,8 @@ export class SynaipseService {
     private cachedLinkKeys: Map<string, NoteId> | null = null;
     /** Superseded note → successor (plan P8 / B4), rebuilt after topology changes. */
     private cachedSuccessors: Map<NoteId, NoteId> | null = null;
+    /** Tail of the pending writes per path (see withPathLock). */
+    private readonly pathLocks = new Map<string, Promise<void>>();
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
     private readonly topologyListeners = new Set<(version: number) => void>();
@@ -1830,7 +1848,7 @@ export class SynaipseService {
         return perCall ?? this.configProjectExtraTags;
     }
 
-    public async writeNote(input: NoteWriteInput, opts?: ProjectOpts, commitTool = 'write_note'): Promise<Note> {
+    public async writeNote(input: NoteWriteInput & WriteGuard, opts?: ProjectOpts, commitTool = 'write_note'): Promise<Note> {
         const project = this.requireProject('write_note', opts?.project);
         const extraTags = this.resolveExtraTags(opts?.extraTags);
 
@@ -1840,14 +1858,78 @@ export class SynaipseService {
             frontmatter: this.applyProjectToFrontmatter(input.frontmatter, project, extraTags)
         };
 
-        const note = await this.notes.write(scoped, {
-            message: buildCommitMessage(commitTool, scoped.path, project),
-            ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
-        });
+        // Guard check and write under one per-path lock, so two writers
+        // holding the same expectedHash cannot both succeed.
+        return this.withPathLock(scoped.path, async () => {
+            this.checkWriteGuard(scoped.path, input);
 
-        await this.maybeIndexNote(note);
-        this.fulltextIndex.addNote(note);
-        return note;
+            const note = await this.notes.write(scoped, {
+                message: buildCommitMessage(commitTool, scoped.path, project),
+                ...(opts?.gitAuthor !== undefined ? {author: opts.gitAuthor} : {})
+            });
+
+            await this.maybeIndexNote(note);
+            this.fulltextIndex.addNote(note);
+            return note;
+        });
+    }
+
+    /** The note id a scoped write of `path` lands on (project folder prefix applied). */
+    public writePathFor(path: string, opts?: ProjectOpts): NoteId {
+        return this.normaliseWritePath(path, this.requireProject('write_note', opts?.project));
+    }
+
+    private checkWriteGuard(path: NoteId, guard: WriteGuard): void {
+        const current = this.notes.tryGet(path);
+        const mode = guard.mode ?? 'upsert';
+
+        if (mode === 'create' && current !== undefined) {
+            throw new WriteConflictError(
+                `${path} already exists (hash ${current.hash}). Read it and change it with edit_note/update_note, or write with mode "upsert".`,
+                path, current.hash);
+        }
+
+        if (mode === 'overwrite' && current === undefined) {
+            throw new WriteConflictError(`${path} does not exist; nothing to overwrite. Write with mode "create" or "upsert".`, path, null);
+        }
+
+        if (guard.expectedHash !== undefined && current?.hash !== guard.expectedHash) {
+            throw new WriteConflictError(
+                current === undefined
+                    ? `${path} does not exist (expectedHash ${guard.expectedHash}).`
+                    : `${path} changed since you read it (expected hash ${guard.expectedHash}, now ${current.hash}). Read it again and reapply your change.`,
+                path, current?.hash ?? null);
+        }
+    }
+
+    /** Run `fn` after every earlier call for the same path has settled. */
+    private async withPathLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+        const previous = this.pathLocks.get(path) ?? Promise.resolve();
+        const run = previous.then(fn, fn);
+        const settled = run.then(() => undefined, () => undefined);
+        this.pathLocks.set(path, settled);
+
+        try {
+            return await run;
+        } finally {
+            if (this.pathLocks.get(path) === settled) this.pathLocks.delete(path);
+        }
+    }
+
+    /**
+     * Existing notes that look like the same knowledge as `text` (plan
+     * P8 / B4): search candidates ranked by word overlap (see
+     * Duplicates.ts). Respects the caller's path scope like search.
+     */
+    public async possibleDuplicates(text: DuplicateText, exclude: readonly NoteId[] = []): Promise<DuplicateCandidate[]> {
+        const query = duplicateQuery(text);
+        if (query.length === 0) return [];
+
+        const hits = await this.search(query, 'hybrid', 8);
+        return pickDuplicates(text, hits, (id) => {
+            const note = this.notes.tryGet(id);
+            return note === undefined ? undefined : {title: note.title, content: note.content};
+        }, new Set(exclude));
     }
 
     /**
@@ -3592,13 +3674,19 @@ export class SynaipseService {
     public async updateNote(id: NoteId, patch: UpdateNoteInput, opts?: ProjectOpts): Promise<Note> {
         this.assertInProject(id, 'update_note', opts?.project);
         const existing = this.notes.get(id);
+
+        if (patch.expectedHash !== undefined && existing.hash !== patch.expectedHash) {
+            throw new WriteConflictError(
+                `${id} changed since you read it (expected hash ${patch.expectedHash}, now ${existing.hash}). Read it again and reapply your change.`,
+                id, existing.hash);
+        }
         const nextContent = patch.content ?? existing.content;
         const nextFrontmatter = patch.frontmatterPatch === undefined
             ? existing.frontmatter
             : {...existing.frontmatter, ...patch.frontmatterPatch};
 
         return this.writeNote(
-            {path: existing.id, content: nextContent, frontmatter: nextFrontmatter},
+            {path: existing.id, content: nextContent, frontmatter: nextFrontmatter, ...(patch.expectedHash !== undefined ? {expectedHash: patch.expectedHash} : {})},
             opts,
             'update_note'
         );

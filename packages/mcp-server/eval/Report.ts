@@ -24,9 +24,21 @@ export interface Summary {
     tokensPerQuestion: number;
 }
 
+export interface DedupeSummary {
+    drafts: number;
+    /** Share of duplicate drafts where an expected note was named. */
+    recall: number;
+    /** Share of new-knowledge drafts that were flagged anyway. */
+    falseAlarms: number;
+    /** Per draft: the flagged note ids. */
+    flagged: Record<string, string[]>;
+}
+
 export interface EvalReport {
     fixture: {notes: number; questions: number};
     context: {toolListTokens: number; instructionsTokens: number; primeTokens: number};
+    /** Duplicate check on writes (P8 S3); missing in baselines from before. */
+    dedupe?: DedupeSummary;
     overall: Summary;
     byCategory: Record<string, Summary>;
     questions: QuestionResult[];
@@ -50,5 +62,9 @@ export const regressions = (base: EvalReport, now: EvalReport): string[] => {
     higher('toolListTokens', base.context.toolListTokens, now.context.toolListTokens, 0.05);
     higher('instructionsTokens', base.context.instructionsTokens, now.context.instructionsTokens, 0.05);
     higher('primeTokens', base.context.primeTokens, now.context.primeTokens, 0.05);
+    if (base.dedupe !== undefined && now.dedupe !== undefined) {
+        lower('dedupe recall', base.dedupe.recall, now.dedupe.recall);
+        higher('dedupe falseAlarms', base.dedupe.falseAlarms, now.dedupe.falseAlarms, 0);
+    }
     return out;
 };

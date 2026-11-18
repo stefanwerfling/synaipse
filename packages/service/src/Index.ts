@@ -1,5 +1,5 @@
 export {SynaipseService} from './Service.js';
-export type {ServiceOverrides} from './Service.js';
+export type {ServiceOverrides, WriteGuard, WriteMode} from './Service.js';
 export {auditContextStorage, getAuditTokenLabel, isPathInScope} from './AuditContext.js';
 export type {AuditContext} from './AuditContext.js';
 export type {AuditEntry, AuditKind} from './AuditLog.js';
@@ -46,3 +46,5 @@ export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStor
 export type {LocalGraph, LocalGraphNode, LocalGraphEdge, LocalGraphEdgeKind, LocalGraphOptions} from './LocalGraph.js';
 export {applyKnowledgeState, buildSuccessors, knowledgeStateOf, supersededTargets} from './KnowledgeState.js';
 export type {AnnotatedHit, KnowledgeNote, KnowledgeState} from './KnowledgeState.js';
+export {DUPLICATE_THRESHOLD, pickDuplicates, similarity} from './Duplicates.js';
+export type {DuplicateCandidate, DuplicateText} from './Duplicates.js';

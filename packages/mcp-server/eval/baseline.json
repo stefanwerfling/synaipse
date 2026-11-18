@@ -4,9 +4,37 @@
     "questions": 32
   },
   "context": {
-    "toolListTokens": 4481,
+    "toolListTokens": 4644,
     "instructionsTokens": 305,
     "primeTokens": 824
+  },
+  "dedupe": {
+    "drafts": 10,
+    "recall": 1,
+    "falseAlarms": 0,
+    "flagged": {
+      "D1": [
+        "Memory/kestrel/notes/rate-limits.md",
+        "Memory/kestrel/notes/rate-limiting-public-api.md"
+      ],
+      "D2": [
+        "Memory/kestrel/bugs/webhook-retry-storm.md"
+      ],
+      "D3": [
+        "Memory/kestrel/inbox/2025-11-10.md"
+      ],
+      "D4": [
+        "Memory/kestrel/notes/postgres-connections.md"
+      ],
+      "D5": [
+        "Memory/kestrel/bugs/csv-import-encoding.md"
+      ],
+      "N1": [],
+      "N2": [],
+      "N3": [],
+      "N4": [],
+      "N5": []
+    }
   },
   "overall": {
     "questions": 32,

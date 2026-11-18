@@ -1,6 +1,7 @@
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import type {Note, SearchMode} from '@synaipse/core';
 import {SynaipseService, getAuditTokenLabel, isPathInScope} from '@synaipse/service';
+import type {WriteMode} from '@synaipse/service';
 import type {EventKind} from '../EventPublisher.js';
 
 const CONSENT_TIMEOUT_MS = 60_000;
@@ -165,6 +166,21 @@ const asSearchMode = (value: unknown): SearchMode => {
     return value as SearchMode;
 };
 
+const WRITE_MODES: readonly WriteMode[] = ['upsert', 'create', 'overwrite'];
+
+/** Omitted → undefined (the service default, upsert). An unknown value is rejected. */
+const asWriteMode = (value: unknown): WriteMode | undefined => {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (!(WRITE_MODES as readonly unknown[]).includes(value)) {
+        throw new Error(`Invalid mode "${String(value)}" — expected one of: ${WRITE_MODES.join(', ')}`);
+    }
+
+    return value as WriteMode;
+};
+
 export interface ToolHandler {
     definition: Tool;
     /**
@@ -194,4 +210,4 @@ export interface ToolHandler {
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 
-export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asLimit, asSearchMode, EMPTY_CTX, LIMIT_MAX};
+export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asLimit, asSearchMode, asWriteMode, EMPTY_CTX, LIMIT_MAX};
