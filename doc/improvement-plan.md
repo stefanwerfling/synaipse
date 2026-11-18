@@ -101,7 +101,7 @@ Suite 1108 grün. Tool-Liste von ca. 7k auf ca. 4,5k Tokens (31 sichtbare Tools)
 | B3 schlanke Write-Antworten mit Dead-Link-Warnungen, `read_note` mit Titel/Alias, `section`, Paging, Vorschlägen; ISO-Zeit plus Alter; Roadmap-Writes nur Gliederung | erledigt |
 | B3 `search`-Filter und Treffer-Anker, globales `verbosity` | offen → P8. `verbosity` scheint nach den schlanken Defaults überflüssig |
 | B6 Primer als `additionalContext` | erledigt (nicht bei `resume`, nicht wenn `CLAUDE.md` ihn noch importiert) |
-| B6 Plugin-`.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | offen → P8 |
+| B6 Plugin-`.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | erledigt (P8 S8) |
 
 **KPI-Lücke:** Das Ziel „Tool-Liste < 3k“ erreicht nur `SYNAIPSE_MCP_TOOLSETS=core`. Mit Roadmap und Benchmark (11 Tools) bleibt es bei ca. 4,5k. Weiter runter ginge nur, indem Roadmap/Benchmark per Default aus sind oder ihre Schemas Hinweise verlieren, die das Modell braucht.
 
@@ -240,7 +240,7 @@ Offen bzw. Folgearbeit:
 - Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
 - Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
 
-### Status P8 (2026-11-18): begonnen
+### Status P8 (2026-11-18): erledigt
 
 Slices (in dieser Reihenfolge; jede endet mit `npm run eval` gegen die Baseline):
 
@@ -253,7 +253,7 @@ Slices (in dieser Reihenfolge; jede endet mit `npm run eval` gegen die Baseline)
 | S5 B5 Resources/Prompts/Completions | dazu B1 `outputSchema`/`structuredContent`, `resource_link` | erledigt |
 | S6 B5 Elicitation | `delete_note`, Consent-Flow statt Long-Poll, Progress, HTTP-Session-TTL | erledigt |
 | S7 C5 Inbox-UI | Übernehmen in eine Note, Verwerfen | erledigt |
-| S8 B6 Plugin-Rest | `.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | offen |
+| S8 B6 Plugin-Rest | `.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | erledigt |
 
 S1: `npm run eval` (`vitest.eval.config.ts`, in CI nach `bundle:check`). `packages/mcp-server/eval/fixture.ts` ist eine Vault mit 38 Notizen (zwei Projekte plus geteiltes Wissen) und 32 Fragen in fünf Kategorien: `lookup`, `paraphrase`, `current` (abgelöste Entscheidung neben der aktuellen), `trust` (niedrige `confidence`, abgelaufenes `valid_until`) und `scoped` (gleiches Thema in beiden Projekten). Ein geskripteter Agent ruft wie vom Arbeitsprotokoll vorgesehen `synaipse_search` (limit 5) und `synaipse_read_note` auf den Top-Treffer auf, jede Frage in einer frischen Vault (`e27eb02`). Gemessen: hit@1, Recall@5, MRR, Anteil der Fragen mit veralteter Notiz vor der Antwort, Tokens pro Frage (Zeichen / 4) sowie Kontextkosten (Tool-Liste, Instructions, Prime). `eval/baseline.json` ist eingecheckt; schlechtere Werte (Tokens: mehr als 5 % mehr) lassen den Lauf scheitern, `EVAL_UPDATE_BASELINE=1 npm run eval` schreibt eine neue Baseline. Ohne Embeddings (offline, deterministisch).
 
@@ -272,6 +272,10 @@ S5 (`4a79623`): Resources `synaipse://note/{+path}` (rohes Markdown, damit Clien
 S6 (`d8b3071`): `delete_note` fragt per Form-Elicitation nach, wenn der Client das kann; die Frage sagt, ob die Notiz aus der Versionsgeschichte wiederherstellbar ist. Ablehnen, Abbrechen oder keine Antwort (Timeout 10 min, Fehler) löschen nichts und liefern `{deleted: false, reason}`; Clients ohne Elicitation löschen wie bisher. Tool-Aufrufe mit `progressToken` bekommen alle 5 s eine Progress-Meldung, damit lange Aufrufe nicht in Client-Timeouts laufen (`ToolCall` im `ToolContext`). Bewusste Abweichung beim Consent: Die Elicitation ersetzt die Freigabe im Synaipse-UI **nicht**, denn ein Client kann eine Elicitation automatisch bestätigen und würde so den Consent-Layer aushebeln. Stattdessen meldet das Warten Fortschritt („Waiting for consent in the Synaipse UI …“) und endet, wenn der Aufruf abgebrochen wird; die Anfrage bleibt im UI offen. HTTP-Sessions schließen nach 30 min ohne Anfrage (`SYNAIPSE_MCP_SESSION_TTL_MS`), über 1000 offene Sessions schließt die am längsten ungenutzte (`SYNAIPSE_MCP_MAX_SESSIONS`); Sessions mit laufender Anfrage bleiben (`Sessions.ts`). Elicitation ist auch über Streamable HTTP getestet (Rückfrage über den Stream des Tool-Aufrufs).
 
 S7 (`0d7622e`): Neuer Tab „Inbox“ (`InboxPanel.ts`) zeigt die `remember`-Einträge eines Projekts nach Tag, je Eintrag die Notizen, die ihn vermutlich schon enthalten (dann ist „Verwerfen“ hervorgehoben), und kuratierte Notizen zum selben Thema. „Übernehmen“ hängt den Text, auf Wunsch bearbeitet, an eine vorgeschlagene Notiz, an eine beliebige andere (Titel oder Pfad) oder legt eine neue Notiz an; „Verwerfen“ entfernt den Eintrag. Beides sind versionierte Schreibvorgänge mit Hash-Guard; eine Inbox-Notiz ohne Einträge wird gelöscht. Ein Eintrag wird über Inbox-Notiz, Uhrzeit und Text identifiziert, weil mehrere Einträge dieselbe Minute haben können. API: `GET /api/inboxes`, `GET /api/inbox`, `POST /api/inbox/promote`, `POST /api/inbox/discard` (veralteter Eintrag → 409). Browser-Smoke gegen eine isolierte Vault: alle drei Wege (verwerfen, in bestehende Notiz mit bearbeitetem Text, in neue Notiz) und die Meldung bei fehlendem Titel geprüft, keine Konsolenfehler, echte Vault unverändert.
+
+S8 (`061a09c`): Das Plugin registriert den MCP-Server selbst (`.mcp.json`): URL `/mcp/${SYNAIPSE_PROJECT:-}` und Header `X-Synaipse-Project-Dir: ${CLAUDE_PROJECT_DIR}`. Ohne ausdrückliches Projekt nimmt der Server jetzt den Ordnernamen daraus (Zeichen außerhalb `A-Za-z0-9_.-` → `-`), denselben Namen, den der SessionStart-Hook für den Primer nutzt. Live mit Claude Code 2.1.316 geprüft: Die Variablen werden nur in Plugin-Configs ersetzt, in einer Projekt-`.mcp.json` fehlt `CLAUDE_PROJECT_DIR`; `claude mcp list` mit dem Plugin verbindet gegen eine isolierte Instanz, der Server erkennt das Projekt. Skill `synaipse-memory` mit dem Arbeitsprotokoll. `PostToolUse` protokolliert Synaipse-Aufrufe als `{kind: synaipse, op, write, notes[]}` (beide Server-Präfixe), `SessionEnd` ergänzt `synaipse_notes_used` und `synaipse_writes`. Der Stop-Hook erinnert einmal pro Session ans Speichern, wenn mindestens drei Code-Änderungen und kein Synaipse-Schreibvorgang vorliegen (`SYNAIPSE_STOP_NUDGE=0` schaltet ab). `install-skill`: `claude-code` schreibt `./.mcp.json` mit `/mcp/<Ordner>` (`--user` für `~/.claude.json`, `--project=<name>`), Cursor-Workspace ebenso, stdio setzt `SYNAIPSE_PROJECT`. Hooks sind mit echten bash/jq-Läufen getestet (`plugin-hooks.test.ts`).
+
+P8-Bilanz (Eval, ohne Embeddings): veraltete Notiz vor der Antwort 45 % → 0, hit@1 0,75 → 0,83 (bei 35 statt 32 Fragen), MRR 0,84 → 0,89, Duplikat-Erkennung Recall 1 ohne Fehlalarm, Prime 1019 → 824 Tokens. Offen aus P8: Claude Code live prüfen, ob `structuredContent` zusätzlich zum Text beim Modell landet (S5); Graph-Seeds aus kürzlich gelesenen Notizen nach Thema filtern (S1-Befund).
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 
