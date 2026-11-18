@@ -134,6 +134,67 @@ export class AuditLog {
     }
 
     /**
+     * One page of matching entries, newest-first (plan P4 / A5). The
+     * cursor is the line number of the oldest entry returned: the file is
+     * append-only, so line numbers never move and a page stays stable
+     * while new entries arrive. Only `limit + 1` matches are held in
+     * memory, not the whole log.
+     */
+    public async page(opts: {
+        limit: number;
+        beforeLine?: number;
+        afterTs?: number;
+        provider?: string;
+        kind?: AuditKind;
+        excludeKinds?: readonly AuditKind[];
+    }): Promise<{entries: AuditEntry[]; nextBeforeLine: number | null}> {
+        if (!existsSync(this.filePath)) return {entries: [], nextBeforeLine: null};
+
+        const exclude = opts.excludeKinds !== undefined && opts.excludeKinds.length > 0
+            ? new Set(opts.excludeKinds)
+            : null;
+        const keep = Math.max(1, opts.limit) + 1;
+        const window: Array<{line: number; entry: AuditEntry}> = [];
+        const stream = createReadStream(this.filePath, {encoding: 'utf8'});
+        const rl = createInterface({input: stream, crlfDelay: Infinity});
+        let line = -1;
+
+        for await (const raw of rl) {
+            line++;
+            if (opts.beforeLine !== undefined && line >= opts.beforeLine) break;
+            if (raw.length === 0) continue;
+
+            let entry: AuditEntry;
+            try {
+                entry = JSON.parse(raw) as AuditEntry;
+            } catch {
+                continue;
+            }
+
+            if (opts.afterTs !== undefined && entry.ts <= opts.afterTs) continue;
+            if (opts.provider !== undefined && entry.provider !== opts.provider) continue;
+            if (opts.kind !== undefined && entry.kind !== opts.kind) continue;
+            if (exclude !== null && exclude.has(entry.kind)) continue;
+
+            window.push({line, entry});
+            if (window.length > keep) window.shift();
+        }
+
+        rl.close();
+        stream.destroy();
+
+        const hasMore = window.length === keep;
+        const pageRows = hasMore ? window.slice(1) : window;
+        pageRows.reverse();
+        const oldest = pageRows[pageRows.length - 1];
+
+        return {
+            entries: pageRows.map((row) => row.entry),
+            nextBeforeLine: hasMore && oldest !== undefined ? oldest.line : null
+        };
+    }
+
+    /**
      * Total entry count. Cheap-ish: walks the file once line-by-line.
      * Used by the UI footer ("128 external calls logged") without
      * loading all entries. With `excludeKinds`, only counts entries

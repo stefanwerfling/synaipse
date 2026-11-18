@@ -5867,6 +5867,9 @@ body.synaipse-sidebar-resizing {
 
 .synaipse-root .audit-list { display: flex; flex-direction: column; gap: var(--space-2); }
 
+.synaipse-root .audit-more,
+.synaipse-root .activity-more { align-self: center; margin-top: var(--space-3); }
+
 .synaipse-root .audit-empty {
     margin-top: var(--space-4);
     padding: var(--space-4);

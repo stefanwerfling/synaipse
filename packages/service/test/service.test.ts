@@ -753,6 +753,35 @@ describe('SynaipseService project enforcement', () => {
         expect(history).toEqual([]);
     });
 
+    it('activityCommits pages newest-first by sha and stays stable when new commits land', async () => {
+        const cfg = {
+            ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),
+            git: {autoCommit: true, author: {name: 'T', email: 't@local'}}
+        };
+
+        service = new SynaipseService(cfg);
+        await service.start();
+
+        for (let i = 0; i < 5; i++) {
+            await service.writeNote({path: `n${i}.md`, content: `v${i}`});
+        }
+
+        const first = await service.activityCommits({limit: 2});
+        expect(first.commits.map((c) => c.noteId)).toEqual(['Memory/app-x/n4.md', 'Memory/app-x/n3.md']);
+        expect(first.commits[0]?.tool).toBe('write_note');
+        expect(first.next).toBe(first.commits[1]?.sha);
+
+        // A write between pages must not shift the next page.
+        await service.writeNote({path: 'late.md', content: 'late'});
+
+        const second = await service.activityCommits({limit: 2, before: first.next!});
+        expect(second.commits.map((c) => c.noteId)).toEqual(['Memory/app-x/n2.md', 'Memory/app-x/n1.md']);
+
+        const third = await service.activityCommits({limit: 10, before: second.next!});
+        expect(third.commits.map((c) => c.noteId)).toContain('Memory/app-x/n0.md');
+        expect(third.next).toBeNull();
+    });
+
     it('noteDiff returns empty string when path is missing in either side', async () => {
         const cfg = {
             ...buildProjectConfig(vaultDir, cacheFile, 'app-x'),

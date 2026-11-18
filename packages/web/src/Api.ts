@@ -228,12 +228,15 @@ export const api = {
             body: JSON.stringify(payload)
         }));
     },
-    audit: async (opts: {limit?: number; afterTs?: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {}): Promise<{
+    /** Newest-first; pass the returned `nextCursor` back as `cursor` for older entries. */
+    audit: async (opts: {limit?: number; cursor?: string; afterTs?: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {}): Promise<{
         entries: AuditEntry[];
         total: number;
+        nextCursor: string | null;
     }> => {
         const url = new URL(apiUrl('/api/audit'), window.location.origin);
         if (opts.limit !== undefined) url.searchParams.set('limit', String(opts.limit));
+        if (opts.cursor !== undefined) url.searchParams.set('cursor', opts.cursor);
         if (opts.afterTs !== undefined) url.searchParams.set('afterTs', String(opts.afterTs));
         if (opts.provider !== undefined) url.searchParams.set('provider', opts.provider);
         if (opts.kind !== undefined) url.searchParams.set('kind', opts.kind);
@@ -486,6 +489,13 @@ export const activityApi = {
         const url = new URL(apiUrl('/api/activity'), window.location.origin);
         url.searchParams.set('days', String(days));
         url.searchParams.set('limit', String(limit));
+        return json(await fetch(url));
+    },
+    /** Vault commits newest-first, one page per call; `cursor` = previous `nextCursor`. */
+    commits: async (limit = 50, cursor?: string): Promise<{commits: ActivityCommit[]; nextCursor: string | null}> => {
+        const url = new URL(apiUrl('/api/activity/commits'), window.location.origin);
+        url.searchParams.set('limit', String(limit));
+        if (cursor !== undefined) url.searchParams.set('cursor', cursor);
         return json(await fetch(url));
     }
 };

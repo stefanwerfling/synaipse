@@ -18,6 +18,9 @@ import {clear, el} from './Dom.js';
  * open while chatting" turns out to be a real workflow.
  */
 
+/** Entries per request; older ones come via "Ältere laden" (cursor pagination). */
+const PAGE_SIZE = 200;
+
 const KIND_LABELS: Record<AuditKind, string> = {
     chat: 'Chat',
     summarize: 'Summarize',
@@ -55,7 +58,11 @@ export class AuditPanel {
     private readonly providerFilter: HTMLSelectElement;
     private readonly kindFilter: HTMLSelectElement;
     private readonly includeEmbedToggle: HTMLInputElement;
+    private readonly moreBtn: HTMLButtonElement;
     private knownProviders = new Set<string>();
+    private nextCursor: string | null = null;
+    private shown = 0;
+    private total = 0;
 
     public constructor() {
         this.element = el('div', {class: 'audit-panel'});
@@ -112,6 +119,13 @@ export class AuditPanel {
         );
 
         this.listHost = el('div', {class: 'audit-list'});
+        this.moreBtn = el('button', {
+            class: 'btn audit-more',
+            attrs: {type: 'button'},
+            text: 'Ältere laden',
+            style: {display: 'none'},
+            on: {click: () => void this.loadMore()}
+        }) as HTMLButtonElement;
         this.emptyHost = el('div', {
             class: 'audit-empty',
             text: 'Noch keine externen LLM-Aufrufe geloggt. Wenn dein Chat-Provider lokal ist (Ollama), bleibt diese Seite leer — gewollt: nichts verlässt den Host, nichts zu auditieren.'
@@ -120,6 +134,7 @@ export class AuditPanel {
         this.element.appendChild(heading);
         this.element.appendChild(filterBar);
         this.element.appendChild(this.listHost);
+        this.element.appendChild(this.moreBtn);
         this.element.appendChild(this.emptyHost);
     }
 
@@ -127,20 +142,24 @@ export class AuditPanel {
         await this.refresh();
     }
 
-    private async refresh(): Promise<void> {
-        const opts: {limit: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {limit: 200};
+    private filterOpts(): {limit: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} {
+        const opts: {limit: number; provider?: string; kind?: AuditKind; includeEmbed?: boolean} = {limit: PAGE_SIZE};
         const p = this.providerFilter.value;
         const k = this.kindFilter.value;
         if (p.length > 0) opts.provider = p;
         if (k.length > 0) opts.kind = k as AuditKind;
         if (this.includeEmbedToggle.checked) opts.includeEmbed = true;
+        return opts;
+    }
 
+    private async refresh(): Promise<void> {
         let result;
         try {
-            result = await api.audit(opts);
+            result = await api.audit(this.filterOpts());
         } catch (e) {
             clear(this.listHost);
             this.emptyHost.style.display = 'none';
+            this.moreBtn.style.display = 'none';
             this.listHost.appendChild(el('div', {
                 class: 'audit-error',
                 text: `Audit-Log laden fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`
@@ -150,9 +169,38 @@ export class AuditPanel {
 
         this.refreshProviderOptions(result.entries);
         this.renderList(result.entries);
-        this.headStats.textContent = result.total === 0
+        this.shown = result.entries.length;
+        this.applyPage(result.total, result.nextCursor);
+    }
+
+    /** Next page of older entries, appended below (cursor from the last page). */
+    private async loadMore(): Promise<void> {
+        if (this.nextCursor === null) return;
+
+        this.moreBtn.disabled = true;
+        try {
+            const result = await api.audit({...this.filterOpts(), cursor: this.nextCursor});
+            this.refreshProviderOptions(result.entries);
+            for (const e of result.entries) {
+                this.listHost.appendChild(this.renderEntry(e));
+            }
+            this.shown += result.entries.length;
+            this.applyPage(result.total, result.nextCursor);
+        } catch (e) {
+            this.moreBtn.textContent = `Laden fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`;
+        } finally {
+            this.moreBtn.disabled = false;
+        }
+    }
+
+    private applyPage(total: number, nextCursor: string | null): void {
+        this.total = total;
+        this.nextCursor = nextCursor;
+        this.moreBtn.textContent = 'Ältere laden';
+        this.moreBtn.style.display = nextCursor === null ? 'none' : '';
+        this.headStats.textContent = this.total === 0
             ? ''
-            : `${result.entries.length} angezeigt / ${result.total} gesamt`;
+            : `${this.shown} angezeigt / ${this.total} gesamt`;
     }
 
     private refreshProviderOptions(entries: readonly AuditEntry[]): void {

@@ -157,4 +157,24 @@ describe('AuditLog', () => {
         expect(out?.embedCalls).toBe(42);
         expect(out?.kind).toBe('embed');
     });
+
+    it('pages newest-first with a line cursor that survives appends', async () => {
+        for (let i = 1; i <= 5; i++) {
+            await log.append(sample({ts: i, kind: i === 3 ? 'embed' : 'chat'}));
+        }
+
+        const first = await log.page({limit: 2, excludeKinds: ['embed']});
+        expect(first.entries.map((e) => e.ts)).toEqual([5, 4]);
+        expect(first.nextBeforeLine).toBe(3);
+
+        await log.append(sample({ts: 6}));
+
+        const second = await log.page({limit: 2, beforeLine: first.nextBeforeLine!, excludeKinds: ['embed']});
+        expect(second.entries.map((e) => e.ts)).toEqual([2, 1]);
+        expect(second.nextBeforeLine).toBeNull();
+
+        const exact = await log.page({limit: 6});
+        expect(exact.entries).toHaveLength(6);
+        expect(exact.nextBeforeLine).toBeNull();
+    });
 });

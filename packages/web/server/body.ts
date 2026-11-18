@@ -17,6 +17,17 @@ export class BodyTooLargeError extends Error {
     }
 }
 
+/** Body is empty or not valid JSON; the API answers 400. */
+export class InvalidBodyError extends Error {
+    public constructor(message: string) {
+        super(message);
+        this.name = 'InvalidBodyError';
+    }
+}
+
+/** Default cap for JSON bodies (plan P4 / A5). Clipped pages are the largest legitimate ones. */
+export const JSON_BODY_LIMIT = 8 * 1024 * 1024;
+
 type MaybeParsed = IncomingMessage & {body?: unknown; _body?: boolean};
 
 const preParsed = (req: MaybeParsed): Buffer | null => {
@@ -44,12 +55,23 @@ export const readRawBody = async (req: IncomingMessage, maxBytes = Number.POSITI
     return Buffer.concat(chunks, total);
 };
 
-/** Parse a JSON body. An empty body throws `empty body`, unless `emptyAs` is given. */
-export const readJsonBody = async <T>(req: IncomingMessage, opts: {emptyAs?: T} = {}): Promise<T> => {
-    const raw = (await readRawBody(req)).toString('utf8');
+/**
+ * Parse a JSON body of at most `maxBytes` (default {@link JSON_BODY_LIMIT}).
+ * An empty body throws {@link InvalidBodyError}, unless `emptyAs` is given;
+ * so does malformed JSON. Too large → {@link BodyTooLargeError}.
+ */
+export const readJsonBody = async <T>(
+    req: IncomingMessage,
+    opts: {emptyAs?: T; maxBytes?: number} = {}
+): Promise<T> => {
+    const raw = (await readRawBody(req, opts.maxBytes ?? JSON_BODY_LIMIT)).toString('utf8');
     if (raw.length === 0) {
         if ('emptyAs' in opts) return opts.emptyAs as T;
-        throw new Error('empty body');
+        throw new InvalidBodyError('empty body');
     }
-    return JSON.parse(raw) as T;
+    try {
+        return JSON.parse(raw) as T;
+    } catch {
+        throw new InvalidBodyError('body is not valid JSON');
+    }
 };

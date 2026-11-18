@@ -16,7 +16,7 @@ import {Diff, PathNotFoundError, type PersonInput, type VerifyReport} from 'ngit
 import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource, type SummarizeEvent} from './Chat.js';
 import {type WriteAssetResult} from './Assets.js';
 import {FilesystemAssetStore, type AssetStore} from './AssetStore.js';
-import {buildActivityReport, type ActivityReport} from './Activity.js';
+import {buildActivityReport, toActivityCommit, type ActivityCommit, type ActivityReport} from './Activity.js';
 import {type GraphLayout} from './Layout.js';
 import {LayoutComputer} from './LayoutComputer.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
@@ -1032,6 +1032,38 @@ export class SynaipseService {
         );
     }
 
+    /**
+     * Vault commits newest-first, one page at a time (plan P4 / A5).
+     * Keyset pagination: `before` is the sha of the last commit of the
+     * previous page and the walk continues at its first parent, so pages
+     * stay stable while new commits land on top. Unknown sha → throws.
+     */
+    public async activityCommits(opts: {limit: number; before?: string}): Promise<{commits: ActivityCommit[]; next: string | null}> {
+        const repo = await this.history.getRepo();
+
+        if (repo === null) {
+            return {commits: [], next: null};
+        }
+
+        let cursor: string | null = opts.before === undefined
+            ? await repo.head()
+            : (await repo.readCommit(opts.before)).parents[0] ?? null;
+        const commits: ActivityCommit[] = [];
+
+        while (cursor !== null && commits.length < opts.limit) {
+            const commit = await repo.readCommit(cursor);
+            commits.push(toActivityCommit({
+                sha: cursor,
+                author: {name: commit.author.name, date: isoDate(commit.author.timestamp)},
+                message: commit.message
+            }));
+            cursor = commit.parents[0] ?? null;
+        }
+
+        const last = commits[commits.length - 1];
+        return {commits, next: cursor !== null && last !== undefined ? last.sha : null};
+    }
+
     public async noteVersion(id: NoteId, commitSha: string): Promise<string> {
         const repo = await this.history.getRepo();
 
@@ -1347,6 +1379,11 @@ export class SynaipseService {
         excludeKinds?: readonly AuditEntry['kind'][];
     } = {}): Promise<AuditEntry[]> {
         return this.auditLog.read(opts);
+    }
+
+    /** One page of audit entries, newest-first; see `AuditLog.page`. */
+    public async getAuditPage(opts: Parameters<AuditLog['page']>[0]): Promise<{entries: AuditEntry[]; nextBeforeLine: number | null}> {
+        return this.auditLog.page(opts);
     }
 
     public async getAuditCount(opts: {excludeKinds?: readonly AuditEntry['kind'][]} = {}): Promise<number> {

@@ -89,6 +89,20 @@ const dayKey = (ms: number): string => {
     return `${yyyy}-${mm}-${dd}`;
 };
 
+/** One log entry as an {@link ActivityCommit} (subject parsed). */
+export const toActivityCommit = (e: RawLogEntry): ActivityCommit => {
+    const parsed = parseSubject(e.message);
+    return {
+        sha: e.sha,
+        ts: tsOf(e.author.date),
+        author: e.author.name,
+        project: parsed.project,
+        tool: parsed.tool,
+        noteId: parsed.noteId.length > 0 ? parsed.noteId : null,
+        subject: parsed.subject
+    };
+};
+
 export const buildActivityReport = (
     entries: readonly RawLogEntry[],
     opts: {sinceDays?: number; commitsCap?: number; hotNotesTop?: number} = {}
@@ -101,19 +115,9 @@ export const buildActivityReport = (
     const commits: ActivityCommit[] = [];
 
     for (const e of entries) {
-        const ts = tsOf(e.author.date);
-        if (ts < window) continue;
-
-        const parsed = parseSubject(e.message);
-        commits.push({
-            sha: e.sha,
-            ts,
-            author: e.author.name,
-            project: parsed.project,
-            tool: parsed.tool,
-            noteId: parsed.noteId.length > 0 ? parsed.noteId : null,
-            subject: parsed.subject
-        });
+        const commit = toActivityCommit(e);
+        if (commit.ts < window) continue;
+        commits.push(commit);
     }
 
     commits.sort((a, b) => b.ts - a.ts);

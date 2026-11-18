@@ -11,6 +11,9 @@ export interface ActivityPanelOptions {
     onOpenNote: (noteId: string) => void;
 }
 
+/** Commits per "Ältere laden" click. */
+const MORE_PAGE = 50;
+
 const RANGES: ReadonlyArray<{label: string; days: number}> = [
     {label: '24h', days: 1},
     {label: '7d', days: 7},
@@ -271,30 +274,61 @@ export class ActivityPanel {
 
         const list = el('ul', {class: 'activity-commits'});
 
-        for (const c of commits) {
-            const row = el('li', {class: 'activity-commit-row'},
-                el('span', {
-                    class: 'activity-commit-tool',
-                    style: {background: colorForTool(c.tool)},
-                    text: c.tool
-                }),
-                el('span', {
-                    class: 'activity-commit-note',
-                    text: c.noteId ?? c.subject,
-                    attrs: c.noteId !== null ? {role: 'button', tabindex: '0'} : {}
-                }),
-                el('span', {class: 'activity-commit-meta', text: `${formatRelative(c.ts)} · ${c.author}${c.project !== null ? ` · ${c.project}` : ''}`})
-            );
-
-            if (c.noteId !== null) {
-                const noteEl = row.querySelector('.activity-commit-note');
-                noteEl?.addEventListener('click', () => this.opts.onOpenNote(c.noteId as string));
+        const shown = new Set<string>();
+        const appendRows = (batch: readonly ActivityCommit[]): void => {
+            for (const c of batch) {
+                if (shown.has(c.sha)) continue;
+                shown.add(c.sha);
+                list.appendChild(this.renderCommitRow(c));
             }
+        };
+        appendRows(commits);
+        section.appendChild(list);
 
-            list.appendChild(row);
+        // Older commits page through /api/activity/commits. The first page
+        // starts at HEAD, so rows already shown from the report are skipped.
+        let cursor: string | undefined;
+        const more = el('button', {
+            class: 'btn activity-more',
+            attrs: {type: 'button'},
+            text: 'Ältere laden',
+            on: {
+                click: () => {
+                    more.setAttribute('disabled', '');
+                    void activityApi.commits(MORE_PAGE, cursor).then((page) => {
+                        appendRows(page.commits);
+                        cursor = page.nextCursor ?? undefined;
+                        if (page.nextCursor === null) more.remove();
+                    }).catch((cause: unknown) => {
+                        more.textContent = `failed: ${String(cause)}`;
+                    }).finally(() => more.removeAttribute('disabled'));
+                }
+            }
+        });
+        section.appendChild(more);
+        return section;
+    }
+
+    private renderCommitRow(c: ActivityCommit): HTMLElement {
+        const row = el('li', {class: 'activity-commit-row'},
+            el('span', {
+                class: 'activity-commit-tool',
+                style: {background: colorForTool(c.tool)},
+                text: c.tool
+            }),
+            el('span', {
+                class: 'activity-commit-note',
+                text: c.noteId ?? c.subject,
+                attrs: c.noteId !== null ? {role: 'button', tabindex: '0'} : {}
+            }),
+            el('span', {class: 'activity-commit-meta', text: `${formatRelative(c.ts)} · ${c.author}${c.project !== null ? ` · ${c.project}` : ''}`})
+        );
+
+        if (c.noteId !== null) {
+            const noteEl = row.querySelector('.activity-commit-note');
+            noteEl?.addEventListener('click', () => this.opts.onOpenNote(c.noteId as string));
         }
 
-        section.appendChild(list);
-        return section;
+        return row;
     }
 }

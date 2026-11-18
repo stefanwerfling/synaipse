@@ -95,6 +95,31 @@ export const jsonCached = async (
 };
 
 /**
+ * Plain JSON with gzip when the client accepts it and the body is large
+ * enough to benefit. For large responses that are built per request
+ * (canvas, roadmap, note list), where {@link jsonCached}'s per-object
+ * cache would never hit.
+ */
+export const jsonGzip = async (req: IncomingMessage, res: ServerResponse, status: number, body: unknown): Promise<void> => {
+    const raw = Buffer.from(JSON.stringify(body), 'utf8');
+
+    if (raw.length < GZIP_MIN_BYTES || !acceptsGzip(req)) {
+        res.writeHead(status, {'Content-Type': 'application/json', 'Content-Length': String(raw.length)});
+        res.end(raw);
+        return;
+    }
+
+    const compressed = await gzipAsync(raw);
+    res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
+        'Content-Length': String(compressed.length),
+        'Vary': 'Accept-Encoding'
+    });
+    res.end(compressed);
+};
+
+/**
  * Integer query parameter clamped to [min, max]; missing or non-numeric
  * values give `fallback` (no more NaN limits reaching the service).
  */
