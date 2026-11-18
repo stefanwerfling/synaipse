@@ -233,9 +233,10 @@ Louvain-Fix (`2617b15`), beim Smoke-Test gefunden: Die Community-Erkennung vergl
 
 2D und Atlas zusammengelegt (2026-11-18): Es gibt nur noch eine 2D-Ansicht für jede Vault-Größe; die Notizanzahl ändert nur den Detailgrad. Bis 2999 Notizen platziert der Client (gespeicherte Anordnung, ziehbar, Tag-Hüllen); ab 3000 übernimmt das Server-Layout mit Community-Scheiben beim Herauszoomen (`choosePlacement`, zurück erst unter 2500, damit eine Vault an der Grenze nicht bei jedem Write springt). Der Wechsel passiert live ohne Neuladen. `GraphAtlas.ts` ist aufgegangen in `ServerLayout.ts` (`buildServerGraph`, `ServerLayoutFeed`) und `Graph.ts`. Der Atlas-Knopf ist weg; ein gespeichertes `atlas` liest sich als 2D. Ab 5k Notizen warnt nur noch 3D, ab 20k ist 3D aus. Lock auf jsNGraph `25d3dbe` (`dd20a46`). Browser: 25k-Vault zeigt die Übersicht in 2D, Klick auf Community zoomt hinein; 2999-Vault zeigt Client-Positionen, die 3000. Notiz per Write schaltet ohne Konsolenfehler um. Hüllen gibt es im Server-Layout nicht.
 
+Server-Layout-Packung (2026-11-18): Die Reihen-Anordnung ist durch eine Kreispackung ersetzt (Front-Chain wie d3 `packSiblings`, `packCircles` in `Layout.ts`), größte Community in der Mitte. Notizen ohne Link zu einer anderen Notiz bilden eine gemeinsame Gruppe (`unlinked: true`, im Client beschriftet „unlinked notes“) am Rand statt je eine Kachel. Kachel-Abstand wächst mit der Größe (24 px + 8 %) statt fester 80 px; innerhalb einer Kachel liegen die bestvernetzten Notizen in der Mitte. `LAYOUT_ALGORITHM_VERSION` = 3. Gemessen (synthetisch, 25k Notizen): Seitenverhältnis 4,05 → 1,26, belegte Fläche 24 % → 57 %, Fläche pro Notiz 25 300 → 5 600 px², Kacheln 2114 → 250. Bei 200k Notizen Seitenverhältnis 1,03. Die Packung selbst kostet bei 50 000 Kreisen ≈ 3,8 s (im Worker); bei realistischen Community-Zahlen ist sie vernachlässigbar. Browser mit der 25k-Vault: runde Übersicht, Tooltip der Gruppe ok, keine Konsolenfehler.
+
 Offen bzw. Folgearbeit:
 
-- Server-Layout: Die Kachel-Packung erzeugt sehr breite erste Reihen, und Notizen ohne Links werden als einzelne Ein-Knoten-Kacheln gelegt (in der 25k-Vault 1368 Stück).
 - Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
 - Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
 
