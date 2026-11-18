@@ -32,12 +32,13 @@ await handle.unmount();     // stops SSE, timers, listeners; removes DOM and ove
 | `theme` | `'dark'` or `'light'`. The theme is set as `data-theme` on the container, never on `<html>`. |
 | `route` | Initial tab (`notes`, `graph`, `canvas`, `inbox`, `roadmap`, `benchmarks`, `chat`, `jobs`, `activity`, `audit`, `consent`) or a note id. |
 | `onThemeChange` | Called with the active theme once after mount and on every change (the user's toggle, `setTheme`). The host switches its shell tokens along, see below. |
+| `brand` | `false` hides the Synaipse logo and name in the top bar, for a host whose tab already names it. Default `true`. |
 | `authGate` | Standalone only: show the login screen in server mode. A host owns authentication and leaves it off. |
 
 What the host can rely on:
 
 - **Scoped CSS.** Every Synaipse rule sits under `.synaipse-root`, the class that `mount()` puts on the container. Nothing styles `body`, `*`, `::selection` or scrollbars outside it. Dialogs and menus render into one `.synaipse-root.synaipse-portal` layer at the end of `<body>`. That layer is removed when the last instance unmounts.
-- **Sizing.** The app fills its container (`height: 100%`). Give the container a height, for example as a flex child.
+- **Sizing.** The app fills its container (`height: 100%`) and scrolls its own overflow, so tall views (roadmap) scroll inside it. Give the container a height, for example as a flex child; the host needs no overflow rule of its own.
 - **Shortcuts.** `Ctrl/Cmd+K` and the search shortcut only react while the app is visible. A hidden host tab therefore does not take them away from the host.
 - **Lazy panels.** Every tab except Notes, Graph and Consent is imported on first open.
 - **Teardown.** `unmount()` closes both SSE streams and a running chat stream. It clears every interval and animation frame and removes global listeners. A fresh `mount()` into the same container afterwards works.

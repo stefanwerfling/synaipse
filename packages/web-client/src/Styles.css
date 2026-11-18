@@ -170,6 +170,15 @@
     flex: 1 1 auto;
     height: 100%;
     min-height: 0;
+    /* Tall views (roadmap) scroll inside the app instead of spilling out:
+       standalone that used to be the page scroll, in a host the host clips
+       its tab (plan P9 / G6). */
+    overflow-y: auto;
+}
+
+/* Embedded with brand: false — the host's tab already names Synaipse. */
+.synaipse-root[data-brand='off'] .brand {
+    display: none;
 }
 
 /* === TOPBAR === */

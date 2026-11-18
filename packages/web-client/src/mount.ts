@@ -30,6 +30,8 @@ export interface SynaipseMountOptions {
     authGate?: boolean;
     /** Initial route: a tab name ("graph") or a note id. */
     route?: string;
+    /** false: hide the Synaipse logo and name in the top bar, when the host's tab names it already (default true). */
+    brand?: boolean;
     /**
      * Called with the active theme once after mount and whenever it changes
      * (the user's toggle or handle.setTheme), so the host can switch its own
@@ -54,6 +56,7 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
     setApiBase(opts.apiBase);
     // Class first: the theme is stamped on every .synaipse-root.
     container.classList.add(ROOT_CLASS);
+    if (opts.brand === false) container.setAttribute('data-brand', 'off');
     if (opts.theme !== undefined) setTheme(opts.theme);
     else initTheme();
     const notify = opts.onThemeChange;
@@ -111,6 +114,7 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
             container.replaceChildren();
             container.classList.remove(ROOT_CLASS);
             container.removeAttribute('data-theme');
+            container.removeAttribute('data-brand');
             // Overlays left open (dialogs, menus) live in the portal layer.
             if (document.querySelector(`.${ROOT_CLASS}:not(.synaipse-portal)`) === null) {
                 document.querySelector('body > .synaipse-portal')?.remove();
