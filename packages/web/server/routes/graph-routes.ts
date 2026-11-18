@@ -1,4 +1,5 @@
 import {intParam, jsonCached} from '../cached-json.js';
+import {versionHeader} from '../graph-deltas.js';
 import {json, notFoundError, type Router} from '../router.js';
 import type {RouteDeps} from './shared.js';
 
@@ -7,7 +8,7 @@ const SEARCH_MODES = new Set(['fulltext', 'semantic', 'hybrid']);
 /** Whole graph, Atlas layout, local graph and search. */
 export const registerGraphRoutes = (router: Router, {service}: RouteDeps): void => {
     router.get('/api/graph', async ({req, res}) => {
-        await jsonCached(req, res, service.graph());
+        await jsonCached(req, res, service.graph(), undefined, versionHeader(service));
     });
 
     router.get('/api/graph/local', ({res, url}) => {

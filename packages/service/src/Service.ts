@@ -384,6 +384,7 @@ export class SynaipseService {
     private cachedLinkKeys: Map<string, NoteId> | null = null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
+    private readonly topologyListeners = new Set<(version: number) => void>();
 
     public constructor(config: Config, overrides: ServiceOverrides = {}) {
         const git = config.git ?? {
@@ -535,6 +536,14 @@ export class SynaipseService {
         this.cachedGraph = null;
         this.cachedAdjacency = null;
         this.cachedLinkKeys = null;
+
+        for (const listener of this.topologyListeners) {
+            try {
+                listener(this.topologyGen);
+            } catch (error) {
+                log.warn('topology listener failed', {error});
+            }
+        }
     }
 
     /** Cached wikilink-target → note-id map (titles, then aliases; see buildLinkKeyMap). */
@@ -2717,6 +2726,26 @@ export class SynaipseService {
         }
 
         return {candidates, archived, failed, dryRun: false};
+    }
+
+    /**
+     * Version of the vault content behind `graph()` and `listNotes()`.
+     * Bumped on every write, delete and watcher change (not only on link
+     * changes), so equal versions mean an identical graph and note list.
+     */
+    public graphVersion(): number {
+        return this.topologyGen;
+    }
+
+    /**
+     * Called synchronously after every change that bumps {@link graphVersion}.
+     * Listeners should debounce: a bulk import fires once per note.
+     */
+    public onTopologyChange(listener: (version: number) => void): () => void {
+        this.topologyListeners.add(listener);
+        return () => {
+            this.topologyListeners.delete(listener);
+        };
     }
 
     public onVaultChange(listener: VaultChangeListener): () => void {

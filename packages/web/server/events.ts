@@ -14,6 +14,15 @@ const KEEPALIVE_MS = 25_000;
 
 export class EventBroadcaster {
     private readonly clients = new Set<ServerResponse>();
+    private readonly connectListeners = new Set<() => void>();
+
+    /** Runs after a client joined (e.g. to take a delta baseline). */
+    public onConnect(listener: () => void): () => void {
+        this.connectListeners.add(listener);
+        return () => {
+            this.connectListeners.delete(listener);
+        };
+    }
 
     public addClient(res: ServerResponse): void {
         res.writeHead(200, {
@@ -41,11 +50,26 @@ export class EventBroadcaster {
 
         res.on('close', cleanup);
         res.on('error', cleanup);
+
+        for (const listener of this.connectListeners) {
+            listener();
+        }
     }
 
     public publish(event: SynaipseEvent): void {
-        const payload = `data: ${JSON.stringify(event)}\n\n`;
+        this.send(`data: ${JSON.stringify(event)}\n\n`);
+    }
 
+    /**
+     * A named SSE event (`event: <name>`). Browsers deliver it only to
+     * `addEventListener(name)`, so `onmessage` consumers of the activity
+     * feed never see it.
+     */
+    public publishNamed(name: string, data: unknown): void {
+        this.send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+
+    private send(payload: string): void {
         for (const client of this.clients) {
             try {
                 client.write(payload);

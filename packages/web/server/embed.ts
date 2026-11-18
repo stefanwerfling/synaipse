@@ -110,6 +110,7 @@ export const createSynaipseEmbed = async (
     const {NoopHistory} = await import('@synaipse/vault');
     const {routes} = await import('./routes.js');
     const {EventBroadcaster} = await import('./events.js');
+    const {GraphDeltaPublisher} = await import('./graph-deltas.js');
     const {JobManager} = await import('./jobs.js');
     const {LocalScheduleStore} = await import('./local-schedule-store.js');
     const {Scheduler} = await import('./scheduler.js');
@@ -176,6 +177,8 @@ export const createSynaipseEmbed = async (
     await service.start();
 
     const broadcaster = new EventBroadcaster();
+    const graphDeltas = new GraphDeltaPublisher(service, broadcaster);
+    broadcaster.onConnect(() => graphDeltas.prime());
     const jobs = new JobManager(service, env);
 
     const scheduleStore: ScheduleStore = mariaScheduleStore ?? new LocalScheduleStore(config.schedulesPath);
@@ -210,6 +213,7 @@ export const createSynaipseEmbed = async (
     const close = (): Promise<void> => {
         closed ??= (async () => {
             scheduler.stop();
+            graphDeltas.close();
             jobs.stopAll();
             broadcaster.close();
             await mcpHandler.closeAll();

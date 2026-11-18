@@ -152,6 +152,7 @@ describe('API routes', () => {
     }));
     const service = {
         listNotes: () => notes,
+        graphVersion: () => 7,
         noteFlags: () => ({private: false}),
         noteHistory: async (id: string, limit: number) => [{id, limit}],
         getVault: () => ({tryGet: (id: string) => notes.find((n) => n.id === id)})
@@ -160,6 +161,7 @@ describe('API routes', () => {
 
     it('keeps the full array without paging params', async () => {
         const out = await call(handler, 'GET', '/api/notes');
+        expect(out.headers['X-Synaipse-Version']).toBe('7');
         expect(Array.isArray(out.body)).toBe(true);
         expect(out.body).toHaveLength(5);
     });

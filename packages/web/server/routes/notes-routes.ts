@@ -1,38 +1,16 @@
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
-import type {Note} from '@synaipse/core';
 import type {SynaipseService} from '@synaipse/service';
 import {resolveAssetPath} from '../asset-route.js';
 import {readRawBody} from '../body.js';
+import {noteSummary} from '../note-summary.js';
+import {versionHeader} from '../graph-deltas.js';
 import {intParam, jsonGzip} from '../cached-json.js';
 import {decodeCursor, encodeCursor, isRecord, keysetPage} from '../pagination.js';
 import {HttpError, badRequest, json, notFoundError, type RouteContext, type Router} from '../router.js';
 import {asFrontmatter, asString, errorMessage, readJson, streamEvents, type RouteDeps} from './shared.js';
 
 const ASSET_UPLOAD_LIMIT = 25 * 1024 * 1024;
-
-interface NoteSummary {
-    id: string;
-    title: string;
-    tags: string[];
-    mtime: number;
-    aliases: string[];
-    isPrivate?: true;
-}
-
-const summarize = (service: SynaipseService, n: Note): NoteSummary => {
-    const flags = service.noteFlags(n);
-    return {
-        id: n.id,
-        title: n.title,
-        tags: n.tags,
-        mtime: n.mtime,
-        aliases: Array.isArray(n.frontmatter.aliases)
-            ? n.frontmatter.aliases.filter((a): a is string => typeof a === 'string')
-            : [],
-        ...(flags.private ? {isPrivate: true as const} : {})
-    };
-};
 
 const isNotesCursor = (v: unknown): v is {id: string} => isRecord(v) && typeof v.id === 'string';
 
@@ -44,8 +22,10 @@ const isNotesCursor = (v: unknown): v is {id: string} => isRecord(v) && typeof v
 const listNotes = async (service: SynaipseService, {req, res, url}: RouteContext): Promise<void> => {
     const paged = url.searchParams.has('limit') || url.searchParams.has('cursor');
 
+    const version = versionHeader(service);
+
     if (!paged) {
-        await jsonGzip(req, res, 200, service.listNotes().map((n) => summarize(service, n)));
+        await jsonGzip(req, res, 200, service.listNotes().map((n) => noteSummary(service, n)), version);
         return;
     }
 
@@ -57,10 +37,10 @@ const listNotes = async (service: SynaipseService, {req, res, url}: RouteContext
     const page = keysetPage(notes, (n) => n.id, cursor?.id ?? null, intParam(url, 'limit', 500, 1, 5000));
 
     await jsonGzip(req, res, 200, {
-        notes: page.items.map((n) => summarize(service, n)),
+        notes: page.items.map((n) => noteSummary(service, n)),
         nextCursor: page.nextKey === null ? null : encodeCursor({id: page.nextKey}),
         total: notes.length
-    });
+    }, version);
 };
 
 export const registerNotesRoutes = (router: Router, {service}: RouteDeps): void => {

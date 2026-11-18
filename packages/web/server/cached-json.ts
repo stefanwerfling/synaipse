@@ -65,10 +65,12 @@ export const jsonCached = async (
     req: IncomingMessage,
     res: ServerResponse,
     body: object,
-    etagSeed?: string
+    etagSeed?: string,
+    extraHeaders: Readonly<Record<string, string>> = {}
 ): Promise<void> => {
     const entry = encode(body, etagSeed);
     const headers: Record<string, string> = {
+        ...extraHeaders,
         'Content-Type': 'application/json',
         'ETag': entry.etag,
         'Cache-Control': 'no-cache',
@@ -100,17 +102,24 @@ export const jsonCached = async (
  * (canvas, roadmap, note list), where {@link jsonCached}'s per-object
  * cache would never hit.
  */
-export const jsonGzip = async (req: IncomingMessage, res: ServerResponse, status: number, body: unknown): Promise<void> => {
+export const jsonGzip = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    status: number,
+    body: unknown,
+    extraHeaders: Readonly<Record<string, string>> = {}
+): Promise<void> => {
     const raw = Buffer.from(JSON.stringify(body), 'utf8');
 
     if (raw.length < GZIP_MIN_BYTES || !acceptsGzip(req)) {
-        res.writeHead(status, {'Content-Type': 'application/json', 'Content-Length': String(raw.length)});
+        res.writeHead(status, {...extraHeaders, 'Content-Type': 'application/json', 'Content-Length': String(raw.length)});
         res.end(raw);
         return;
     }
 
     const compressed = await gzipAsync(raw);
     res.writeHead(status, {
+        ...extraHeaders,
         'Content-Type': 'application/json',
         'Content-Encoding': 'gzip',
         'Content-Length': String(compressed.length),

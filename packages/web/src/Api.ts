@@ -1,3 +1,4 @@
+import {VERSION_HEADER, parseVersion} from './GraphDelta.js';
 import {apiUrl} from './ApiBase.js';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Frontmatter, Graph, Note, Roadmap, RoadmapSummary, SearchHit, SearchMode} from '@synaipse/core';
 
@@ -77,7 +78,12 @@ export interface CanvasSummary {
 
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
-        return json(await fetch(apiUrl('/api/notes')));
+        return (await api.listNotesVersioned()).data;
+    },
+    /** Note list plus the vault version it was built at (for graph deltas). */
+    listNotesVersioned: async (): Promise<{data: NoteSummary[]; version: number | null}> => {
+        const res = await fetch(apiUrl('/api/notes'));
+        return {data: await json<NoteSummary[]>(res), version: parseVersion(res.headers.get(VERSION_HEADER))};
     },
     listCanvases: async (): Promise<CanvasSummary[]> => {
         const {canvases} = await json<{canvases: CanvasSummary[]}>(await fetch(apiUrl('/api/canvases')));
@@ -165,7 +171,12 @@ export const api = {
         return json(await fetch(url));
     },
     getGraph: async (): Promise<Graph> => {
-        return json(await fetch(apiUrl('/api/graph')));
+        return (await api.getGraphVersioned()).data;
+    },
+    /** Whole graph plus the vault version it was built at (for graph deltas). */
+    getGraphVersioned: async (): Promise<{data: Graph; version: number | null}> => {
+        const res = await fetch(apiUrl('/api/graph'));
+        return {data: await json<Graph>(res), version: parseVersion(res.headers.get(VERSION_HEADER))};
     },
     getLocalGraph: async (id: string, depth = 1, limit = 60): Promise<LocalGraphData> => {
         const url = new URL(apiUrl('/api/graph/local'), window.location.origin);

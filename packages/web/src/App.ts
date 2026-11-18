@@ -5,6 +5,7 @@ import {api, NoteSummary} from './Api.js';
 import {CommandPalette} from './CommandPalette.js';
 import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
+import {applyGraphDelta, applyNotesDelta, isEmptyGraphDelta, type GraphDelta} from './GraphDelta.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
 import {ConsentInbox} from './ConsentInbox.js';
@@ -47,6 +48,9 @@ export class App {
     private tab: Tab = 'notes';
     private notes: NoteSummary[] = [];
     private graph: Graph | null = null;
+    /** Server versions behind `notes` / `graph`; null = unknown, next delta re-fetches. */
+    private notesVersion: number | null = null;
+    private graphVersion: number | null = null;
     private project: string | null = null;
 
     private notesPanel: NotesPanel;
@@ -161,6 +165,9 @@ export class App {
 
         this.events = new EventStream();
         this.events.subscribe((event) => this.handleMcpEvent(event));
+        this.events.subscribeNamed('graph-delta', (data) => this.applyDelta(data as GraphDelta));
+        this.events.subscribeNamed('graph-reset', () => this.scheduleVaultReload());
+        this.events.onReconnect(() => this.scheduleVaultReload());
         // Only panels that were opened can show stale data.
         this.events.subscribe((event) => this.loadedPanel('roadmap')?.onVaultEvent(event.touched));
         this.events.subscribe((event) => this.loadedPanel('benchmarks')?.onVaultEvent(event.touched));
@@ -378,9 +385,8 @@ export class App {
     private handleMcpEvent(event: SynaipseEvent): void {
         this.activityLog.push(event);
 
-        if (event.kind === 'write' || event.kind === 'delete') {
-            this.scheduleVaultReload();
-        }
+        // Writes no longer trigger a reload here: the server follows up
+        // with a `graph-delta` (or `graph-reset`) event, see applyDelta.
 
         if (event.touched.length === 0) {
             return;
@@ -428,16 +434,52 @@ export class App {
 
         if (this.tab !== 'graph') {
             this.graph = null;
+            this.graphVersion = null;
             return;
         }
 
         try {
-            this.graph = await api.getGraph();
+            const {data, version} = await api.getGraphVersioned();
+            this.graph = data;
+            this.graphVersion = version;
         } catch (error) {
             console.error('failed to refresh graph', error);
             return;
         }
 
+        this.applyGraphFilter();
+        this.renderTagBar();
+    }
+
+    /**
+     * Apply a server delta to the note list and, when loaded, the graph
+     * (plan P4 / A5). A version gap (missed events, a fetch that raced a
+     * write) falls back to a full reload.
+     */
+    private applyDelta(delta: GraphDelta): void {
+        if (this.notesVersion !== delta.from) {
+            this.scheduleVaultReload();
+            return;
+        }
+
+        this.notes = applyNotesDelta(this.notes, delta);
+        this.notesVersion = delta.to;
+        if (delta.notes.upsert.length > 0 || delta.notes.removed.length > 0) {
+            this.notesPanel.setNotes(this.notes);
+            this.palette.setNotes(this.notes);
+        }
+
+        if (this.graph === null) return;
+
+        if (this.graphVersion !== delta.from) {
+            this.scheduleVaultReload();
+            return;
+        }
+
+        this.graphVersion = delta.to;
+        if (isEmptyGraphDelta(delta)) return;
+
+        this.graph = applyGraphDelta(this.graph, delta);
         this.applyGraphFilter();
         this.renderTagBar();
     }
@@ -650,7 +692,9 @@ export class App {
 
     private async loadNotes(): Promise<void> {
         try {
-            this.notes = await api.listNotes();
+            const {data, version} = await api.listNotesVersioned();
+            this.notes = data;
+            this.notesVersion = version;
             this.notesPanel.setNotes(this.notes);
             this.palette.setNotes(this.notes);
         } catch (error) {
@@ -675,7 +719,9 @@ export class App {
             const started = Date.now();
 
             try {
-                this.graph = await api.getGraph();
+                const {data, version} = await api.getGraphVersioned();
+                this.graph = data;
+                this.graphVersion = version;
                 loadingMsg.textContent = `fetched ${this.graph.nodes.length} nodes / ${this.graph.edges.length} edges in ${Date.now() - started}ms`;
             } catch (error) {
                 console.error('failed to load graph', error);

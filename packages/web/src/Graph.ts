@@ -189,11 +189,17 @@ const buildElements = (state: GraphState, communities: CommunityResult | null): 
             };
         });
 
+    // Stable edge ids (endpoints + kind, plus a counter for duplicates) so
+    // an update can diff against the live elements instead of rebuilding.
+    const seen = new Map<string, number>();
     const edges: ElementDefinition[] = filteredEdges
         .filter((e) => visibleIds.has(e.from) && visibleIds.has(e.to))
-        .map((e, i) => ({
-            data: {id: `e${i}`, source: e.from, target: e.to, kind: e.kind}
-        }));
+        .map((e) => {
+            const key = `e:${e.kind}:${e.from}→${e.to}`;
+            const n = seen.get(key) ?? 0;
+            seen.set(key, n + 1);
+            return {data: {id: n === 0 ? key : `${key}#${n}`, source: e.from, target: e.to, kind: e.kind}};
+        });
 
     return {
         elements: [...nodes, ...edges],
@@ -549,11 +555,6 @@ export class GraphView implements GraphRenderer {
     }
 
     private render(): void {
-        if (this.cy !== null) {
-            this.cy.destroy();
-            this.cy = null;
-        }
-
         const communities = this.getCommunities();
         const filter = buildElements(this.state, communities);
         clear(this.stats);
@@ -564,6 +565,11 @@ export class GraphView implements GraphRenderer {
         }
 
         this.stats.textContent = statsParts.join(' · ');
+
+        if (this.cy !== null) {
+            this.reconcile(filter.elements);
+            return;
+        }
 
         const savedPositions = positionsStore.get();
         const resolvedPositions = resolvePositions(filter.elements, savedPositions);
@@ -641,6 +647,64 @@ export class GraphView implements GraphRenderer {
         this.cy.on('layoutstop', () => this.snapshotPositions());
         // dragfree fires when the user finishes dragging a single node — capture that too
         this.cy.on('dragfree', 'node', () => this.snapshotPositions());
+        this.scheduleHullRender();
+    }
+
+    /**
+     * Bring the live Cytoscape graph to `elements` in one batch: remove
+     * what is gone, update changed node data, add what is new (placed near
+     * its neighbours). Camera, positions and selection stay, so a write
+     * elsewhere no longer resets the view (plan P4 / A5).
+     */
+    private reconcile(elements: readonly ElementDefinition[]): void {
+        const cy = this.cy;
+        if (cy === null) return;
+
+        const wanted = new Map<string, ElementDefinition>();
+        for (const e of elements) {
+            if (typeof e.data.id === 'string') wanted.set(e.data.id, e);
+        }
+
+        const anchors: PositionMap = {...positionsStore.get()};
+        cy.nodes().forEach((node) => {
+            anchors[node.id()] = {...node.position()};
+        });
+        const positions = resolvePositions(elements, anchors);
+
+        cy.batch(() => {
+            cy.elements().forEach((ele) => {
+                if (ele.removed()) return;
+                const target = wanted.get(ele.id());
+
+                if (target === undefined) {
+                    ele.remove();
+                    return;
+                }
+
+                wanted.delete(ele.id());
+
+                if (ele.isNode()) {
+                    const d = target.data;
+                    if (ele.data('label') !== d.label || ele.data('color') !== d.color || ele.data('tagCount') !== d.tagCount) {
+                        ele.data({label: d.label, color: d.color, tagCount: d.tagCount});
+                    }
+                }
+            });
+
+            const added = [...wanted.values()];
+            const nodes = added
+                .filter((e) => e.data.source === undefined)
+                .map((e) => {
+                    const pos = positions.get(e.data.id as string);
+                    return pos !== undefined ? {...e, position: pos} : e;
+                });
+            const edges = added.filter((e) => e.data.source !== undefined);
+
+            if (nodes.length > 0) cy.add(nodes);
+            if (edges.length > 0) cy.add(edges);
+        });
+
+        this.nodeIndex = new Map(this.state.data.nodes.map((n) => [n.id, n]));
         this.scheduleHullRender();
     }
 
