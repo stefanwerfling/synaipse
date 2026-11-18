@@ -118,6 +118,17 @@ export const renderMarkdownInto = (host: HTMLElement, content: string, noteId?: 
 };
 
 /**
+ * Markdown only, without the async infographic / floorplan hydration.
+ * For text that is still changing (a streaming chat answer): hydrating
+ * on every frame would restart antv for each token. Call
+ * {@link renderMarkdownInto} once the text is final.
+ */
+export const renderMarkdownDraftInto = (host: HTMLElement, content: string): void => {
+    host.innerHTML = renderMarkdown(content);
+    rewriteAssetImages(host, undefined);
+};
+
+/**
  * Like {@link renderMarkdownInto} but AWAITS the async infographic /
  * floorplan hydration passes so the caller ends up with finished SVG in
  * `host` — needed for PDF export, where we serialize/adopt the subtree

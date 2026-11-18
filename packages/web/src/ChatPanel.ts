@@ -2,7 +2,8 @@ import {apiUrl} from './ApiBase.js';
 import {api, type ChatSession, type ChatTurnDto, type ChatSourceRef} from './Api.js';
 import {ChatSidebar} from './ChatSidebar.js';
 import {clear, el} from './Dom.js';
-import {renderMarkdownInto} from './MarkdownPreview.js';
+import {FrameThrottle} from './FrameThrottle.js';
+import {renderMarkdownDraftInto, renderMarkdownInto} from './MarkdownPreview.js';
 import {PreviewDialog, previewSkipFlag} from './PreviewDialog.js';
 
 export type ChatSource = ChatSourceRef;
@@ -66,6 +67,12 @@ export class ChatPanel {
     private messages: Message[] = [];
     private streaming = false;
     private currentAbort: AbortController | null = null;
+    /** Rendered element per message, so streaming can patch one bubble. */
+    private readonly messageEls = new WeakMap<Message, HTMLElement>();
+    /** The message whose body the next throttled frame re-renders. */
+    private streamTarget: Message | null = null;
+    /** One body re-render per frame at most, backing off for long answers (plan P4 / D5). */
+    private readonly streamFrame = new FrameThrottle(() => this.renderStreamingBody());
     private model = '—';
     private enabled = false;
     private researchEnabled = false;
@@ -504,6 +511,7 @@ export class ChatPanel {
     }
 
     private renderThread(): void {
+        this.streamFrame.cancel();
         clear(this.thread);
 
         if (this.messages.length === 0) {
@@ -512,10 +520,57 @@ export class ChatPanel {
         }
 
         for (const msg of this.messages) {
-            this.thread.appendChild(this.renderMessage(msg));
+            const node = this.renderMessage(msg);
+            this.messageEls.set(msg, node);
+            this.thread.appendChild(node);
         }
 
         this.thread.scrollTop = this.thread.scrollHeight;
+    }
+
+    /** True when the thread is scrolled (nearly) to the bottom. */
+    private isAtBottom(): boolean {
+        return this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight < 48;
+    }
+
+    /**
+     * Replace one message's element in place (start/sources events, end of
+     * the stream). Falls back to a full render when it is not on screen.
+     */
+    private rerenderMessage(msg: Message): void {
+        const current = this.messageEls.get(msg);
+        if (current === undefined || current.parentElement !== this.thread) {
+            this.renderThread();
+            return;
+        }
+
+        const stick = this.isAtBottom();
+        const next = this.renderMessage(msg);
+        current.replaceWith(next);
+        this.messageEls.set(msg, next);
+        if (stick) this.thread.scrollTop = this.thread.scrollHeight;
+    }
+
+    /**
+     * Token path: re-render only the streaming answer's text, without
+     * infographic hydration, and leave footer, sources list and every
+     * older message alone. Before, each token rebuilt the whole thread
+     * (all markdown again), so cost grew with conversation length.
+     */
+    private renderStreamingBody(): void {
+        const msg = this.streamTarget;
+        if (msg === null) return;
+
+        const body = this.messageEls.get(msg)?.querySelector<HTMLElement>('.chat-card-body');
+        if (body === null || body === undefined) {
+            this.rerenderMessage(msg);
+            return;
+        }
+
+        const stick = this.isAtBottom();
+        renderMarkdownDraftInto(body, stripChatMarkers(msg.text));
+        if (msg.streaming === true) body.appendChild(document.createTextNode('▍'));
+        if (stick) this.thread.scrollTop = this.thread.scrollHeight;
     }
 
     private renderMessage(msg: Message): HTMLElement {
@@ -550,7 +605,11 @@ export class ChatPanel {
         // Append the streaming cursor as a separate text node so we don't
         // pollute the markdown source with a literal '▍' that gets re-parsed
         // on every token.
-        renderMarkdownInto(body, cleanText);
+        if (msg.streaming === true) {
+            renderMarkdownDraftInto(body, cleanText);
+        } else {
+            renderMarkdownInto(body, cleanText);
+        }
         if (msg.streaming === true) {
             body.appendChild(document.createTextNode('▍'));
         }
@@ -737,6 +796,7 @@ export class ChatPanel {
     /** Unmount: cancel a running chat/research stream. */
     public destroy(): void {
         this.stop();
+        this.cancelStreamFrame();
     }
 
     private setStreaming(active: boolean): void {
@@ -780,9 +840,22 @@ export class ChatPanel {
         const userMsg: Message = {role: 'user', text: question};
         const assistantMsg: Message = {role: 'assistant', text: '', streaming: true, sources: []};
 
+        const last = this.messages[this.messages.length - 1];
+        const appendable = last !== undefined && this.messageEls.get(last)?.parentElement === this.thread;
         this.messages.push(userMsg);
         this.messages.push(assistantMsg);
-        this.renderThread();
+
+        if (appendable) {
+            // Older messages stay as they are (and keep hydrated infographics).
+            for (const msg of [userMsg, assistantMsg]) {
+                const node = this.renderMessage(msg);
+                this.messageEls.set(msg, node);
+                this.thread.appendChild(node);
+            }
+            this.thread.scrollTop = this.thread.scrollHeight;
+        } else {
+            this.renderThread();
+        }
 
         this.setStreaming(true);
         this.currentAbort = new AbortController();
@@ -835,8 +908,11 @@ export class ChatPanel {
         } finally {
             assistantMsg.streaming = false;
             this.currentAbort = null;
+            this.streamFrame.cancel();
+            this.streamTarget = null;
             this.setStreaming(false);
-            this.renderThread();
+            // Final render with full hydration (infographics, floorplans).
+            this.rerenderMessage(assistantMsg);
             void this.autoSave();
         }
     }
@@ -898,6 +974,19 @@ export class ChatPanel {
             target.text += `\n\n[error: ${String(event.message)}]`;
         }
 
-        this.renderThread();
+        if (event.kind === 'start' || event.kind === 'sources') {
+            // Footer changes (model, sources, privacy): rare, whole bubble.
+            this.streamFrame.cancel();
+            this.rerenderMessage(target);
+        } else {
+            this.streamTarget = target;
+            this.streamFrame.request();
+        }
+    }
+
+    /** Unmount: also drop a pending frame. */
+    private cancelStreamFrame(): void {
+        this.streamFrame.cancel();
+        this.streamTarget = null;
     }
 }
