@@ -118,3 +118,22 @@ export const createReranker = (config: Config): Reranker | null => {
 
     throw new ConfigError(`unknown reranker provider: ${String(cfg.provider)}`);
 };
+
+/**
+ * Stable identity of the configured embedder: `provider:model:dimension`.
+ * Stored per note next to the embedded hash so a model switch (even one
+ * with the same dimension) is detected and triggers a re-embed instead of
+ * silently mixing two vector spaces. Null when embeddings are disabled.
+ */
+export const embedderFingerprint = (config: Config, dimension: number): string | null => {
+    switch (config.embeddings.provider) {
+        case 'voyage':
+            return config.voyage === undefined ? null : `voyage:${config.voyage.model}:${dimension}`;
+        case 'ollama':
+            return config.ollama === undefined ? null : `ollama:${stripTag(config.ollama.model)}:${dimension}`;
+        case 'huggingface':
+            return config.huggingface === undefined ? null : `huggingface:${config.huggingface.model}:${dimension}`;
+        default:
+            return null;
+    }
+};

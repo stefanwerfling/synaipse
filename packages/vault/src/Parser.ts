@@ -1,50 +1,12 @@
 import path from 'node:path';
 import matter from 'gray-matter';
-import type {Frontmatter, Note} from '@synaipse/core';
+import {extractTags, extractWikilinks, type Frontmatter, type Note} from '@synaipse/core';
 import {sha1} from './Hash.js';
 
-const WIKILINK_RE = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
-const TAG_RE = /(?:^|\s)#([A-Za-z0-9_\-/]+)/g;
-const CODE_FENCE_RE = /```[\s\S]*?```|`[^`]*`/g;
-
-const stripCode = (markdown: string): string => {
-    return markdown.replace(CODE_FENCE_RE, '');
-};
-
-export const extractWikilinks = (markdown: string): string[] => {
-    const cleaned = stripCode(markdown);
-    const links = new Set<string>();
-
-    for (const match of cleaned.matchAll(WIKILINK_RE)) {
-        if (match[1]) {
-            links.add(match[1].trim());
-        }
-    }
-
-    return [...links];
-};
-
-export const extractTags = (markdown: string, frontmatter: Frontmatter): string[] => {
-    const tags = new Set<string>();
-
-    if (Array.isArray(frontmatter.tags)) {
-        for (const tag of frontmatter.tags) {
-            if (typeof tag === 'string') {
-                tags.add(tag);
-            }
-        }
-    }
-
-    const cleaned = stripCode(markdown);
-
-    for (const match of cleaned.matchAll(TAG_RE)) {
-        if (match[1]) {
-            tags.add(match[1]);
-        }
-    }
-
-    return [...tags];
-};
+// Link/tag primitives live in @synaipse/core so the MariaDB adapter
+// parses exactly like the filesystem vault. Re-exported for callers that
+// historically imported them from here.
+export {extractTags, extractWikilinks} from '@synaipse/core';
 
 const noteIdFor = (vaultRoot: string, absolutePath: string): string => {
     return path.relative(vaultRoot, absolutePath).replaceAll(path.sep, '/');

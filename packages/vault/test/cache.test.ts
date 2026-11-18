@@ -26,9 +26,26 @@ describe('HashCache', () => {
         const b = new HashCache(file, 0);
         await b.load();
 
-        expect(b.get('n1.md')).toEqual({hash: 'h1', mtime: 100});
-        expect(b.get('n2.md')).toEqual({hash: 'h2', mtime: 200});
+        // Fresh entries persist an explicit "not embedded" marker ('').
+        expect(b.get('n1.md')).toEqual({hash: 'h1', mtime: 100, embeddedHash: ''});
+        expect(b.get('n2.md')).toEqual({hash: 'h2', mtime: 200, embeddedHash: ''});
         expect(b.size()).toBe(2);
+    });
+
+    it('adopts legacy entries (no embed fields) as embedded under the legacy marker', async () => {
+        const {writeFile} = await import('node:fs/promises');
+        await writeFile(file, JSON.stringify({'old.md': {hash: 'h', mtime: 1}}), 'utf8');
+        const c = new HashCache(file, 0);
+        await c.load();
+        expect(c.get('old.md')).toEqual({hash: 'h', mtime: 1, embeddedHash: 'h', embedModel: 'legacy'});
+    });
+
+    it('keeps the embedded marker when the content hash moves on', async () => {
+        const c = new HashCache(file, 0);
+        c.set('n.md', {hash: 'h1', mtime: 1});
+        c.setEmbedded('n.md', 'h1', 'voyage:m:3');
+        c.set('n.md', {hash: 'h2', mtime: 2});
+        expect(c.get('n.md')).toMatchObject({hash: 'h2', embeddedHash: 'h1', embedModel: 'voyage:m:3'});
     });
 
     it('ignores duplicate writes with identical hash + mtime', async () => {

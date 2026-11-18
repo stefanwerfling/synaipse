@@ -1,6 +1,10 @@
 import {existsSync} from 'node:fs';
-import {mkdir, readFile, stat, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rename, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import {LEGACY_EMBED_MODEL} from '@synaipse/core';
+
+/** `embeddedHash` value of an entry whose content was never embedded. */
+const NOT_EMBEDDED = '';
 
 export interface CacheEntry {
     hash: string;
@@ -16,6 +20,10 @@ export interface CacheEntry {
      */
     referencedCount?: number;
     lastReferenced?: number;
+    /** See NoteEntry.embeddedHash in @synaipse/core. */
+    embeddedHash?: string;
+    /** See NoteEntry.embedModel in @synaipse/core. */
+    embedModel?: string;
 }
 
 export interface TouchSeed {
@@ -40,12 +48,40 @@ export class HashCache {
             return;
         }
 
+        let raw: string;
         try {
-            const raw = await readFile(this.file, 'utf8');
+            raw = await readFile(this.file, 'utf8');
+        } catch (error) {
+            process.stderr.write(`[synaipse] WARN cannot read index cache ${this.file}: ${String(error)}\n`);
+            this.data = new Map();
+            return;
+        }
+
+        try {
             const parsed = JSON.parse(raw) as Record<string, CacheEntry>;
             this.data = new Map(Object.entries(parsed));
+            // Entries from before embeddedHash existed: their `hash` was
+            // only recorded after a successful start-up embed, so adopt it
+            // as the embedded state under an explicit LEGACY_EMBED_MODEL
+            // marker. Without the marker a brand-new, never-embedded entry
+            // would be indistinguishable from a legacy one.
+            for (const entry of this.data.values()) {
+                if (entry.embedModel === undefined && entry.embeddedHash === undefined) {
+                    entry.embeddedHash = entry.hash;
+                    entry.embedModel = LEGACY_EMBED_MODEL;
+                }
+            }
             this.knownMtime = await this.diskMtime();
-        } catch {
+        } catch (error) {
+            // A corrupt cache used to reset silently, which made the next
+            // start re-embed the whole vault without a word. Keep the
+            // broken file for inspection and say loudly what happens next.
+            const backup = `${this.file}.corrupt-${Date.now()}`;
+            await rename(this.file, backup).catch(() => undefined);
+            process.stderr.write(
+                `[synaipse] WARN index cache ${this.file} is corrupt (${error instanceof Error ? error.message : String(error)}); ` +
+                `moved to ${backup}. All notes will be re-embedded.\n`
+            );
             this.data = new Map();
         }
     }
@@ -113,7 +149,38 @@ export class HashCache {
             merged.lastReferenced = prev.lastReferenced;
         }
 
+        if (merged.embeddedHash === undefined) {
+            // '' = explicitly "not embedded yet". Must be persisted as a
+            // value: an absent field is how legacy entries are recognised
+            // on load, and those count as embedded.
+            merged.embeddedHash = prev?.embeddedHash ?? NOT_EMBEDDED;
+        }
+
+        if (merged.embedModel === undefined && prev?.embedModel !== undefined) {
+            merged.embedModel = prev.embedModel;
+        }
+
+
         this.data.set(id, merged);
+        this.schedule();
+    }
+
+    /** Mark `hash` as embedded with `model` (see NoteEntry.embeddedHash). */
+    public setEmbedded(id: string, hash: string, model: string): void {
+        const existing = this.data.get(id);
+
+        if (existing === undefined) {
+            this.data.set(id, {hash, mtime: 0, embeddedHash: hash, embedModel: model});
+            this.schedule();
+            return;
+        }
+
+        if (existing.embeddedHash === hash && existing.embedModel === model) {
+            return;
+        }
+
+        existing.embeddedHash = hash;
+        existing.embedModel = model;
         this.schedule();
     }
 
@@ -135,7 +202,8 @@ export class HashCache {
             hash: seed.hash,
             mtime: seed.mtime,
             accessCount: 1,
-            lastAccessed: now
+            lastAccessed: now,
+            embeddedHash: NOT_EMBEDDED
         });
         this.schedule();
     }
@@ -159,7 +227,8 @@ export class HashCache {
             hash: seed.hash,
             mtime: seed.mtime,
             referencedCount: 1,
-            lastReferenced: now
+            lastReferenced: now,
+            embeddedHash: NOT_EMBEDDED
         });
         this.schedule();
     }
@@ -215,7 +284,11 @@ export class HashCache {
         this.dirty = false;
         await mkdir(path.dirname(this.file), {recursive: true});
         const obj: Record<string, CacheEntry> = Object.fromEntries(this.data);
-        await writeFile(this.file, JSON.stringify(obj, null, 2), 'utf8');
+        // Atomic replace: a crash mid-write must never leave a truncated
+        // JSON behind (that would force a full re-embed on next start).
+        const tmp = `${this.file}.tmp-${process.pid}`;
+        await writeFile(tmp, JSON.stringify(obj), 'utf8');
+        await rename(tmp, this.file);
         this.knownMtime = await this.diskMtime();
     }
 }

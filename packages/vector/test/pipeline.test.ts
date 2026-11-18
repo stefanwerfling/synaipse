@@ -31,12 +31,17 @@ const fakeEmbedder = (): VoyageEmbedder & {calls: number[]} => {
     } as unknown as VoyageEmbedder & {calls: number[]};
 };
 
-const fakeStore = (): QdrantStore & {upserts: number[]; deletes: string[][]} => {
+const fakeStore = (): QdrantStore & {upserts: number[]; deletes: string[][]; trims: Array<Record<string, number>>} => {
     const upserts: number[] = [];
     const deletes: string[][] = [];
+    const trims: Array<Record<string, number>> = [];
     return {
         upserts,
         deletes,
+        trims,
+        deleteStaleChunks: vi.fn(async (keep: ReadonlyMap<string, number>) => {
+            trims.push(Object.fromEntries(keep));
+        }),
         deleteByNote: vi.fn(),
         deleteByNotes: vi.fn(async (ids: string[]) => {
             deletes.push([...ids]);
@@ -46,7 +51,7 @@ const fakeStore = (): QdrantStore & {upserts: number[]; deletes: string[][]} => 
         }),
         search: vi.fn(),
         ensureCollection: vi.fn()
-    } as unknown as QdrantStore & {upserts: number[]; deletes: string[][]};
+    } as unknown as QdrantStore & {upserts: number[]; deletes: string[][]; trims: Array<Record<string, number>>};
 };
 
 describe('VectorIndex.indexNotes', () => {
@@ -66,14 +71,39 @@ describe('VectorIndex.indexNotes', () => {
         expect(store.upserts).toEqual([4, 4, 1]);
     });
 
-    it('deletes prior chunks for all notes in one filter call', async () => {
+    it('upserts first, then trims stale tail chunks in one call (never deletes up front)', async () => {
         const embedder = fakeEmbedder();
         const store = fakeStore();
         const index = new VectorIndex({embedder, store, batchSize: 64});
 
-        await index.indexNotes([note('a', 1), note('b', 1)]);
+        await index.indexNotes([note('a', 1), note('b', 3)]);
 
-        expect(store.deletes).toEqual([['a', 'b']]);
+        expect(store.deletes).toEqual([]);
+        expect(store.upserts).toEqual([4]);
+        expect(store.trims).toEqual([{a: 1, b: 3}]);
+    });
+
+    it('keeps existing vectors when embedding fails mid-way', async () => {
+        const embedder = fakeEmbedder();
+        (embedder.embed as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('embedder down'));
+        const store = fakeStore();
+        const index = new VectorIndex({embedder, store});
+
+        await expect(index.indexNotes([note('a', 2)])).rejects.toThrow('embedder down');
+
+        expect(store.deletes).toEqual([]);
+        expect(store.trims).toEqual([]);
+        expect(store.upserts).toEqual([]);
+    });
+
+    it('trims all chunks of a note that became empty', async () => {
+        const embedder = fakeEmbedder();
+        const store = fakeStore();
+        const index = new VectorIndex({embedder, store});
+
+        await index.indexNotes([{...note('gone', 0), content: ''}]);
+
+        expect(store.trims).toEqual([{gone: 0}]);
     });
 
     it('skips embedding when no chunks are produced', async () => {

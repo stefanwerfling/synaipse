@@ -45,7 +45,45 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
 
         expect(adapter.list().map((n) => n.id)).toEqual(['Notes/Alpha.md']);
         expect(adapter.tags().get('demo')).toEqual(['Notes/Alpha.md']);
-        expect(adapter.backlinksOf('Beta')).toEqual(['Notes/Alpha.md']);
+        // Backlinks are keyed by note id (path), not by the raw link text —
+        // `[[Beta]]` only produces a backlink once a note titled Beta exists.
+        expect(adapter.backlinksOf('Beta')).toEqual([]);
+        await adapter.write({path: 'Notes/Beta.md', content: '# Beta', frontmatter: {title: 'Beta'}});
+        expect(adapter.backlinksOf('Notes/Beta.md')).toEqual(['Notes/Alpha.md']);
+        expect(adapter.get('Notes/Beta.md').backlinks).toEqual(['Notes/Alpha.md']);
+    });
+
+    it('backlinks resolve via aliases and survive a reload', async () => {
+        const a = new MariaDBNoteAdapter(pool, cfg);
+        await a.load();
+        await a.write({path: 'Notes/Target.md', content: 'body', frontmatter: {title: 'Target', aliases: ['tgt']}});
+        await a.write({path: 'Notes/Src1.md', content: 'see [[Target]]', frontmatter: {title: 'Src1'}});
+        await a.write({path: 'Notes/Src2.md', content: 'see [[tgt]]', frontmatter: {title: 'Src2'}});
+        expect(a.backlinksOf('Notes/Target.md').sort()).toEqual(['Notes/Src1.md', 'Notes/Src2.md']);
+
+        const b = new MariaDBNoteAdapter(pool, cfg);
+        await b.load();
+        expect(b.backlinksOf('Notes/Target.md').sort()).toEqual(['Notes/Src1.md', 'Notes/Src2.md']);
+    });
+
+    it('B2: embedded state is tracked separately from the content hash and persists', async () => {
+        const a = new MariaDBNoteAdapter(pool, cfg);
+        await a.load();
+        const v1 = await a.write({path: 'Notes/E.md', content: 'v1', frontmatter: {title: 'E'}});
+
+        // Fresh write: not embedded yet → the service must embed it.
+        expect(a.getEntry(v1.id)?.embeddedHash).toBeUndefined();
+
+        a.recordEmbedded(v1.id, v1.hash, 'voyage:m:3');
+        await a.flushEntries();
+
+        // Content moves on; embedded marker stays at v1 until re-embedded.
+        const v2 = await a.write({path: 'Notes/E.md', content: 'v2', frontmatter: {title: 'E'}});
+        expect(a.getEntry(v2.id)).toMatchObject({hash: v2.hash, embeddedHash: v1.hash, embedModel: 'voyage:m:3'});
+
+        const b = new MariaDBNoteAdapter(pool, cfg);
+        await b.load();
+        expect(b.getEntry('Notes/E.md')).toMatchObject({hash: v2.hash, embeddedHash: v1.hash, embedModel: 'voyage:m:3'});
     });
 
     it('upsert keeps a single row + refreshes the hash on rewrite', async () => {

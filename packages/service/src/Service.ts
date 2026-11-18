@@ -1,5 +1,5 @@
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
-import {ProjectScopeError, parseRoadmap} from '@synaipse/core';
+import {buildLinkKeyMap, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
@@ -78,7 +78,7 @@ export interface SnapshotEntry {
     type: 'file' | 'dir';
     sha: string;
 }
-import {createEmbedder, createReranker, QdrantStore, VectorIndex, type Reranker} from '@synaipse/vector';
+import {createEmbedder, createReranker, embedderFingerprint, QdrantStore, VectorIndex, type Embedder, type Reranker, type VectorStore} from '@synaipse/vector';
 import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSignal} from './Fusion.js';
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {InvertedIndex} from './InvertedIndex.js';
@@ -89,7 +89,12 @@ export interface IndexingStats {
     reindexed: number;
     removed: number;
     unchanged: number;
+    /** Notes whose embedding failed and is still outstanding (retried on next write / start). */
+    pending: number;
 }
+
+/** Notes per embedding group at start-up; progress is persisted after each group. */
+const STARTUP_EMBED_GROUP = 50;
 
 export interface RelatedNote {
     id: NoteId;
@@ -309,6 +314,14 @@ export interface ServiceOverrides {
      * entirely to fall through to `createReranker(config)`.
      */
     reranker?: Reranker | null;
+    /**
+     * Test hooks for the embedding path: inject a fake embedder and an
+     * in-memory vector store so start-up/write/retry behaviour can be
+     * verified without Voyage/Ollama and Qdrant. `embedder: null`
+     * disables embeddings regardless of config.
+     */
+    embedder?: Embedder | null;
+    vectorStore?: VectorStore;
 }
 
 export class SynaipseService {
@@ -318,6 +331,10 @@ export class SynaipseService {
     private readonly history: History;
     private readonly assetStore: AssetStore;
     private readonly index: VectorIndex | null;
+    /** Embedder fingerprint (see embedderFingerprint); null when embeddings are off. */
+    private readonly embedModel: string | null;
+    /** Notes whose last embed attempt failed; retried on their next write and on start. */
+    private readonly pendingEmbeds = new Set<NoteId>();
     /** Optional cross-encoder that re-orders the top of RRF fusion. Null when disabled. */
     private readonly reranker: Reranker | null;
     /** How many hits to feed the reranker per query. Only used when reranker !== null. */
@@ -341,7 +358,8 @@ export class SynaipseService {
     private cachedLayoutKey: string | null = null;
     private cachedGraph: Graph | null = null;
     private cachedAdjacency: AdjacencyMap | null = null;
-    private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
+    private cachedLinkKeys: Map<string, NoteId> | null = null;
+    private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
     public constructor(config: Config, overrides: ServiceOverrides = {}) {
@@ -375,7 +393,7 @@ export class SynaipseService {
 
         this.embedExcludePrefixes = config.embedExcludePrefixes ?? [];
 
-        const embedder = createEmbedder(config);
+        const embedder = overrides.embedder !== undefined ? overrides.embedder : createEmbedder(config);
 
         // Classify the embedder for audit-log routing. Same DSGVO posture as
         // chat providers: anything that hits a non-loopback URL is "external"
@@ -401,10 +419,13 @@ export class SynaipseService {
 
         if (embedder === null) {
             this.index = null;
+            this.embedModel = null;
             return;
         }
 
-        const store = new QdrantStore({
+        this.embedModel = embedderFingerprint(config, embedder.dimension) ?? `custom:${embedder.dimension}`;
+
+        const store = overrides.vectorStore ?? new QdrantStore({
             url: config.qdrant.url,
             ...(config.qdrant.apiKey !== undefined ? {apiKey: config.qdrant.apiKey} : {}),
             collection: config.qdrant.collection,
@@ -433,9 +454,40 @@ export class SynaipseService {
         return !this.embedExcludePrefixes.some((p) => noteId.startsWith(p));
     }
 
+    /**
+     * True when the vector store does not (yet) hold this exact note
+     * content for the configured embedder. Legacy entries (embedded before
+     * the fingerprint was tracked) count as embedded.
+     */
+    private needsEmbedding(note: Note): boolean {
+        const entry = this.notes.getEntry(note.id);
+        if (entry === undefined || entry.embeddedHash !== note.hash) return true;
+        if (entry.embedModel === LEGACY_EMBED_MODEL) return false;
+        return entry.embedModel !== this.embedModel;
+    }
+
+    /**
+     * Embed one note after a write. Never throws: the note is already
+     * persisted, and failing the write because the embedder is down would
+     * make callers (LLMs especially) retry and duplicate it. The note stays
+     * marked as not-embedded and is retried on its next write and on start.
+     */
     private async maybeIndexNote(note: Note): Promise<void> {
-        if (this.index !== null && this.shouldEmbed(note.id)) {
-            await this.index.indexNote(note);
+        if (this.index !== null && this.embedModel !== null && this.shouldEmbed(note.id)) {
+            try {
+                await this.index.indexNote(note);
+                this.notes.recordEmbedded(note.id, note.hash, this.embedModel);
+                if (this.pendingEmbeds.delete(note.id)) {
+                    this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
+                }
+            } catch (error) {
+                this.pendingEmbeds.add(note.id);
+                this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
+                process.stderr.write(
+                    `[synaipse] WARN embedding ${note.id} failed (${error instanceof Error ? error.message : String(error)}); ` +
+                    `note is saved, vector index will catch up on the next write or start (${this.pendingEmbeds.size} pending)\n`
+                );
+            }
         }
 
         this.invalidateTopologyCaches();
@@ -449,6 +501,15 @@ export class SynaipseService {
         this.cachedLayoutKey = null;
         this.cachedGraph = null;
         this.cachedAdjacency = null;
+        this.cachedLinkKeys = null;
+    }
+
+    /** Cached wikilink-target → note-id map (titles, then aliases; see buildLinkKeyMap). */
+    private linkKeyMap(): Map<string, NoteId> {
+        if (this.cachedLinkKeys === null) {
+            this.cachedLinkKeys = buildLinkKeyMap(this.notes.list());
+        }
+        return this.cachedLinkKeys;
     }
 
     public async start(): Promise<void> {
@@ -475,7 +536,7 @@ export class SynaipseService {
             process.stderr.write(`[synaipse] embed exclude prefixes: ${this.embedExcludePrefixes.join(', ')}\n`);
         }
 
-        const stats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0};
+        const stats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
         const liveIds = new Set<NoteId>();
         const toReindex: Note[] = [];
         let excluded = 0;
@@ -489,9 +550,12 @@ export class SynaipseService {
                 continue;
             }
 
-            const cached = this.notes.getEntry(note.id);
-
-            if (cached && cached.hash === note.hash) {
+            if (!this.needsEmbedding(note)) {
+                // Adopt legacy entries under the current fingerprint so a
+                // later model switch is detected for them too.
+                if (this.notes.getEntry(note.id)?.embedModel === LEGACY_EMBED_MODEL) {
+                    this.notes.recordEmbedded(note.id, note.hash, this.embedModel!);
+                }
                 stats.unchanged += 1;
                 continue;
             }
@@ -505,15 +569,34 @@ export class SynaipseService {
 
         const orphans: NoteId[] = this.notes.entryIds().filter((id) => !liveIds.has(id));
 
-        if (toReindex.length > 0) {
-            await this.index.indexNotes(toReindex);
+        // Embed in groups and persist after each one: a crash or embedder
+        // outage during a long first index keeps the progress made so far
+        // instead of restarting from zero. If the embedder is unreachable,
+        // stop early and serve fulltext — the rest is retried next start.
+        for (let i = 0; i < toReindex.length; i += STARTUP_EMBED_GROUP) {
+            const group = toReindex.slice(i, i + STARTUP_EMBED_GROUP);
 
-            for (const note of toReindex) {
-                this.notes.recordEntry(note.id, note.hash, note.mtime);
+            try {
+                await this.index.indexNotes(group);
+            } catch (error) {
+                for (const note of toReindex.slice(i)) this.pendingEmbeds.add(note.id);
+                process.stderr.write(
+                    `[synaipse] WARN embedding failed (${error instanceof Error ? error.message : String(error)}); ` +
+                    `${toReindex.length - i} notes left un-embedded, retried on next start. Search falls back to fulltext for them.\n`
+                );
+                break;
             }
 
-            stats.reindexed = toReindex.length;
+            for (const note of group) {
+                this.notes.recordEntry(note.id, note.hash, note.mtime);
+                this.notes.recordEmbedded(note.id, note.hash, this.embedModel!);
+            }
+
+            stats.reindexed += group.length;
+            await this.notes.flushEntries();
         }
+
+        stats.pending = this.pendingEmbeds.size;
 
         if (orphans.length > 0) {
             await this.index.deleteNotes(orphans);
@@ -740,24 +823,7 @@ export class SynaipseService {
         if (this.cachedAdjacency !== null) return this.cachedAdjacency;
 
         const notes = this.notes.list();
-        const keyToId = new Map<string, NoteId>();
-
-        for (const note of notes) {
-            if (note.title.length > 0 && !keyToId.has(note.title)) {
-                keyToId.set(note.title, note.id);
-            }
-        }
-
-        for (const note of notes) {
-            const aliases = note.frontmatter.aliases;
-            if (aliases === undefined) continue;
-            for (const alias of aliases) {
-                if (alias.length > 0 && !keyToId.has(alias)) {
-                    keyToId.set(alias, note.id);
-                }
-            }
-        }
-
+        const keyToId = this.linkKeyMap();
         this.cachedAdjacency = buildAdjacency(notes, (key) => keyToId.get(key));
         return this.cachedAdjacency;
     }
@@ -2520,13 +2586,13 @@ export class SynaipseService {
         if (this.cachedGraph !== null) return this.cachedGraph;
 
         const notes = this.notes.list();
-        const titleToId = new Map(notes.map((n) => [n.title, n.id]));
+        const keyToId = this.linkKeyMap();
 
         const built: Graph = {
             nodes: notes.map((n) => ({id: n.id, title: n.title, tags: n.tags})),
             edges: notes.flatMap((n) =>
                 n.wikilinks
-                    .map((link) => titleToId.get(link))
+                    .map((link) => keyToId.get(link))
                     .filter((target): target is NoteId => Boolean(target))
                     .map((target) => ({from: n.id, to: target, kind: 'wikilink' as const}))
             )
@@ -2588,13 +2654,10 @@ export class SynaipseService {
             }
         }
 
-        const titleToId = new Map<string, NoteId>();
-        for (const other of this.notes.list()) {
-            titleToId.set(other.title, other.id);
-        }
+        const keyToId = this.linkKeyMap();
 
         for (const link of note.wikilinks) {
-            const targetId = titleToId.get(link);
+            const targetId = keyToId.get(link);
 
             if (targetId !== undefined) {
                 add(targetId, 0.6, 'wikilink-out');
@@ -2655,16 +2718,13 @@ export class SynaipseService {
             return [];
         }
 
-        const titleToId = new Map<string, NoteId>();
-        for (const note of allNotes) {
-            titleToId.set(note.title, note.id);
-        }
+        const keyToId = this.linkKeyMap();
 
         const linkedSet = (note: Note): Set<NoteId> => {
             const set = new Set<NoteId>([note.id]);
 
             for (const link of note.wikilinks) {
-                const targetId = titleToId.get(link);
+                const targetId = keyToId.get(link);
 
                 if (targetId !== undefined) {
                     set.add(targetId);
@@ -3150,6 +3210,8 @@ export class SynaipseService {
             }
             this.fulltextIndex.removeNote(id);
             this.notes.removeEntry(id);
+            this.pendingEmbeds.delete(id);
+            this.invalidateTopologyCaches();
             this.notifyVaultChange({kind, path, noteId: id});
             return;
         }

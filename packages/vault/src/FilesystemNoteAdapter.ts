@@ -78,6 +78,10 @@ export class FilesystemNoteAdapter implements NoteAdapter {
         this.cache.set(id, {hash, mtime});
     }
 
+    public recordEmbedded(id: NoteId, hash: string, model: string): void {
+        this.cache.setEmbedded(id, hash, model);
+    }
+
     public recordAccess(id: NoteId, hashSeed?: string, mtimeSeed?: number): void {
         if (hashSeed !== undefined && mtimeSeed !== undefined) {
             this.cache.touch(id, {hash: hashSeed, mtime: mtimeSeed});

@@ -12,6 +12,13 @@ export interface NoteWriteContext {
  * adapters persist this in a sidecar JSON; DB-backed adapters store
  * it as a column on the notes table plus a small access table.
  */
+/**
+ * `NoteEntry.embedModel` value for entries that were embedded before the
+ * embedder fingerprint was tracked. The service adopts them as embedded
+ * (no forced re-embed on upgrade) and stamps the current fingerprint.
+ */
+export const LEGACY_EMBED_MODEL = 'legacy';
+
 export interface NoteEntry {
     hash: string;
     mtime: number;
@@ -24,6 +31,20 @@ export interface NoteEntry {
      */
     referencedCount?: number;
     lastReferenced?: number;
+    /**
+     * Content hash that is actually present in the vector store. Distinct
+     * from `hash` (= last content the adapter wrote/saw): `hash` is
+     * updated on every write, `embeddedHash` only after the embedder and
+     * the vector-store upsert succeeded. `embeddedHash !== note.hash`
+     * means the note still needs (re-)embedding — e.g. after the embedder
+     * was down during a write, or on a fresh/wiped vector collection.
+     *
+     * Undefined on legacy filesystem entries written before this field
+     * existed; the service treats those as "embedded at `hash`".
+     */
+    embeddedHash?: string;
+    /** Embedder fingerprint (`provider:model:dimension`) used for `embeddedHash`. */
+    embedModel?: string;
 }
 
 /**
@@ -48,8 +69,14 @@ export interface NoteAdapter {
     /** Index-entry queries (hash + access journal). */
     getEntry(id: NoteId): NoteEntry | undefined;
     entryIds(): NoteId[];
-    /** Record hash+mtime after successful embedding (used by the indexing batch). Sync; pair with flushEntries() for durability. */
+    /** Record the content hash+mtime the adapter has seen. Sync; pair with flushEntries() for durability. */
     recordEntry(id: NoteId, hash: string, mtime: number): void;
+    /**
+     * Record that `hash` was successfully embedded with `model` and is now
+     * in the vector store. Only call after the upsert succeeded. Sync; pair
+     * with flushEntries() for durability.
+     */
+    recordEmbedded(id: NoteId, hash: string, model: string): void;
     /** Bump accessCount/lastAccessed; optionally seed the entry if it does not yet exist. */
     recordAccess(id: NoteId, hashSeed?: string, mtimeSeed?: number): void;
     /** Bump referencedCount/lastReferenced; optionally seed the entry if it does not yet exist. */

@@ -1,6 +1,9 @@
 import {createHash} from 'node:crypto';
 import type {Pool} from 'mariadb';
 import {
+    extractTags,
+    extractWikilinks,
+    LinkIndex,
     type Frontmatter,
     type Note,
     type NoteAdapter,
@@ -22,36 +25,9 @@ interface NoteRow {
     last_accessed: number | null;
     referenced_count: number;
     last_referenced: number | null;
+    embedded_hash?: string | null;
+    embed_model?: string | null;
 }
-
-const WIKILINK_RE = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
-const TAG_RE = /(?:^|\s)#([A-Za-z0-9_\-/]+)/g;
-const CODE_FENCE_RE = /```[\s\S]*?```|`[^`]*`/g;
-
-const stripCode = (markdown: string): string => markdown.replace(CODE_FENCE_RE, '');
-
-const extractWikilinks = (markdown: string): string[] => {
-    const cleaned = stripCode(markdown);
-    const links = new Set<string>();
-    for (const match of cleaned.matchAll(WIKILINK_RE)) {
-        if (match[1]) links.add(match[1].trim());
-    }
-    return [...links];
-};
-
-const extractTags = (markdown: string, frontmatter: Frontmatter): string[] => {
-    const tags = new Set<string>();
-    if (Array.isArray(frontmatter.tags)) {
-        for (const tag of frontmatter.tags) {
-            if (typeof tag === 'string') tags.add(tag);
-        }
-    }
-    const cleaned = stripCode(markdown);
-    for (const match of cleaned.matchAll(TAG_RE)) {
-        if (match[1]) tags.add(match[1]);
-    }
-    return [...tags];
-};
 
 const sha1 = (input: string): string => createHash('sha1').update(input).digest('hex');
 
@@ -100,6 +76,8 @@ interface DirtyEntry {
     lastAccessed?: number;
     referencedCount?: number;
     lastReferenced?: number;
+    embeddedHash?: string;
+    embedModel?: string;
 }
 
 /**
@@ -114,15 +92,15 @@ interface DirtyEntry {
  * and persists on flushEntries() to keep the per-search hot path off
  * the DB round-trip.
  *
- * Wikilink and tag extraction is currently duplicated from
- * @synaipse/vault Parser.ts — the regexes need to stay in sync. A
- * follow-up will hoist these primitives to @synaipse/core so both
- * adapters share one implementation.
+ * Wikilink/tag extraction and backlink resolution come from
+ * @synaipse/core (Markdown.ts, LinkIndex.ts) — the same primitives the
+ * filesystem vault uses, so `[[Title]]`/`[[alias]]` resolve to the same
+ * note id in both storage modes.
  */
 export class MariaDBNoteAdapter implements NoteAdapter {
     private notes = new Map<NoteId, Note>();
     private entries = new Map<NoteId, NoteEntry>();
-    private backlinks = new Map<NoteId, Set<NoteId>>();
+    private readonly links = new LinkIndex();
     private tagIndex = new Map<string, Set<NoteId>>();
     private dirtyEntries = new Map<NoteId, DirtyEntry>();
     private loaded = false;
@@ -134,13 +112,13 @@ export class MariaDBNoteAdapter implements NoteAdapter {
 
     public async load(): Promise<void> {
         const rows = await this.pool.query<NoteRow[]>(
-            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed, referenced_count, last_referenced FROM notes WHERE vault_id = ?',
+            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed, referenced_count, last_referenced, embedded_hash, embed_model FROM notes WHERE vault_id = ?',
             [this.cfg.vaultId]
         );
 
         this.notes.clear();
         this.entries.clear();
-        this.backlinks.clear();
+        this.links.clear();
         this.tagIndex.clear();
         this.dirtyEntries.clear();
 
@@ -153,7 +131,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                 ...(row.access_count > 0 ? {accessCount: row.access_count} : {}),
                 ...(row.last_accessed !== null ? {lastAccessed: row.last_accessed} : {}),
                 ...(row.referenced_count > 0 ? {referencedCount: row.referenced_count} : {}),
-                ...(row.last_referenced !== null ? {lastReferenced: row.last_referenced} : {})
+                ...(row.last_referenced !== null ? {lastReferenced: row.last_referenced} : {}),
+                ...(typeof row.embedded_hash === 'string' ? {embeddedHash: row.embedded_hash} : {}),
+                ...(typeof row.embed_model === 'string' ? {embedModel: row.embed_model} : {})
             });
             for (const tag of note.tags) {
                 let bucket = this.tagIndex.get(tag);
@@ -163,9 +143,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                 }
                 bucket.add(note.id);
             }
+            this.links.upsert(note);
         }
 
-        this.rebuildBacklinks();
         this.loaded = true;
     }
 
@@ -244,7 +224,12 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         };
 
         this.indexNote(note);
-        this.entries.set(note.id, {hash, mtime});
+        const prevEntry = this.entries.get(note.id);
+        this.entries.set(note.id, {
+            ...(prevEntry ?? {}),
+            hash,
+            mtime
+        });
         return this.withBacklinks(note);
     }
 
@@ -259,8 +244,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     }
 
     public backlinksOf(id: NoteId): NoteId[] {
-        const set = this.backlinks.get(id);
-        return set === undefined ? [] : [...set];
+        return this.links.backlinksOf(id);
     }
 
     public tags(): Map<string, NoteId[]> {
@@ -290,12 +274,32 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             ...(prev?.accessCount !== undefined ? {accessCount: prev.accessCount} : {}),
             ...(prev?.lastAccessed !== undefined ? {lastAccessed: prev.lastAccessed} : {}),
             ...(prev?.referencedCount !== undefined ? {referencedCount: prev.referencedCount} : {}),
-            ...(prev?.lastReferenced !== undefined ? {lastReferenced: prev.lastReferenced} : {})
+            ...(prev?.lastReferenced !== undefined ? {lastReferenced: prev.lastReferenced} : {}),
+            ...(prev?.embeddedHash !== undefined ? {embeddedHash: prev.embeddedHash} : {}),
+            ...(prev?.embedModel !== undefined ? {embedModel: prev.embedModel} : {})
         };
         this.entries.set(id, merged);
         const dirty = this.dirtyEntries.get(id) ?? {};
         dirty.hash = hash;
         dirty.mtime = mtime;
+        this.dirtyEntries.set(id, dirty);
+    }
+
+    public recordEmbedded(id: NoteId, hash: string, model: string): void {
+        const existing = this.entries.get(id);
+        if (existing === undefined) {
+            // Embedded notes always exist in the table; without an entry
+            // there is no row to UPDATE, so nothing to record.
+            return;
+        }
+        if (existing.embeddedHash === hash && existing.embedModel === model) {
+            return;
+        }
+        existing.embeddedHash = hash;
+        existing.embedModel = model;
+        const dirty = this.dirtyEntries.get(id) ?? {};
+        dirty.embeddedHash = hash;
+        dirty.embedModel = model;
         this.dirtyEntries.set(id, dirty);
     }
 
@@ -386,7 +390,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                          access_count = COALESCE(?, access_count),
                          last_accessed = COALESCE(?, last_accessed),
                          referenced_count = COALESCE(?, referenced_count),
-                         last_referenced = COALESCE(?, last_referenced)
+                         last_referenced = COALESCE(?, last_referenced),
+                         embedded_hash = COALESCE(?, embedded_hash),
+                         embed_model = COALESCE(?, embed_model)
                      WHERE vault_id = ? AND note_path = ?`,
                     [
                         dirty.hash ?? null,
@@ -395,6 +401,8 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                         dirty.lastAccessed ?? null,
                         dirty.referencedCount ?? null,
                         dirty.lastReferenced ?? null,
+                        dirty.embeddedHash ?? null,
+                        dirty.embedModel ?? null,
                         this.cfg.vaultId,
                         id
                     ]
@@ -416,11 +424,11 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     }
 
     private withBacklinks(note: Note): Note {
-        const backlinks = this.backlinks.get(note.id);
-        if (backlinks === undefined || backlinks.size === 0) {
+        const backlinks = this.links.backlinksOf(note.id);
+        if (backlinks.length === 0) {
             return note;
         }
-        return {...note, backlinks: [...backlinks]};
+        return {...note, backlinks};
     }
 
     private indexNote(note: Note): void {
@@ -433,9 +441,6 @@ export class MariaDBNoteAdapter implements NoteAdapter {
                 bucket?.delete(prev.id);
                 if (bucket && bucket.size === 0) this.tagIndex.delete(tag);
             }
-            for (const target of prev.wikilinks) {
-                this.backlinks.get(target)?.delete(prev.id);
-            }
         }
 
         for (const tag of note.tags) {
@@ -447,14 +452,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             bucket.add(note.id);
         }
 
-        for (const target of note.wikilinks) {
-            let bucket = this.backlinks.get(target);
-            if (!bucket) {
-                bucket = new Set();
-                this.backlinks.set(target, bucket);
-            }
-            bucket.add(note.id);
-        }
+        this.links.upsert(note);
     }
 
     private unindexNote(id: NoteId): void {
@@ -466,22 +464,6 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             bucket?.delete(id);
             if (bucket && bucket.size === 0) this.tagIndex.delete(tag);
         }
-        for (const target of note.wikilinks) {
-            this.backlinks.get(target)?.delete(id);
-        }
-    }
-
-    private rebuildBacklinks(): void {
-        this.backlinks.clear();
-        for (const note of this.notes.values()) {
-            for (const target of note.wikilinks) {
-                let bucket = this.backlinks.get(target);
-                if (!bucket) {
-                    bucket = new Set();
-                    this.backlinks.set(target, bucket);
-                }
-                bucket.add(note.id);
-            }
-        }
+        this.links.remove(id);
     }
 }

@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {QdrantClient} from '@qdrant/js-client-rest';
 import {VectorError} from '@synaipse/core';
 import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
+import type {VectorStore} from './VectorStore.js';
 
 export interface QdrantRetryInfo {
     attempt: number;
@@ -132,7 +133,10 @@ const sanitiseText = (text: string): string => {
     return text.replace(LONE_SURROGATE_RE, '�').replaceAll('\0', '');
 };
 
-export class QdrantStore {
+/** Notes per stale-chunk delete request (one nested filter each). */
+const STALE_DELETE_GROUP = 256;
+
+export class QdrantStore implements VectorStore {
     private readonly client: QdrantClient;
     private readonly retry: ResolvedRetry;
     private ready = false;
@@ -186,9 +190,33 @@ export class QdrantStore {
                 field_name: 'noteId',
                 field_schema: 'keyword'
             }));
+        } else {
+            await this.assertDimension();
         }
 
         this.ready = true;
+    }
+
+    /**
+     * Refuse to work against a collection built for a different embedder
+     * dimension. Without this check a model switch either fails on every
+     * upsert with an opaque 400 or — same dimension, different model —
+     * silently mixes two vector spaces.
+     */
+    private async assertDimension(): Promise<void> {
+        const info = await this.withRetry(() => this.client.getCollection(this.options.collection));
+        const vectors = (info.config?.params as {vectors?: unknown} | undefined)?.vectors;
+        const size = typeof vectors === 'object' && vectors !== null && typeof (vectors as {size?: unknown}).size === 'number'
+            ? (vectors as {size: number}).size
+            : null;
+
+        if (size !== null && size !== this.options.dimension) {
+            throw new VectorError(
+                `Qdrant collection "${this.options.collection}" has vector size ${size}, ` +
+                `but the configured embedder produces ${this.options.dimension}. ` +
+                `Use a different QDRANT_COLLECTION for this model (or delete the collection to rebuild it).`
+            );
+        }
     }
 
     public async upsert(chunks: Chunk[], vectors: number[][]): Promise<void> {
@@ -235,6 +263,30 @@ export class QdrantStore {
                 must: [{key: 'noteId', match: {any: noteIds}}]
             }
         }));
+    }
+
+    public async deleteStaleChunks(keep: ReadonlyMap<NoteId, number>): Promise<void> {
+        if (keep.size === 0) {
+            return;
+        }
+
+        await this.ensureCollection();
+        const entries = [...keep.entries()];
+
+        for (let i = 0; i < entries.length; i += STALE_DELETE_GROUP) {
+            const group = entries.slice(i, i + STALE_DELETE_GROUP);
+            await this.withRetry(() => this.client.delete(this.options.collection, {
+                wait: true,
+                filter: {
+                    should: group.map(([noteId, count]) => ({
+                        must: [
+                            {key: 'noteId', match: {value: noteId}},
+                            ...(count > 0 ? [{key: 'index', range: {gte: count}}] : [])
+                        ]
+                    }))
+                }
+            }));
+        }
     }
 
     public async search(vector: number[], limit: number): Promise<SearchHit[]> {

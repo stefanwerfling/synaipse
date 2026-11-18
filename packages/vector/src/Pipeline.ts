@@ -1,12 +1,12 @@
 import type {Note, NoteId, SearchHit} from '@synaipse/core';
 import type {Embedder} from './Embedder.js';
-import {QdrantStore} from './Qdrant.js';
+import type {VectorStore} from './VectorStore.js';
 import {chunkNote, CHUNK_DEFAULTS, ChunkOptions} from './Chunker.js';
 import type {Chunk} from '@synaipse/core';
 
 export interface VectorIndexOptions {
     embedder: Embedder;
-    store: QdrantStore;
+    store: VectorStore;
     chunkOptions?: ChunkOptions;
     batchSize?: number;
     maxBatchChars?: number;
@@ -61,7 +61,7 @@ export const partitionChunks = (
 
 export class VectorIndex {
     private readonly embedder: Embedder;
-    private readonly store: QdrantStore;
+    private readonly store: VectorStore;
     private readonly chunkOptions: ChunkOptions;
     private readonly batchSize: number;
     private readonly maxBatchChars: number;
@@ -87,11 +87,23 @@ export class VectorIndex {
             return {notes: 0, chunks: 0, batches: 0};
         }
 
-        await this.store.deleteByNotes(notes.map((n) => n.id));
+        // Upsert-then-trim instead of delete-then-upsert: point ids are
+        // derived from `noteId::index`, so upserting overwrites existing
+        // chunks in place and only the tail of a note that got shorter
+        // has to go. If embedding fails half-way the note keeps its old
+        // vectors instead of ending up with none (the caller does not
+        // mark it embedded, so it is retried later).
+        const keep = new Map<NoteId, number>();
+        const allChunks: Chunk[] = [];
 
-        const allChunks = notes.flatMap((n) => chunkNote(n, this.chunkOptions));
+        for (const n of notes) {
+            const chunks = chunkNote(n, this.chunkOptions);
+            keep.set(n.id, chunks.length);
+            allChunks.push(...chunks);
+        }
 
         if (allChunks.length === 0) {
+            await this.store.deleteStaleChunks(keep);
             return {notes: notes.length, chunks: 0, batches: 0};
         }
 
@@ -117,6 +129,8 @@ export class VectorIndex {
                 chars: slice.reduce((sum, c) => sum + c.text.length, 0)
             });
         }
+
+        await this.store.deleteStaleChunks(keep);
 
         return {notes: notes.length, chunks: allChunks.length, batches: partitions.length};
     }
