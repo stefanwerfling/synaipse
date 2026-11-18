@@ -21,6 +21,7 @@ export const buildInstructions = (project: string | null): string => {
         '3. Pick the lightest write: synaipse_remember for a one-line insight, synaipse_log_session for what you did and which notes you used, synaipse_write_note only for a curated note worth finding again (decision, how-to, architecture).',
         '4. Change existing notes with synaipse_edit_note (find/replace) or synaipse_update_note — never resend an unchanged note.',
         '5. Link instead of copying: [[Note Title]] wikilinks in the body; synaipse_link_note adds references to an existing note.',
+        '6. When a note replaces an older one, set frontmatter supersedes: ["Old title"]. Hits marked supersededBy or expired are outdated: answer from the successor.',
         '',
         'Note ids are vault-relative paths like "Memory/<project>/topic.md". Results are compact JSON.'
     ].join('\n');
