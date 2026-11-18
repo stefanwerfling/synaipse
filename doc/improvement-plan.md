@@ -202,12 +202,13 @@ Offen bzw. Folgearbeit:
 - Subpath-Exports in jsNGraph, damit der Lazy-Chunk nicht den Rect-Kit und ModelView mitschleppt.
 - Tag `v0.2.0` pushen.
 
-### Status P6 (2026-11-18): begonnen (J4/J5/J6/J8 + S2)
+### Status P6 (2026-11-18): umgesetzt (J4/J5/J6/J8 + S2 + S3)
 
 Im jsNGraph-Repo (`1f8a191`, `07715fb`, gepusht):
 
 - J5 nur als `layoutMode: 'static'` (vorberechnete Server-Positionen). Barnes-Hut und Worker bewusst nicht gebaut (Nutzer-Entscheidung).
-- J4 Label-Kollision und Kanten-Batching. Pfeilspitzen werden in 64er-Chunks gefüllt, unter 2 px weggelassen (ein `fill()` über 5000 Teilpfade kostete in Chrome ≈ 250 ms). LOD-Aggregation folgt mit S3.
+- J4 Label-Kollision und Kanten-Batching. Pfeilspitzen werden in 64er-Chunks gefüllt, unter 2 px weggelassen (ein `fill()` über 5000 Teilpfade kostete in Chrome ≈ 250 ms).
+- J4 LOD und Aggregation (`25d3dbe`, nur lokal, Nutzer pusht): `setClusters`/`clusterAt`/`focusCluster`/`isClustered` und Event `clusterClick`. Unter `clusterZoom` zeichnet jsNGraph Cluster-Scheiben (Größe nach Mitgliederzahl, begrenzt durch die Ausdehnung des Clusters) mit gewichteten Sammelkanten; Labels nur, wo sie keine Scheibe verdecken. Dazu `edgeMinZoom`, Viewport-Culling per Quadtree ab 2000 Knoten, Punkte unter 2 px als gebündelte Quadrate, `repaint()`. Beispiel `examples/atlas.html`. Gemessen mit 100 000 Notizen in der Übersicht: vorher ≈ 500 ms pro Frame, mit Clustern ≈ 3 ms, ohne Cluster ≈ 60 ms. `vault.html` mit 3000 und 6000 Notizen ist gleich schnell oder schneller.
 - J6 `setHulls`/`hullsAt` (Cluster-Hüllen), `NodeStyle.ring`.
 - J8 `addOverlay` plus Effekte `pulse`/`trail`/`ripple`; Beispiel `examples/vault.html`.
 
@@ -221,9 +222,20 @@ S2 in Synaipse (`0c3acd0`):
 - Browser: 3120 Notizen ≈ 15 ms pro Frame.
 - 1212 Tests grün, Bundle-Budget ok.
 
+S3 in Synaipse (`9ead549`):
+
+- `GraphAtlas.ts` ist ein Adapter: Server-Layout → NGraph über `buildAtlas` (rein, getestet). Communities sind Cluster (Klick zoomt hinein), Notizen ab Zoom 0,5, Kanten ab 1, Labels ab 1,5. `Quadtree.ts` und der handgeschriebene Canvas-Renderer sind weg.
+- Neu im Atlas: Heat-Ringe, Effekte (pulse/trail/ripple), Tag-Filter per jsNGraph-Filter. Live-Updates behalten die Kamera; vorher wurde bei jeder Datenänderung neu eingepasst.
+- Fix: Bei Datenänderungen lädt der Atlas das Layout mit `force`. Der Client-Cache kannte nur Writes aus der eigenen UI, MCP-Writes blieben bis zu 60 s unsichtbar.
+- Browser mit einer 25k-Smoke-Vault: Frames ≤ 11 ms auf jeder Zoomstufe (Cluster 4–11 ms, Notizen ≤ 4 ms). Neue Notiz per Write nach ≈ 2,4 s sichtbar.
+
+Louvain-Fix (`2617b15`), beim Smoke-Test gefunden: Die Community-Erkennung verglich Wechsel gegen 0 statt gegen das Bleiben in der eigenen Community. Die Modularität wurde auf dem kollabierten Graphen berechnet, und Self-Loops wurden halbiert. Ergebnis in der 25k-Vault vorher: eine Community mit 23 389 Notizen, Modularität −0,50. Nachher: 1563 Communities, die größte mit 563 Notizen, Modularität 0,87. Der Algorithmus liegt jetzt einmal in `@synaipse/core/louvain`, statt in zwei identischen Kopien. Der Layout-Hash (= ETag) enthält `LAYOUT_ALGORITHM_VERSION`; sonst hätten Browser per 304 das alte Layout behalten.
+
 Offen bzw. Folgearbeit:
 
-- S3: Atlas auf jsNGraph (LOD, Aggregation).
+- jsNGraph `25d3dbe` pushen, danach `npm install --allow-git=all`. Erst dann steht `package-lock.json` auf dem neuen Stand; bis dahin bricht `tsc` in CI am Atlas.
+- Die Schwellen 5k/20k sind weiter ein Wechsel der Ansicht, keine reine LOD-Frage. Die 2D-Ansicht platziert Notizen auf dem Client und hat keine Übersicht. Nächster Schritt wäre, dass 2D ab einigen Tausend Notizen Server-Positionen und Cluster nutzt; dann könnten 2D und Atlas zusammenfallen.
+- Server-Layout: Die Kachel-Packung erzeugt sehr breite erste Reihen, und Notizen ohne Links werden als einzelne Ein-Knoten-Kacheln gelegt (in der 25k-Vault 1368 Stück).
 - Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
 - Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
 

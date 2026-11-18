@@ -34,11 +34,11 @@ const EMPTY_TAG_SET: ReadonlySet<string> = new Set();
 const HEAT_TICK_MS = 15_000;
 
 // Node-count thresholds that gate which renderer the UI is allowed to
-// choose. Cytoscape (2D) and three.js (3D) run frame-by-frame simulations
-// and OOM the browser tab well before we hit the Atlas's static-canvas
-// upper bound. Force-atlas kicks in at 20k because that's where both fall
-// over in practice; the softer warning at 5k gives users a heads-up that
-// they're in expensive territory but doesn't take the choice away.
+// choose. The 2D view places notes on the client and has no zoomed-out
+// overview; the 3D view (three.js) simulates every frame. The Atlas uses
+// the server layout and jsNGraph's cluster LOD, so from 20k it is forced;
+// the softer warning at 5k gives users a heads-up that they're in
+// expensive territory but doesn't take the choice away.
 const HUGE_GRAPH_FORCE_ATLAS = 20_000;
 const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
 
@@ -848,7 +848,7 @@ export class App {
     /**
      * Effective render mode = user preference clamped to what the current
      * graph size can actually support. Anything past 20k nodes is forced
-     * to Atlas because Cytoscape/three.js hit the wall well before that.
+     * to Atlas (server layout + cluster overview), see the thresholds above.
      */
     private effectiveViewMode(): '2d' | '3d' | 'atlas' {
         const requested = this.viewMode.get();
