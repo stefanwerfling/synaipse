@@ -175,7 +175,8 @@ describe('over Streamable HTTP', () => {
 
         const remote = new Client({name: 'http-test', version: '0.0.0'});
         try {
-            await remote.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/demo`)));
+            // The SDK transport type trips exactOptionalPropertyTypes (sessionId?: string).
+            await remote.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp/demo`)) as Parameters<Client["connect"]>[0]);
             const {resources} = await remote.listResources();
             expect(resources[0]?.uri).toBe('synaipse://project/demo/primer');
             const note = await remote.readResource({uri: noteUri('Memory/demo/decisions/cache.md')});
