@@ -1,5 +1,6 @@
 import './Styles.css';
 import {App} from './App.js';
+import {setApiBase} from './ApiBase.js';
 import {initTheme} from './Theme.js';
 
 /**
@@ -11,17 +12,17 @@ import {initTheme} from './Theme.js';
  * a namespaced API base — without `Main.ts`'s auth gate or its
  * module-level bootstrap side effects.
  *
- * API base handling (routing `/api/...` to `/mod/synaipse/api/...`) is
- * owned by the host shell's single request rewrite — a module must not
- * patch `window.fetch` itself, or two mounted modules would fight over
- * it. `apiBase` is accepted for interface symmetry but not needed here.
+ * `apiBase` (e.g. "/synaipse") prefixes every API URL via apiUrl(),
+ * so the host needs no `window.fetch` rewrite; a host that still has one
+ * leaves the already-prefixed URLs alone.
  */
 export interface SynaipseMountOptions {
-    /** Namespaced base (e.g. "/mod/synaipse"); applied by the host shell. */
+    /** Namespaced base (e.g. "/synaipse"), prefixed to every API URL. */
     apiBase?: string;
 }
 
-export async function mount(container: HTMLElement, _opts: SynaipseMountOptions = {}): Promise<void> {
+export async function mount(container: HTMLElement, opts: SynaipseMountOptions = {}): Promise<void> {
+    setApiBase(opts.apiBase);
     initTheme();
     container.classList.add('synaipse-root');
 

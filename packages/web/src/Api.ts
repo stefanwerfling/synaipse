@@ -1,3 +1,4 @@
+import {apiUrl} from './ApiBase.js';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Frontmatter, Graph, Note, Roadmap, RoadmapSummary, SearchHit, SearchMode} from '@synaipse/core';
 
 const json = async <T>(response: Response): Promise<T> => {
@@ -68,19 +69,19 @@ export interface CanvasSummary {
 
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
-        return json(await fetch('/api/notes'));
+        return json(await fetch(apiUrl('/api/notes')));
     },
     listCanvases: async (): Promise<CanvasSummary[]> => {
-        const {canvases} = await json<{canvases: CanvasSummary[]}>(await fetch('/api/canvases'));
+        const {canvases} = await json<{canvases: CanvasSummary[]}>(await fetch(apiUrl('/api/canvases')));
         return canvases;
     },
     getCanvas: async (id: string): Promise<CanvasDocument> => {
-        const url = new URL('/api/canvas', window.location.origin);
+        const url = new URL(apiUrl('/api/canvas'), window.location.origin);
         url.searchParams.set('path', id);
         return json(await fetch(url));
     },
     putCanvas: async (id: string, doc: CanvasDocument): Promise<void> => {
-        const url = new URL('/api/canvas', window.location.origin);
+        const url = new URL(apiUrl('/api/canvas'), window.location.origin);
         url.searchParams.set('path', id);
         const response = await fetch(url, {
             method: 'PUT',
@@ -90,21 +91,21 @@ export const api = {
         await noContent(response);
     },
     deleteCanvas: async (id: string): Promise<void> => {
-        const url = new URL('/api/canvas', window.location.origin);
+        const url = new URL(apiUrl('/api/canvas'), window.location.origin);
         url.searchParams.set('path', id);
         await noContent(await fetch(url, {method: 'DELETE'}));
     },
     listRoadmaps: async (): Promise<RoadmapSummary[]> => {
-        const {roadmaps} = await json<{roadmaps: RoadmapSummary[]}>(await fetch('/api/roadmaps'));
+        const {roadmaps} = await json<{roadmaps: RoadmapSummary[]}>(await fetch(apiUrl('/api/roadmaps')));
         return roadmaps;
     },
     getRoadmap: async (project: string): Promise<Roadmap> => {
-        const url = new URL('/api/roadmap', window.location.origin);
+        const url = new URL(apiUrl('/api/roadmap'), window.location.origin);
         url.searchParams.set('project', project);
         return json(await fetch(url));
     },
     putRoadmap: async (project: string, roadmap: Roadmap): Promise<Roadmap> => {
-        const url = new URL('/api/roadmap', window.location.origin);
+        const url = new URL(apiUrl('/api/roadmap'), window.location.origin);
         url.searchParams.set('project', project);
         const response = await fetch(url, {
             method: 'PUT',
@@ -114,16 +115,16 @@ export const api = {
         return json(response);
     },
     listBenchmarks: async (): Promise<BenchmarkSummary[]> => {
-        const {benchmarks} = await json<{benchmarks: BenchmarkSummary[]}>(await fetch('/api/benchmarks'));
+        const {benchmarks} = await json<{benchmarks: BenchmarkSummary[]}>(await fetch(apiUrl('/api/benchmarks')));
         return benchmarks;
     },
     getBenchmark: async (project: string): Promise<BenchmarkSet> => {
-        const url = new URL('/api/benchmark', window.location.origin);
+        const url = new URL(apiUrl('/api/benchmark'), window.location.origin);
         url.searchParams.set('project', project);
         return json(await fetch(url));
     },
     putBenchmark: async (project: string, set: BenchmarkSet): Promise<BenchmarkSet> => {
-        const url = new URL('/api/benchmark', window.location.origin);
+        const url = new URL(apiUrl('/api/benchmark'), window.location.origin);
         url.searchParams.set('project', project);
         const response = await fetch(url, {
             method: 'PUT',
@@ -133,10 +134,10 @@ export const api = {
         return json(response);
     },
     getNote: async (id: string): Promise<Note> => {
-        return json(await fetch(`/api/notes/${encodeURIComponent(id)}`));
+        return json(await fetch(apiUrl(`/api/notes/${encodeURIComponent(id)}`)));
     },
     writeNote: async (input: WriteNoteInput): Promise<Note> => {
-        const response = await fetch(`/api/notes/${encodeURIComponent(input.path)}`, {
+        const response = await fetch(apiUrl(`/api/notes/${encodeURIComponent(input.path)}`), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(input)
@@ -145,18 +146,18 @@ export const api = {
         return json(response);
     },
     deleteNote: async (id: string): Promise<void> => {
-        await noContent(await fetch(`/api/notes/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+        await noContent(await fetch(apiUrl(`/api/notes/${encodeURIComponent(id)}`), {method: 'DELETE'}));
         invalidateLayoutCache();
     },
     search: async (query: string, mode: SearchMode = 'hybrid', limit = 20): Promise<SearchHit[]> => {
-        const url = new URL('/api/search', window.location.origin);
+        const url = new URL(apiUrl('/api/search'), window.location.origin);
         url.searchParams.set('q', query);
         url.searchParams.set('mode', mode);
         url.searchParams.set('limit', String(limit));
         return json(await fetch(url));
     },
     getGraph: async (): Promise<Graph> => {
-        return json(await fetch('/api/graph'));
+        return json(await fetch(apiUrl('/api/graph')));
     },
     getGraphLayout: async (options: {force?: boolean} = {}): Promise<GraphLayout> => {
         const now = Date.now();
@@ -173,7 +174,7 @@ export const api = {
 
         layoutInflight = (async () => {
             try {
-                const value = await json<GraphLayout>(await fetch('/api/graph/layout'));
+                const value = await json<GraphLayout>(await fetch(apiUrl('/api/graph/layout')));
                 layoutCache = {value, ts: Date.now()};
                 return value;
             } finally {
@@ -196,7 +197,7 @@ export const api = {
         researchEnabled: boolean;
         researchProvider: 'tavily' | 'searxng' | null;
     }> => {
-        return json(await fetch('/api/info'));
+        return json(await fetch(apiUrl('/api/info')));
     },
     chatPreview: async (payload: {question: string; pathPrefix?: string}): Promise<{
         providerIsLocal: boolean | null;
@@ -204,7 +205,7 @@ export const api = {
         redactions: Array<{kind: string; count: number}>;
         sources: Array<{index: number; noteId: string; title: string; score: number; snippet?: string}>;
     }> => {
-        return json(await fetch('/api/chat/preview', {
+        return json(await fetch(apiUrl('/api/chat/preview'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
@@ -214,7 +215,7 @@ export const api = {
         entries: AuditEntry[];
         total: number;
     }> => {
-        const url = new URL('/api/audit', window.location.origin);
+        const url = new URL(apiUrl('/api/audit'), window.location.origin);
         if (opts.limit !== undefined) url.searchParams.set('limit', String(opts.limit));
         if (opts.afterTs !== undefined) url.searchParams.set('afterTs', String(opts.afterTs));
         if (opts.provider !== undefined) url.searchParams.set('provider', opts.provider);
@@ -223,15 +224,15 @@ export const api = {
         return json(await fetch(url));
     },
     noteHistory: async (id: string, limit = 50): Promise<{entries: HistoryEntry[]}> => {
-        const url = new URL(`/api/notes/${encodeURIComponent(id)}/history`, window.location.origin);
+        const url = new URL(apiUrl(`/api/notes/${encodeURIComponent(id)}/history`), window.location.origin);
         url.searchParams.set('limit', String(limit));
         return json(await fetch(url));
     },
     noteVersion: async (id: string, sha: string): Promise<{content: string; sha: string}> => {
-        return json(await fetch(`/api/notes/${encodeURIComponent(id)}/version/${encodeURIComponent(sha)}`));
+        return json(await fetch(apiUrl(`/api/notes/${encodeURIComponent(id)}/version/${encodeURIComponent(sha)}`)));
     },
     noteDiff: async (id: string, from: string, to?: string): Promise<{unified: string}> => {
-        const url = new URL(`/api/notes/${encodeURIComponent(id)}/diff`, window.location.origin);
+        const url = new URL(apiUrl(`/api/notes/${encodeURIComponent(id)}/diff`), window.location.origin);
         url.searchParams.set('from', from);
 
         if (to !== undefined) {
@@ -241,10 +242,10 @@ export const api = {
         return json(await fetch(url));
     },
     verifyHistory: async (): Promise<VerifyResult> => {
-        return json(await fetch('/api/health/verify'));
+        return json(await fetch(apiUrl('/api/health/verify')));
     },
     snapshotList: async (sha: string, treePath?: string): Promise<{sha: string; path: string; entries: SnapshotEntry[]}> => {
-        const url = new URL(`/api/snapshot/${encodeURIComponent(sha)}`, window.location.origin);
+        const url = new URL(apiUrl(`/api/snapshot/${encodeURIComponent(sha)}`), window.location.origin);
 
         if (treePath !== undefined) {
             url.searchParams.set('path', treePath);
@@ -253,13 +254,13 @@ export const api = {
         return json(await fetch(url));
     },
     listChats: async (): Promise<ChatSummary[]> => {
-        return json(await fetch('/api/chats'));
+        return json(await fetch(apiUrl('/api/chats')));
     },
     getChat: async (id: string): Promise<ChatSession> => {
-        return json(await fetch(`/api/chats/${encodeURIComponent(id)}`));
+        return json(await fetch(apiUrl(`/api/chats/${encodeURIComponent(id)}`)));
     },
     createChat: async (input: ChatSessionInput): Promise<ChatSession> => {
-        const response = await fetch('/api/chats', {
+        const response = await fetch(apiUrl('/api/chats'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(input)
@@ -267,7 +268,7 @@ export const api = {
         return json(response);
     },
     updateChat: async (id: string, input: ChatSessionInput): Promise<ChatSession> => {
-        const response = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+        const response = await fetch(apiUrl(`/api/chats/${encodeURIComponent(id)}`), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(input)
@@ -275,16 +276,16 @@ export const api = {
         return json(response);
     },
     deleteChat: async (id: string): Promise<void> => {
-        await noContent(await fetch(`/api/chats/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+        await noContent(await fetch(apiUrl(`/api/chats/${encodeURIComponent(id)}`), {method: 'DELETE'}));
     },
     saveChatAsNote: async (id: string): Promise<{noteId: string}> => {
-        const response = await fetch(`/api/chats/${encodeURIComponent(id)}/save-as-note`, {
+        const response = await fetch(apiUrl(`/api/chats/${encodeURIComponent(id)}/save-as-note`), {
             method: 'POST'
         });
         return json(response);
     },
     uploadAsset: async (noteId: string, file: File): Promise<AssetUploadResult> => {
-        const response = await fetch('/api/assets/upload', {
+        const response = await fetch(apiUrl('/api/assets/upload'), {
             method: 'POST',
             headers: {
                 'Content-Type': file.type !== '' ? file.type : 'application/octet-stream',
@@ -298,7 +299,7 @@ export const api = {
         id: string,
         opts: {save?: boolean; signal?: AbortSignal} = {}
     ): AsyncGenerator<SummarizeEvent, void, void> {
-        const response = await fetch(`/api/notes/${encodeURIComponent(id)}/summarize`, {
+        const response = await fetch(apiUrl(`/api/notes/${encodeURIComponent(id)}/summarize`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({save: opts.save === true}),
@@ -465,7 +466,7 @@ export interface ActivityReport {
 
 export const activityApi = {
     get: async (days = 7, limit = 1000): Promise<ActivityReport> => {
-        const url = new URL('/api/activity', window.location.origin);
+        const url = new URL(apiUrl('/api/activity'), window.location.origin);
         url.searchParams.set('days', String(days));
         url.searchParams.set('limit', String(limit));
         return json(await fetch(url));
@@ -563,10 +564,10 @@ export type JobEvent =
     | {kind: 'stopped'};
 
 export const jobsApi = {
-    list: async (): Promise<JobRecord[]> => json(await fetch('/api/jobs')),
-    get: async (id: string): Promise<JobRecord> => json(await fetch(`/api/jobs/${encodeURIComponent(id)}`)),
+    list: async (): Promise<JobRecord[]> => json(await fetch(apiUrl('/api/jobs'))),
+    get: async (id: string): Promise<JobRecord> => json(await fetch(apiUrl(`/api/jobs/${encodeURIComponent(id)}`))),
     start: async (type: JobType, params: JobParams): Promise<JobRecord> => {
-        const response = await fetch('/api/jobs', {
+        const response = await fetch(apiUrl('/api/jobs'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({type, params})
@@ -574,10 +575,10 @@ export const jobsApi = {
         return json(response);
     },
     stop: async (id: string): Promise<void> => {
-        await fetch(`/api/jobs/${encodeURIComponent(id)}/stop`, {method: 'POST'});
+        await fetch(apiUrl(`/api/jobs/${encodeURIComponent(id)}/stop`), {method: 'POST'});
     },
     stream: (id: string, onEvent: (event: JobEvent) => void, onError?: (e: Event) => void): () => void => {
-        const es = new EventSource(`/api/jobs/${encodeURIComponent(id)}/stream`);
+        const es = new EventSource(apiUrl(`/api/jobs/${encodeURIComponent(id)}/stream`));
         es.onmessage = (evt) => {
             try {
                 onEvent(JSON.parse(evt.data) as JobEvent);
@@ -592,12 +593,12 @@ export const jobsApi = {
 
 export const importApi = {
     listExisting: async (): Promise<Record<string, string>> => {
-        return json(await fetch('/api/import/chatgpt/existing'));
+        return json(await fetch(apiUrl('/api/import/chatgpt/existing')));
     },
     importConversation: async (
         conversation: ChatgptImportConversation
     ): Promise<{noteId: string; isUpdate: boolean}> => {
-        const response = await fetch('/api/import/chatgpt', {
+        const response = await fetch(apiUrl('/api/import/chatgpt'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({conversation})
@@ -670,11 +671,11 @@ export interface SchedulePatchInput {
 
 export const schedulesApi = {
     list: async (): Promise<Schedule[]> => {
-        const {schedules} = await json<{schedules: Schedule[]}>(await fetch('/api/schedules'));
+        const {schedules} = await json<{schedules: Schedule[]}>(await fetch(apiUrl('/api/schedules')));
         return schedules;
     },
     create: async (input: ScheduleCreateInput): Promise<Schedule> => {
-        const response = await fetch('/api/schedules', {
+        const response = await fetch(apiUrl('/api/schedules'), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(input)
@@ -683,7 +684,7 @@ export const schedulesApi = {
         return schedule;
     },
     update: async (id: string, patch: SchedulePatchInput): Promise<Schedule> => {
-        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+        const response = await fetch(apiUrl(`/api/schedules/${encodeURIComponent(id)}`), {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(patch)
@@ -692,10 +693,10 @@ export const schedulesApi = {
         return schedule;
     },
     delete: async (id: string): Promise<void> => {
-        await noContent(await fetch(`/api/schedules/${encodeURIComponent(id)}`, {method: 'DELETE'}));
+        await noContent(await fetch(apiUrl(`/api/schedules/${encodeURIComponent(id)}`), {method: 'DELETE'}));
     },
     runNow: async (id: string): Promise<Schedule> => {
-        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}/run-now`, {method: 'POST'});
+        const response = await fetch(apiUrl(`/api/schedules/${encodeURIComponent(id)}/run-now`), {method: 'POST'});
         const {schedule} = await json<{schedule: Schedule}>(response);
         return schedule;
     }
@@ -704,17 +705,17 @@ export const schedulesApi = {
 export const consentApi = {
     listPending: async (): Promise<ConsentRequestSummary[]> => {
         const {requests} = await json<{requests: ConsentRequestSummary[]}>(
-            await fetch('/api/consent/pending')
+            await fetch(apiUrl('/api/consent/pending'))
         );
         return requests;
     },
     approve: async (id: string): Promise<ConsentRequestSummary> => {
-        const response = await fetch(`/api/consent/${encodeURIComponent(id)}/approve`, {method: 'POST'});
+        const response = await fetch(apiUrl(`/api/consent/${encodeURIComponent(id)}/approve`), {method: 'POST'});
         const {request} = await json<{request: ConsentRequestSummary}>(response);
         return request;
     },
     deny: async (id: string): Promise<ConsentRequestSummary> => {
-        const response = await fetch(`/api/consent/${encodeURIComponent(id)}/deny`, {method: 'POST'});
+        const response = await fetch(apiUrl(`/api/consent/${encodeURIComponent(id)}/deny`), {method: 'POST'});
         const {request} = await json<{request: ConsentRequestSummary}>(response);
         return request;
     },
@@ -725,7 +726,7 @@ export const consentApi = {
         onNew: (req: ConsentRequestSummary) => void,
         onResolved: (req: ConsentRequestSummary) => void
     ): () => void => {
-        const es = new EventSource('/api/consent/stream');
+        const es = new EventSource(apiUrl('/api/consent/stream'));
         const parse = (evt: MessageEvent): ConsentRequestSummary | null => {
             try {
                 return JSON.parse(evt.data as string) as ConsentRequestSummary;

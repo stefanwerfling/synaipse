@@ -3,6 +3,8 @@
  * server-mode and stubbed to "always-authenticated" in local-mode so the
  * rest of the app can stay mode-agnostic.
  */
+
+import {apiUrl} from './ApiBase.js';
 export interface AccountDto {
     id: number;
     email: string;
@@ -17,7 +19,7 @@ export type AuthMode =
     | {mode: 'server'; authenticated: true; account: AccountDto};
 
 export const fetchAuthMode = async (): Promise<AuthMode> => {
-    const res = await fetch('/api/auth/mode', {credentials: 'same-origin'});
+    const res = await fetch(apiUrl('/api/auth/mode'), {credentials: 'same-origin'});
     if (!res.ok) {
         throw new Error(`/api/auth/mode failed: ${res.status}`);
     }
@@ -36,7 +38,7 @@ export interface LoginError {
 }
 
 export const login = async (email: string, password: string): Promise<LoginResult | LoginError> => {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
@@ -58,7 +60,7 @@ export const login = async (email: string, password: string): Promise<LoginResul
 };
 
 export const logout = async (): Promise<void> => {
-    await fetch('/api/auth/logout', {
+    await fetch(apiUrl('/api/auth/logout'), {
         method: 'POST',
         credentials: 'same-origin'
     });
@@ -99,7 +101,7 @@ const tokensError = async (res: Response, fallback: string): Promise<Error> => {
 };
 
 export const listTokens = async (): Promise<TokenDto[]> => {
-    const res = await fetch('/api/tokens', {credentials: 'same-origin'});
+    const res = await fetch(apiUrl('/api/tokens'), {credentials: 'same-origin'});
     if (!res.ok) throw await tokensError(res, 'listTokens failed');
     const body = await res.json() as {tokens: TokenDto[]};
     return body.tokens;
@@ -115,7 +117,7 @@ export const createToken = async (input: CreateTokenInput): Promise<CreateTokenR
         payload.expiresInDays = input.expiresInDays;
     }
 
-    const res = await fetch('/api/tokens', {
+    const res = await fetch(apiUrl('/api/tokens'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
@@ -126,7 +128,7 @@ export const createToken = async (input: CreateTokenInput): Promise<CreateTokenR
 };
 
 export const revokeToken = async (id: number): Promise<void> => {
-    const res = await fetch(`/api/tokens/${id}`, {
+    const res = await fetch(apiUrl(`/api/tokens/${id}`), {
         method: 'DELETE',
         credentials: 'same-origin'
     });
@@ -139,7 +141,7 @@ export const rotateToken = async (id: number, expiresInDays?: number | null): Pr
         payload.expiresInDays = expiresInDays;
     }
 
-    const res = await fetch(`/api/tokens/${id}/rotate`, {
+    const res = await fetch(apiUrl(`/api/tokens/${id}/rotate`), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
@@ -171,14 +173,14 @@ export interface PatchUserInput {
 }
 
 export const listUsers = async (): Promise<AdminAccountDto[]> => {
-    const res = await fetch('/api/admin/users', {credentials: 'same-origin'});
+    const res = await fetch(apiUrl('/api/admin/users'), {credentials: 'same-origin'});
     if (!res.ok) throw await tokensError(res, 'listUsers failed');
     const body = await res.json() as {accounts: AdminAccountDto[]};
     return body.accounts;
 };
 
 export const createUser = async (input: CreateUserInput): Promise<AdminAccountDto> => {
-    const res = await fetch('/api/admin/users', {
+    const res = await fetch(apiUrl('/api/admin/users'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
@@ -190,7 +192,7 @@ export const createUser = async (input: CreateUserInput): Promise<AdminAccountDt
 };
 
 export const patchUser = async (id: number, patch: PatchUserInput): Promise<AdminAccountDto> => {
-    const res = await fetch(`/api/admin/users/${id}`, {
+    const res = await fetch(apiUrl(`/api/admin/users/${id}`), {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',

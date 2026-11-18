@@ -9,6 +9,8 @@
  * to land on the canonical vault-relative asset id, then encode it as
  * the `path` query param.
  */
+
+import {apiUrl} from './ApiBase.js';
 const ASSET_EXTENSIONS: ReadonlySet<string> = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg'
 ]);
@@ -63,5 +65,5 @@ export const resolveAssetUrl = (src: string, noteId: string | undefined): string
 
     if (resolvedPath.length === 0) return null;
 
-    return `/api/asset?path=${encodeURIComponent(resolvedPath)}${suffix}`;
+    return apiUrl(`/api/asset?path=${encodeURIComponent(resolvedPath)}${suffix}`);
 };

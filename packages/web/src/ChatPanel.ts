@@ -1,3 +1,4 @@
+import {apiUrl} from './ApiBase.js';
 import {api, type ChatSession, type ChatTurnDto, type ChatSourceRef} from './Api.js';
 import {ChatSidebar} from './ChatSidebar.js';
 import {clear, el} from './Dom.js';
@@ -782,7 +783,7 @@ export class ChatPanel {
         this.currentAbort = new AbortController();
 
         try {
-            const endpoint = opts.research === true ? '/api/research' : '/api/chat';
+            const endpoint = opts.research === true ? apiUrl('/api/research') : apiUrl('/api/chat');
             const payload = opts.research === true
                 ? {question}
                 : {question, history};

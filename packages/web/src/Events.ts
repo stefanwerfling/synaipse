@@ -1,3 +1,4 @@
+import {apiUrl} from './ApiBase.js';
 export type EventKind = 'read' | 'write' | 'delete' | 'search' | 'list' | 'graph' | 'tags';
 
 export interface SynaipseEvent {
@@ -14,7 +15,7 @@ export class EventStream {
     private source: EventSource | null = null;
     private readonly listeners = new Set<EventListener>();
 
-    public start(url = '/api/events/stream'): void {
+    public start(url = apiUrl('/api/events/stream')): void {
         if (this.source !== null) {
             return;
         }
