@@ -1431,7 +1431,7 @@ export const routes = (
             return;
         }
 
-        await jsonLarge(req, res, 200, service.graphLayout());
+        await jsonLarge(req, res, 200, await service.graphLayout());
         return;
     }
 

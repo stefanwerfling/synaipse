@@ -63,7 +63,7 @@ export interface AuditEntry {
 // naturally; writeNote/deleteNote also invalidate explicitly.
 const LAYOUT_CACHE_TTL_MS = 60_000;
 let layoutCache: {value: GraphLayout; ts: number} | null = null;
-let layoutInflight: Promise<GraphLayout> | null = null;
+let layoutInflight: Promise<GraphLayout & {stale?: boolean}> | null = null;
 
 const invalidateLayoutCache = (): void => {
     layoutCache = null;
@@ -174,7 +174,7 @@ export const api = {
         url.searchParams.set('limit', String(limit));
         return json(await fetch(url));
     },
-    getGraphLayout: async (options: {force?: boolean} = {}): Promise<GraphLayout> => {
+    getGraphLayout: async (options: {force?: boolean} = {}): Promise<GraphLayout & {stale?: boolean}> => {
         const now = Date.now();
 
         if (!options.force && layoutCache !== null && now - layoutCache.ts < LAYOUT_CACHE_TTL_MS) {
@@ -189,8 +189,10 @@ export const api = {
 
         layoutInflight = (async () => {
             try {
-                const value = await json<GraphLayout>(await fetch(apiUrl('/api/graph/layout')));
-                layoutCache = {value, ts: Date.now()};
+                const value = await json<GraphLayout & {stale?: boolean}>(await fetch(apiUrl('/api/graph/layout')));
+                // A stale layout (server is recomputing) is shown but not cached,
+                // so the next call picks up the fresh one.
+                layoutCache = value.stale === true ? null : {value, ts: Date.now()};
                 return value;
             } finally {
                 layoutInflight = null;

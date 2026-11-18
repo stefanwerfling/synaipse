@@ -49,6 +49,8 @@ export class GraphAtlasView implements GraphRenderer {
     private pendingFetch: Promise<void> | null = null;
     private listenerAbort: AbortController | null = null;
     private resizeObserver: ResizeObserver | null = null;
+    /** Re-poll while the server still serves a stale layout (it recomputes off-thread). */
+    private staleTimer: number | null = null;
 
     public constructor(initial: GraphRendererState, private readonly cb: GraphRendererCallbacks) {
         this.state = initial;
@@ -75,6 +77,10 @@ export class GraphAtlasView implements GraphRenderer {
     }
 
     public destroy(): void {
+        if (this.staleTimer !== null) {
+            window.clearTimeout(this.staleTimer);
+            this.staleTimer = null;
+        }
         if (this.rafHandle !== null) {
             cancelAnimationFrame(this.rafHandle);
             this.rafHandle = null;
@@ -125,8 +131,13 @@ export class GraphAtlasView implements GraphRenderer {
         this.element.appendChild(this.overlay);
     }
 
-    private async refreshLayout(): Promise<void> {
+    private async refreshLayout(fit = true): Promise<void> {
         if (this.pendingFetch !== null) return;
+
+        if (this.staleTimer !== null) {
+            window.clearTimeout(this.staleTimer);
+            this.staleTimer = null;
+        }
 
         const nodeCount = this.state.data.nodes.length;
         const edgeCount = this.state.data.edges.length;
@@ -135,13 +146,22 @@ export class GraphAtlasView implements GraphRenderer {
 
         this.pendingFetch = (async () => {
             try {
-                this.layout = await api.getGraphLayout();
+                const layout = await api.getGraphLayout();
+                this.layout = layout;
                 this.edges = [...this.state.data.edges];
-                this.nodeIndex = new Map(this.layout.nodes.map((n) => [n.id, n]));
+                this.nodeIndex = new Map(layout.nodes.map((n) => [n.id, n]));
                 this.buildSpatialIndex();
-                this.fitToContent();
+                if (fit) this.fitToContent();
                 const ms = Date.now() - started;
-                this.stats.textContent = `${this.layout.nodes.length} nodes · ${this.edges.length} edges · ${this.layout.communities.length} communities · ${ms}ms`;
+                this.stats.textContent = `${layout.nodes.length} nodes · ${this.edges.length} edges · ${layout.communities.length} communities · ${ms}ms${layout.stale === true ? ' · updating…' : ''}`;
+
+                if (layout.stale === true) {
+                    // Keep the user's viewport; just swap in the fresh positions when ready.
+                    this.staleTimer = window.setTimeout(() => {
+                        this.staleTimer = null;
+                        void this.refreshLayout(false);
+                    }, 1500);
+                }
             } catch (cause) {
                 this.stats.textContent = `layout failed: ${String(cause)}`;
             } finally {

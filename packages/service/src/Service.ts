@@ -17,7 +17,8 @@ import {runChat, runSummarize, type ChatEvent, type ChatOptions, type ChatSource
 import {type WriteAssetResult} from './Assets.js';
 import {FilesystemAssetStore, type AssetStore} from './AssetStore.js';
 import {buildActivityReport, type ActivityReport} from './Activity.js';
-import {computeLayout, type GraphLayout} from './Layout.js';
+import {type GraphLayout} from './Layout.js';
+import {LayoutComputer} from './LayoutComputer.js';
 import {renderCompiledMarkdown, runCompile, type CompileEvent, type CompileResult} from './Compile.js';
 import {createLlmProvider, isLocalUrl, type LlmConfig, type LlmProvider, type LlmProviderKind} from './Llm.js';
 import {isNotePrivate, redactSensitive, type RedactionHit} from './Privacy.js';
@@ -147,6 +148,9 @@ export interface ArchiveReport {
 }
 
 const log = createLogger('service');
+
+/** Quiet period after the last topology change before the Atlas layout is recomputed. */
+const LAYOUT_DEBOUNCE_MS = 750;
 
 const isInside = (dir: string, file: string): boolean => {
     const rel = path.relative(path.resolve(dir), path.resolve(file));
@@ -363,8 +367,15 @@ export class SynaipseService {
     private readonly embedderProviderId: string | null;
     /** True iff embedder calls leave the host (voyage always; ollama with a non-loopback URL). False for huggingface (in-process) and ollama-on-loopback. */
     private readonly embedderIsExternal: boolean;
+    /** Last computed Atlas layout; kept (stale) across topology changes until the recompute lands. */
     private cachedLayout: GraphLayout | null = null;
-    private cachedLayoutKey: string | null = null;
+    /** Topology generation the cached layout was computed for. */
+    private cachedLayoutGen = -1;
+    /** Bumped on every topology change. */
+    private topologyGen = 0;
+    private layoutJob: Promise<GraphLayout> | null = null;
+    private layoutTimer: NodeJS.Timeout | null = null;
+    private readonly layoutComputer = new LayoutComputer();
     private cachedGraph: Graph | null = null;
     private cachedAdjacency: AdjacencyMap | null = null;
     private cachedLinkKeys: Map<string, NoteId> | null = null;
@@ -513,8 +524,10 @@ export class SynaipseService {
         // Topology might have changed (new/removed note or edited wikilinks).
         // Drop the memoised graph, Atlas layout, and search-time adjacency
         // map; the next request rebuilds them lazily.
-        this.cachedLayout = null;
-        this.cachedLayoutKey = null;
+        // The Atlas layout is NOT dropped: requests keep getting the previous
+        // one (marked stale) while a debounced recompute runs off-thread.
+        this.topologyGen++;
+        this.scheduleLayoutRecompute();
         this.cachedGraph = null;
         this.cachedAdjacency = null;
         this.cachedLinkKeys = null;
@@ -697,16 +710,24 @@ export class SynaipseService {
         this.warmGraphCaches();
     }
 
-    /** Build graph + Atlas layout so the first request after startup is instant. */
+    /** Build the graph now and the Atlas layout in the background, so the first request is fast. */
     private warmGraphCaches(): void {
         const started = Date.now();
         const graph = this.graph();
-        this.graphLayout();
-        const ms = Date.now() - started;
-        log.info('graph cache warmed', {nodes: graph.nodes.length, edges: graph.edges.length, ms});
+        log.info('graph cache warmed', {nodes: graph.nodes.length, edges: graph.edges.length, ms: Date.now() - started});
+
+        void this.recomputeLayout().then(
+            () => log.info('layout warmed', {ms: Date.now() - started, offThread: this.layoutComputer.offThread}),
+            (error: unknown) => log.warn('layout warm-up failed', {error: error instanceof Error ? error.message : String(error)})
+        );
     }
 
     public async stop(): Promise<void> {
+        if (this.layoutTimer !== null) {
+            clearTimeout(this.layoutTimer);
+            this.layoutTimer = null;
+        }
+        await this.layoutComputer.close();
         await this.watcher.stop();
         await this.notes.flushEntries();
         this.notes.closeLocal?.();
@@ -2693,18 +2714,73 @@ export class SynaipseService {
         }, id, options);
     }
 
-    public graphLayout(): GraphLayout {
-        const data = this.graph();
-        const cacheKey = `${data.nodes.length}:${data.edges.length}`;
-
-        if (this.cachedLayout !== null && this.cachedLayoutKey === cacheKey) {
+    /**
+     * Atlas layout (Louvain + tiles), computed off the main thread (plan
+     * P4 / A3). Stale-while-revalidate: after a topology change callers
+     * get the previous layout with `stale: true` right away while a
+     * debounced recompute runs; only the very first call waits.
+     */
+    public async graphLayout(): Promise<GraphLayout & {stale?: boolean}> {
+        if (this.cachedLayout !== null && this.cachedLayoutGen === this.topologyGen) {
             return this.cachedLayout;
         }
 
-        const layout = computeLayout(data);
-        this.cachedLayout = layout;
-        this.cachedLayoutKey = cacheKey;
-        return layout;
+        // An empty stale layout is useless to show; wait for the real one.
+        if (this.cachedLayout !== null && (this.cachedLayout.nodes.length > 0 || this.graph().nodes.length === 0)) {
+            if (this.layoutJob === null && this.layoutTimer === null) {
+                this.scheduleLayoutRecompute();
+            }
+            return {...this.cachedLayout, stale: true};
+        }
+
+        return this.recomputeLayout();
+    }
+
+    private scheduleLayoutRecompute(): void {
+        if (this.cachedLayout === null && this.layoutJob === null) {
+            // Nothing was ever computed or requested: stay lazy.
+            return;
+        }
+
+        if (this.layoutTimer !== null) {
+            clearTimeout(this.layoutTimer);
+        }
+
+        // Debounced: a burst of writes (import, crawl) recomputes once.
+        this.layoutTimer = setTimeout(() => {
+            this.layoutTimer = null;
+            void this.recomputeLayout().catch((error: unknown) => {
+                log.warn('layout recompute failed', {error: error instanceof Error ? error.message : String(error)});
+            });
+        }, LAYOUT_DEBOUNCE_MS);
+        this.layoutTimer.unref();
+    }
+
+    /** Compute for the current topology; joins a running job and re-runs if topology moved on meanwhile. */
+    private async recomputeLayout(): Promise<GraphLayout> {
+        while (this.layoutJob !== null) {
+            await this.layoutJob.catch(() => undefined);
+        }
+
+        if (this.cachedLayout !== null && this.cachedLayoutGen === this.topologyGen) {
+            return this.cachedLayout;
+        }
+
+        const gen = this.topologyGen;
+        const data = this.graph();
+        const job = this.layoutComputer.compute(data);
+        this.layoutJob = job;
+
+        try {
+            const layout = await job;
+            // Even when the topology moved on meanwhile, a newer-but-stale
+            // layout beats an older one; the scheduled recompute catches up.
+            this.cachedLayout = layout;
+            this.cachedLayoutGen = gen;
+            return layout;
+        } finally {
+            this.layoutJob = null;
+        }
     }
 
     public async related(id: NoteId, limit = 10): Promise<RelatedNote[]> {
