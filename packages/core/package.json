@@ -33,6 +33,6 @@
     "clean": "tsc --build --clean"
   },
   "dependencies": {
-    "vts": "github:OpenSourcePKG/vts"
+    "vts": "github:OpenSourcePKG/vts#cfb7ead30bb56d7723b13b4a89f4c81842ada25f"
   }
 }

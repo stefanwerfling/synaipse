@@ -27,7 +27,6 @@ const STORAGE_COLLAPSED = 'synaipse.notes.collapsedGroups';
 
 const RECENT_BUCKETS = ['Today', 'Yesterday', 'This week', 'This month', 'Earlier'] as const;
 const UNTAGGED_LABEL = 'untagged';
-const ROOT_FOLDER_LABEL = '/';
 
 interface NoteGroup {
     key: string;
