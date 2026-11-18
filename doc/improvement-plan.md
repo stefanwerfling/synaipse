@@ -62,7 +62,7 @@ Diese Punkte sind **echte Fehler**, keine Verbesserungen, und kommen vor allem a
 
 **Akzeptanz:** Alle Fixes haben Tests. Neu kommt eine Contract-Test-Suite, die **beide** NoteAdapter (Filesystem und MariaDB) gegen dieselben Erwartungen laufen lässt. Damit kann B3 nicht wieder entstehen.
 
-### Status P0 (2026-11-18): umgesetzt, uncommitted
+### Status P0 (2026-11-18): umgesetzt, committet (`b79c5e3`..`6f220ca`)
 
 Alle 12 Punkte sind erledigt. Die Suite steht bei 1080 Tests grün (vorher 1044), die MariaDB-Integration bei 25 Tests, gelaufen gegen einen Wegwerf-Container. Den Qdrant-Filter und den Dimensions-Check habe ich zusätzlich gegen eine echte Qdrant-Instanz verifiziert.
 
@@ -87,6 +87,25 @@ Bei der Umsetzung kam ein weiterer Fund dazu: **`update_note` hatte ebenfalls ei
 - **Filesystem-Mode:** Bestehende Cache-Einträge werden als „legacy“ übernommen und **nicht** neu embedded.
 - Tokens mit Pfad-Scope sehen in Such-, Listen- und Graph-Ergebnissen nur noch ihre Präfixe. `verify_history` und `snapshot_list` sind für sie gesperrt.
 - Der Index-Cache wird atomar und kompakt geschrieben (ohne Pretty-Print). Ist er korrupt, wird er als `.corrupt-<ts>` gesichert und die Situation laut geloggt.
+
+### Status P2 (2026-11-18): Kern umgesetzt, committet (`acf5f3c`..`b25286a`)
+
+Suite 1108 grün. Tool-Liste von ca. 7k auf ca. 4,5k Tokens (31 sichtbare Tools); nur Toolset `core` ca. 2,6k (20 Tools). Gemessen als JSON-Zeichen/4.
+
+| Punkt | Stand |
+|---|---|
+| B1 SDK, `instructions`, Annotations, kompaktes JSON, `isError` statt Protokollfehler, Enums ablehnen, `Tools/`-Split | erledigt. **Abweichung:** kein Umstieg auf `McpServer.registerTool`; der Low-Level-`Server` kann `instructions`, Annotations und `title` genauso, ohne alle Schemas nach zod zu portieren |
+| B1 `outputSchema`/`structuredContent`, `resource_link` | offen → P8 (zusammen mit Resources) |
+| B2 `synaipse_list`, `synaipse_links`, begrenzter `synaipse_graph`, `link_note` mit NoteRef-Validierung | erledigt. Alte Namen bleiben aufrufbar, sind aber aus `tools/list` versteckt (`DEPRECATED_TOOLS`) |
+| B2 Admin-Gruppe hinter Flag | erledigt als `SYNAIPSE_MCP_TOOLSETS` (`core`, `roadmap`, `benchmark`, `admin`; `admin` default aus). `list_changed` entfällt, weil die Toolsets pro Prozess feststehen |
+| B3 schlanke Write-Antworten mit Dead-Link-Warnungen, `read_note` mit Titel/Alias, `section`, Paging, Vorschlägen; ISO-Zeit plus Alter; Roadmap-Writes nur Gliederung | erledigt |
+| B3 `search`-Filter und Treffer-Anker, globales `verbosity` | offen → P8. `verbosity` scheint nach den schlanken Defaults überflüssig |
+| B6 Primer als `additionalContext` | erledigt (nicht bei `resume`, nicht wenn `CLAUDE.md` ihn noch importiert) |
+| B6 Plugin-`.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | offen → P8 |
+
+**KPI-Lücke:** Das Ziel „Tool-Liste < 3k“ erreicht nur `SYNAIPSE_MCP_TOOLSETS=core`. Mit Roadmap und Benchmark (11 Tools) bleibt es bei ca. 4,5k. Weiter runter ginge nur, indem Roadmap/Benchmark per Default aus sind oder ihre Schemas Hinweise verlieren, die das Modell braucht.
+
+**Verhaltensänderungen:** Write-Tools liefern nicht mehr die ganze Note. `read_note` kappt den Body standardmäßig bei 20.000 Zeichen (mit `next`-Hinweis). `synaipse_graph` liefert nie mehr den ganzen Vault, und Kanten kommen als `[from, to]`. `verify_history` und `snapshot_list` brauchen `SYNAIPSE_MCP_TOOLSETS=…,admin`. Ungültige Enum-Werte werden abgelehnt. Ein laufender Server braucht einen Neustart.
 
 ---
 
