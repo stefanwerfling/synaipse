@@ -1,5 +1,5 @@
 import hljsLightCss from 'highlight.js/styles/github.css?inline';
-import {el} from './Dom.js';
+import {el, portalHost} from './Dom.js';
 import {hydrateMarkdownForExport} from './MarkdownPreview.js';
 
 /**
@@ -307,7 +307,7 @@ export const exportNoteToPdf = async (note: PdfNote): Promise<void> => {
     });
     const body = el('div', {class: 'md-preview-body'});
     stage.appendChild(body);
-    document.body.appendChild(stage);
+    portalHost().appendChild(stage);
 
     try {
         await hydrateMarkdownForExport(body, note.content, note.id);

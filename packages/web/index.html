@@ -5,20 +5,26 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link rel="icon" type="image/svg+xml" href="/src/Logo.svg" />
         <title>Synaipse</title>
-        <script>
-            (function () {
-                try {
-                    var stored = localStorage.getItem('synaipse-theme');
-                    var theme = stored === 'light' || stored === 'dark' ? stored : 'dark';
-                    document.documentElement.setAttribute('data-theme', theme);
-                } catch (_) {
-                    document.documentElement.setAttribute('data-theme', 'dark');
-                }
-            })();
-        </script>
+        <style>
+            /* Standalone page frame only — the app's own CSS is scoped to .synaipse-root. */
+            html, body { margin: 0; height: 100%; }
+            #root { min-height: 100vh; height: 100vh; display: flex; flex-direction: column; }
+        </style>
     </head>
     <body>
-        <div id="root"></div>
+        <div id="root" class="synaipse-root"></div>
+        <script>
+            // Theme before first paint (no flash); mount() takes over from here.
+            (function () {
+                var theme = 'dark';
+                try {
+                    var stored = localStorage.getItem('synaipse-theme');
+                    if (stored === 'light' || stored === 'dark') theme = stored;
+                } catch (_) {}
+                document.getElementById('root').setAttribute('data-theme', theme);
+                document.body.style.background = theme === 'light' ? '#f7f8fa' : '#0b0d12';
+            })();
+        </script>
         <script type="module" src="/src/Main.ts"></script>
     </body>
 </html>

@@ -3,7 +3,7 @@ import {markedHighlight} from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
 import type {TypedLink, TypedLinkKind} from '@synaipse/core';
 import {resolveAssetUrl} from './AssetUrl.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
@@ -202,7 +202,7 @@ const openInfographicFullscreen = async (syntax: string): Promise<void> => {
     box.appendChild(close);
     box.appendChild(stage);
     backdrop.appendChild(box);
-    document.body.appendChild(backdrop);
+    portalHost().appendChild(backdrop);
 
     const dismiss = (): void => {
         document.removeEventListener('keydown', onKey);
@@ -680,7 +680,7 @@ export class MarkdownPreview {
         card.addEventListener('mouseenter', () => this.cancelClose());
         card.addEventListener('mouseleave', () => this.scheduleClose());
 
-        document.body.appendChild(card);
+        portalHost().appendChild(card);
         this.hoverCard = card;
     }
 

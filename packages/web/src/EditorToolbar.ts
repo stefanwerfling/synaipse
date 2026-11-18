@@ -1,4 +1,4 @@
-import {el} from './Dom.js';
+import {el, portalHost} from './Dom.js';
 import {openDsgvoDialog} from './DsgvoDialog.js';
 import {openFloorplanDialog} from './FloorplanDialog.js';
 import {
@@ -204,7 +204,7 @@ export class EditorToolbar {
         menu.style.top = `${rect.bottom + 4}px`;
         menu.style.left = `${rect.left}px`;
 
-        document.body.appendChild(menu);
+        portalHost().appendChild(menu);
         this.containerMenu = menu;
 
         // Dismiss on outside click / Escape — defer to next tick so the

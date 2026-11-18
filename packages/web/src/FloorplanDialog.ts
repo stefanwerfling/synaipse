@@ -1,4 +1,4 @@
-import {el} from './Dom.js';
+import {el, portalHost} from './Dom.js';
 
 /**
  * Modal wrapper around mdfloor's `mountEditor` for inserting or editing
@@ -96,7 +96,7 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     box.appendChild(stage);
     box.appendChild(actions);
     backdrop.appendChild(box);
-    document.body.appendChild(backdrop);
+    portalHost().appendChild(backdrop);
 
     void (async () => {
         let mdfloor: typeof import('mdfloor');

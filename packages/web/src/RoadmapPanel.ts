@@ -210,7 +210,7 @@ export class RoadmapPanel {
      */
     public onVaultEvent(touched: readonly string[]): void {
         if (this.project === null || this.saving) return;
-        if (!document.body.contains(this.element)) return;
+        if (!this.element.isConnected) return;
         if (touched.includes(`Memory/${this.project}/_roadmap.md`)) {
             void this.loadRoadmap();
         }

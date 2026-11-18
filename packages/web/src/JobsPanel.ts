@@ -6,7 +6,7 @@ import {
     type JobType,
     type Schedule
 } from './Api.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 
 /**
  * Jobs tab, redesigned around persistent jobs:
@@ -544,7 +544,7 @@ export class JobsPanel {
         this.modalKeyHandler = onKey;
 
         backdrop.appendChild(panel);
-        document.body.appendChild(backdrop);
+        portalHost().appendChild(backdrop);
         this.modal = backdrop;
         nameInput.focus();
     }

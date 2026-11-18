@@ -1,4 +1,4 @@
-import {clear, el} from './Dom.js';
+import {clear, el, isAppVisible} from './Dom.js';
 import {searchNotes, type NoteCandidate, type NoteRanked} from './Fuzzy.js';
 import {PersistentValue} from './Persistence.js';
 
@@ -313,6 +313,7 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
         const isModK = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k';
 
         if (!isModK) return;
+        if (!this.open && !isAppVisible(this.element.parentElement ?? this.element)) return;
 
         event.preventDefault();
 

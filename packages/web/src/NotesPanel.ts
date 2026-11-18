@@ -2,7 +2,7 @@ import type {Note} from '@synaipse/core';
 import {extractTypedLinks} from '@synaipse/core';
 import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 import {listDraftIds} from './Drafts.js';
 import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
@@ -449,7 +449,7 @@ export class NotesPanel {
             if (!dragging) return;
             dragging = false;
             handle.classList.remove('dragging');
-            document.body.classList.remove('sidebar-resizing');
+            document.body.classList.remove('synaipse-sidebar-resizing');
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
             this.sidebarWidth.set(lastW);
@@ -468,7 +468,7 @@ export class NotesPanel {
             startW = clamp(this.sidebarWidth.get());
             lastW = startW;
             handle.classList.add('dragging');
-            document.body.classList.add('sidebar-resizing');
+            document.body.classList.add('synaipse-sidebar-resizing');
             window.addEventListener('mousemove', onMove);
             window.addEventListener('mouseup', onUp);
         };
@@ -1504,7 +1504,7 @@ export class NotesPanel {
                 text: '↳ Ask about this',
                 on: {mousedown: (e) => e.preventDefault()}
             }) as HTMLButtonElement;
-            document.body.appendChild(this.selectionBtn);
+            portalHost().appendChild(this.selectionBtn);
         }
 
         const btn = this.selectionBtn;
@@ -1562,7 +1562,7 @@ export class NotesPanel {
             if (e.target === overlay) this.closeSummarizeModal(overlay);
         });
 
-        document.body.appendChild(overlay);
+        portalHost().appendChild(overlay);
 
         const ctl = new AbortController();
         this.summarizeAbort = ctl;

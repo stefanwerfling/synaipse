@@ -1,5 +1,5 @@
 import {logout} from './Auth.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 import {TokensPanel} from './TokensPanel.js';
 import {AdminPanel} from './AdminPanel.js';
 
@@ -85,7 +85,7 @@ export class Settings {
         dialog.appendChild(this.bodyHost);
         dialog.appendChild(footer);
 
-        document.body.appendChild(this.overlay);
+        portalHost().appendChild(this.overlay);
         this.renderActiveTab();
     }
 

@@ -3,7 +3,7 @@ import {App} from './App.js';
 import {setApiBase} from './ApiBase.js';
 import {fetchAuthMode} from './Auth.js';
 import {mountLoginScreen} from './Login.js';
-import {initTheme, setTheme, type Theme} from './Theme.js';
+import {initTheme, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
 
 /**
  * The one entry point for the Synaipse web UI (plan P3 / E1) — used by
@@ -45,9 +45,10 @@ type Account = {id: number; email: string; isAdmin: boolean};
 
 export async function mount(container: HTMLElement, opts: SynaipseMountOptions = {}): Promise<SynaipseMountHandle> {
     setApiBase(opts.apiBase);
+    // Class first: the theme is stamped on every .synaipse-root.
+    container.classList.add(ROOT_CLASS);
     if (opts.theme !== undefined) setTheme(opts.theme);
     else initTheme();
-    container.classList.add('synaipse-root');
 
     let app: App | null = null;
     let unmounted = false;
@@ -97,7 +98,12 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
             app?.destroy();
             app = null;
             container.replaceChildren();
-            container.classList.remove('synaipse-root');
+            container.classList.remove(ROOT_CLASS);
+            container.removeAttribute('data-theme');
+            // Overlays left open (dialogs, menus) live in the portal layer.
+            if (document.querySelector(`.${ROOT_CLASS}:not(.synaipse-portal)`) === null) {
+                document.querySelector('body > .synaipse-portal')?.remove();
+            }
         },
         setTheme: (theme) => setTheme(theme),
         navigate: (route) => app?.navigate(route),

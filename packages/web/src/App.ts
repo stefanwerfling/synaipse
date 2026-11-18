@@ -165,7 +165,7 @@ export class App {
         this.events.subscribe((event) => this.loadedPanel('roadmap')?.onVaultEvent(event.touched));
         this.events.subscribe((event) => this.loadedPanel('benchmarks')?.onVaultEvent(event.touched));
 
-        this.element = el('div', {class: 'root'}, this.topbar, this.body, this.activityLog.element);
+        this.element = el('div', {class: 'root synaipse-app'}, this.topbar, this.body, this.activityLog.element);
 
         this.selectedTags.subscribe(() => {
             if (this.tab === 'graph') {

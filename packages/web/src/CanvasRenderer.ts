@@ -1,7 +1,7 @@
 import type {CanvasDocument, CanvasEdge, CanvasNode, CanvasSide, CanvasTextNode} from '@synaipse/core';
 import {api} from './Api.js';
 import {mountCardEditor} from './CardEditor.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
 
 const SIDES: readonly CanvasSide[] = ['top', 'right', 'bottom', 'left'];
@@ -1362,10 +1362,10 @@ export class CanvasRenderer {
         const cardNextSibling = cardEl?.nextSibling ?? null;
         if (cardEl !== undefined) {
             cardEl.classList.add('editing-modal');
-            document.body.appendChild(cardEl);
+            portalHost().appendChild(cardEl);
         }
         const backdrop = el('div', {class: 'canvas-editing-backdrop'});
-        document.body.appendChild(backdrop);
+        portalHost().appendChild(backdrop);
 
         // Clicking the dimmed area behind the modal = commit. The
         // editor's blur handler already handles focus loss, so this

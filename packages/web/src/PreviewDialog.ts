@@ -1,4 +1,4 @@
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 
 export interface PreviewSummary {
     provider: string;
@@ -142,7 +142,7 @@ export class PreviewDialog {
             body.appendChild(footer);
 
             overlay.appendChild(body);
-            document.body.appendChild(overlay);
+            portalHost().appendChild(overlay);
             this.overlay = overlay;
 
             sendBtn.focus();

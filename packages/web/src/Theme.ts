@@ -35,38 +35,61 @@ const persistTheme = (theme: Theme): void => {
     }
 };
 
-const applyHljsStylesheet = (theme: Theme): void => {
-    if (typeof document === 'undefined') {
+/** Root class of every Synaipse DOM tree (app container and portal layer). */
+export const ROOT_CLASS = 'synaipse-root';
+
+/**
+ * Prefix every selector of a plain stylesheet with `scope` (plan P3 / D3),
+ * so a third-party stylesheet such as highlight.js only styles Synaipse.
+ * Handles flat rule lists (no @media nesting), which is all hljs ships.
+ */
+export const scopeCss = (css: string, scope: string): string =>
+    css
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/([^{}]+)\{/g, (_m, selectors: string) => {
+            const scoped = selectors
+                .split(',')
+                .map((sel) => sel.trim())
+                .filter((sel) => sel.length > 0)
+                .map((sel) => `${scope} ${sel}`)
+                .join(', ');
+            return `${scoped} {`;
+        });
+
+/**
+ * Both highlight.js themes, scoped to the matching root theme. Installed
+ * once; switching themes is just the data-theme attribute.
+ */
+const installHljsStylesheet = (): void => {
+    if (typeof document === 'undefined' || document.getElementById(HLJS_STYLE_ID) !== null) {
         return;
     }
-
-    let style = document.getElementById(HLJS_STYLE_ID) as HTMLStyleElement | null;
-
-    if (style === null) {
-        style = document.createElement('style');
-        style.id = HLJS_STYLE_ID;
-        document.head.appendChild(style);
-    }
-
-    style.textContent = theme === 'light' ? hljsLightCss : hljsDarkCss;
+    const style = document.createElement('style');
+    style.id = HLJS_STYLE_ID;
+    style.textContent = [
+        scopeCss(hljsDarkCss, `.${ROOT_CLASS}[data-theme='dark']`),
+        scopeCss(hljsLightCss, `.${ROOT_CLASS}[data-theme='light']`)
+    ].join('\n');
+    document.head.appendChild(style);
 };
 
-export const getTheme = (): Theme => {
-    if (typeof document === 'undefined') {
-        return readStoredTheme();
-    }
+let current: Theme | null = null;
 
-    const attr = document.documentElement.getAttribute('data-theme');
+export const getTheme = (): Theme => current ?? readStoredTheme();
 
-    return isTheme(attr) ? attr : readStoredTheme();
-};
-
+/**
+ * Stamp the theme on every Synaipse root — never on <html>, which belongs
+ * to the host page (plan P3 / E1).
+ */
 export const applyTheme = (theme: Theme): void => {
+    current = theme;
     if (typeof document !== 'undefined') {
-        document.documentElement.setAttribute('data-theme', theme);
+        for (const root of document.querySelectorAll(`.${ROOT_CLASS}`)) {
+            root.setAttribute('data-theme', theme);
+        }
     }
 
-    applyHljsStylesheet(theme);
+    installHljsStylesheet();
 };
 
 export const setTheme = (theme: Theme): void => {

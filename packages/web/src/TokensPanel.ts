@@ -1,4 +1,4 @@
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 import {
     createToken,
     listTokens,
@@ -343,5 +343,5 @@ const showPlainTokenModal = (plain: string, label: string, action: 'created' | '
     );
 
     overlay.appendChild(modal);
-    document.body.appendChild(overlay);
+    portalHost().appendChild(overlay);
 };

@@ -1,4 +1,4 @@
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 
 /**
  * Modal dialog for wrapping a selected text span in a DSGVO/privacy
@@ -233,7 +233,7 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
     box.appendChild(err);
     box.appendChild(actions);
     backdrop.appendChild(box);
-    document.body.appendChild(backdrop);
+    portalHost().appendChild(backdrop);
 
     renderPreview();
     (radios.find((r) => r.checked) ?? radios[0])?.focus();

@@ -6,7 +6,7 @@ import {
     type ChatgptConversationPreview,
     type ParsedExport
 } from './ChatgptImport.js';
-import {clear, el} from './Dom.js';
+import {clear, el, portalHost} from './Dom.js';
 
 export interface ImportDialogCallbacks {
     onNotesChanged: () => void;
@@ -59,7 +59,7 @@ export class ImportDialog {
 
         this.body = el('div', {class: 'import-dialog'});
         this.overlay.appendChild(this.body);
-        document.body.appendChild(this.overlay);
+        portalHost().appendChild(this.overlay);
 
         this.renderDropzone();
     }

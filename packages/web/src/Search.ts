@@ -1,6 +1,6 @@
 import type {SearchHit, SearchHitComponents, SearchMode} from '@synaipse/core';
 import {api} from './Api.js';
-import {clear, el} from './Dom.js';
+import {clear, el, isAppVisible} from './Dom.js';
 
 export interface SearchOptions {
     semanticEnabled: boolean;
@@ -29,7 +29,9 @@ export class Search {
         this.mode = opts.semanticEnabled ? 'hybrid' : 'fulltext';
         this.element = el('div', {class: 'search'});
         this.build();
-        this.globalKeyHandler = (event) => this.handleGlobalKey(event);
+        this.globalKeyHandler = (event) => {
+            if (isAppVisible(this.element)) this.handleGlobalKey(event);
+        };
         window.addEventListener('keydown', this.globalKeyHandler);
     }
 

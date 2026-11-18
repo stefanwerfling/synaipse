@@ -106,3 +106,29 @@ export const mount = (host: HTMLElement, node: Node): void => {
     clear(host);
     host.appendChild(node);
 };
+/**
+ * Layer for overlays (dialogs, menus, hover cards) that must escape the
+ * app's overflow/transform but still carry Synaipse's scoped styles and
+ * theme (plan P3 / D3). One `.synaipse-root` div at the end of <body>,
+ * created on first use; Theme.applyTheme stamps its data-theme too.
+ */
+export const portalHost = (): HTMLElement => {
+    const existing = document.querySelector<HTMLElement>('body > .synaipse-portal');
+    if (existing !== null) return existing;
+    const host = document.createElement('div');
+    host.className = 'synaipse-root synaipse-portal';
+    const theme = document.querySelector('.synaipse-root[data-theme]')?.getAttribute('data-theme');
+    if (theme !== null && theme !== undefined) host.setAttribute('data-theme', theme);
+    document.body.appendChild(host);
+    return host;
+};
+
+/**
+ * Whether the Synaipse app that owns `node` is currently on screen. Global
+ * keyboard shortcuts check this, so an embedded Synaipse in a hidden host
+ * tab doesn't steal Ctrl+K from the page around it (plan P3 / E1).
+ */
+export const isAppVisible = (node: Element): boolean => {
+    const root = node.closest('.synaipse-root:not(.synaipse-portal)');
+    return root !== null && root.getClientRects().length > 0;
+};
