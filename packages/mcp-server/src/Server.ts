@@ -287,7 +287,14 @@ export const buildMcpHttpHandler = (
                 }
             });
 
+            // Guard against re-entrant teardown: server.close() closes the
+            // transport, which fires onclose again → infinite recursion
+            // (RangeError: Maximum call stack size exceeded). Run the
+            // teardown exactly once.
+            let closing = false;
             transport.onclose = () => {
+                if (closing) return;
+                closing = true;
                 const id = transport.sessionId;
                 if (id !== undefined) sessions.delete(id);
                 void server.close();
