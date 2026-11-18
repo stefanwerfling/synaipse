@@ -9,7 +9,7 @@ written to the vault automatically** — the plugin is opt-in by design.
 
 | Hook              | What it writes                                                   |
 |-------------------|------------------------------------------------------------------|
-| `SessionStart`    | Creates / resumes `<session_id>.jsonl` and `<session_id>.meta.json`; refreshes `.claude/synaipse-primer.md` from the Synaipse web API |
+| `SessionStart`    | Creates / resumes `<session_id>.jsonl` and `<session_id>.meta.json`; refreshes `.claude/synaipse-primer.md` from the Synaipse web API and injects it as context |
 | `UserPromptSubmit`| `{kind:"user", text}` line                                       |
 | `Stop`            | `{kind:"stop", transcript_path}` line                            |
 | `PostToolUse`     | `Edit`/`Write`/`Bash`/`NotebookEdit` → full args + 200-char result preview. Other tools → counter line only (`{kind:"tool_counter", name, result_size}`). |
@@ -20,30 +20,31 @@ logs — which can contain secrets in tool args — never get committed.
 
 Same `session_id` always maps to the same files, so **resume** simply appends.
 
-## CLAUDE.md primer bridge
+## Primer at session start
 
-On every `SessionStart` (incl. resume) the hook calls `GET /api/prime?format=markdown`
+On every `SessionStart` (incl. resume) the hook calls `GET /api/prime?format=markdown&project=<name>`
 on the Synaipse web API (`localhost:${SYNAIPSE_WEB_API_PORT:-3001}`) and writes the
 returned bundle to `$CLAUDE_PROJECT_DIR/.claude/synaipse-primer.md`. The bundle is
 the same `synaipse_prime` payload Claude would otherwise have to fetch via MCP —
 pinned notes, recent sessions, project decisions, hot notes, recent edits, TODO
 sample — pre-rendered as compact Markdown.
 
-To make Claude pick the file up automatically, add one line to your
-`CLAUDE.md` (project-level or user-level):
+The hook then hands the primer to Claude directly as SessionStart
+`additionalContext`, so it is in context from the first turn — **no `CLAUDE.md`
+entry needed**. It is skipped when it would land twice:
 
-```md
-@.claude/synaipse-primer.md
-```
+- on `resume` (the earlier injection is part of the restored transcript), and
+- when `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` still contains the
+  older `@.claude/synaipse-primer.md` import — remove that line to switch over.
 
-That's it — the `@`-import is resolved at session start, the primer lives in
-Claude's context from the very first turn, no manual `synaipse_prime` call needed.
+| Env | Default | Effect |
+|---|---|---|
+| `SYNAIPSE_PRIMER_INJECT` | `1` | `0` disables the injection (file is still refreshed) |
+| `SYNAIPSE_PRIMER_MAX_BYTES` | `12000` | Cap for the injected text |
 
-The file is regenerated on every SessionStart. If the web API is unreachable
-(server down, wrong port, no curl), the hook silently skips the refresh and the
-last known primer stays in place. Add `.claude/synaipse-primer.md` to your
-`.gitignore` if you don't want to commit the snapshot — it's a derived
-view of the vault, not source of truth.
+If the web API is unreachable (server down, wrong port, no curl), the refresh is
+skipped and the last known primer is used. Add `.claude/synaipse-primer.md` to
+your `.gitignore` — it's a derived view of the vault, not source of truth.
 
 Override the port with `SYNAIPSE_WEB_API_PORT=<n>` in the environment Claude
 Code inherits (e.g. via your shell profile or a wrapper script).

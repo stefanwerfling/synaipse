@@ -45,7 +45,7 @@ printf '{"ts":"%s","kind":"session_start"}\n' "$TS" >> "$SYNAIPSE_JSONL_PATH" 2>
 # silently no-op if curl is missing or the web API is down.
 if command -v curl >/dev/null 2>&1; then
   PORT="${SYNAIPSE_WEB_API_PORT:-3001}"
-  PRIMER_DIR="${CLAUDE_PROJECT_DIR}/.claude"
+  PRIMER_DIR="${CLAUDE_PROJECT_DIR:-$CWD}/.claude"
   PRIMER_PATH="${PRIMER_DIR}/synaipse-primer.md"
   PRIMER_TMP="${PRIMER_PATH}.tmp.$$"
 
@@ -62,6 +62,31 @@ if command -v curl >/dev/null 2>&1; then
   else
     rm -f "$PRIMER_TMP" 2>/dev/null
   fi
+fi
+
+# Hand the primer straight to the model as SessionStart additionalContext,
+# so no CLAUDE.md @-import is needed. Skipped when it would land twice:
+#   - on resume the earlier injection is already part of the restored transcript;
+#   - a CLAUDE.md that still @-imports the primer file already loads it.
+# Opt out with SYNAIPSE_PRIMER_INJECT=0. Capped so a huge primer can't
+# flood the context (the server targets < 2k tokens anyway).
+PRIMER_FILE="${CLAUDE_PROJECT_DIR:-$CWD}/.claude/synaipse-primer.md"
+SOURCE="$(printf '%s' "$PAYLOAD" | jq -r '.source // empty' 2>/dev/null || true)"
+PRIMER_MAX_BYTES="${SYNAIPSE_PRIMER_MAX_BYTES:-12000}"
+
+primer_imported_by_claude_md() {
+  local root="${CLAUDE_PROJECT_DIR:-$CWD}" f
+  for f in "$root/CLAUDE.md" "$root/.claude/CLAUDE.md" "$root/CLAUDE.local.md"; do
+    [[ -f "$f" ]] && grep -q 'synaipse-primer\.md' "$f" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+if [[ "${SYNAIPSE_PRIMER_INJECT:-1}" != "0" && "$SOURCE" != "resume" && -s "$PRIMER_FILE" ]] \
+    && ! primer_imported_by_claude_md; then
+  head -c "$PRIMER_MAX_BYTES" "$PRIMER_FILE" 2>/dev/null \
+    | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: ("# Synaipse memory primer\n\n" + .)}}' 2>/dev/null \
+    || true
 fi
 
 exit 0
