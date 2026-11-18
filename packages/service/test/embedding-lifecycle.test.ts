@@ -189,6 +189,22 @@ describe('embedding lifecycle', () => {
         expect(row.embed_model).toBe('voyage:voyage-test:3');
     });
 
+    it('imports a JSON cache from outside the vault without renaming it (foreign vault stays untouched)', async () => {
+        await writeNote(vaultDir, 'a.md', 'alpha');
+        const foreignDir = await mkdtemp(path.join(tmpdir(), 'synaipse-foreign-'));
+        const foreign = path.join(foreignDir, '.synaipse-index.json');
+        await writeFile(foreign, JSON.stringify({'other.md': {hash: 'x', mtime: 1}}), 'utf8');
+        try {
+            service = new SynaipseService({...buildConfig(vaultDir), indexCachePath: foreign},
+                {embedder, vectorStore: store, skipWatcher: true, reranker: null});
+            await service.start();
+            await service.stop();
+            expect(await readdir(foreignDir)).toEqual(['.synaipse-index.json']);
+        } finally {
+            await rm(foreignDir, {recursive: true, force: true});
+        }
+    });
+
     it('B9: a corrupt cache is kept as backup and triggers a (logged) full re-embed', async () => {
         await writeNote(vaultDir, 'a.md', 'alpha');
         await writeFile(path.join(vaultDir, '.cache.json'), '{"a.md": {"hash": ', 'utf8');

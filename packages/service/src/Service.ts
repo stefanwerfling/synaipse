@@ -147,6 +147,11 @@ export interface ArchiveReport {
 
 const log = createLogger('service');
 
+const isInside = (dir: string, file: string): boolean => {
+    const rel = path.relative(path.resolve(dir), path.resolve(file));
+    return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
 const MS_PER_DAY = 86_400_000;
 
 const GRAPH_SEED_RECENT_WINDOW_MS = 7 * MS_PER_DAY;
@@ -376,7 +381,11 @@ export class SynaipseService {
         });
         this.notes = overrides.notes ?? new FilesystemNoteAdapter(
             this.vault,
-            new EntryStore(config.statePath ?? path.join(config.vaultPath, '.synaipse', 'state.db'), {legacyJsonPath: config.indexCachePath})
+            new EntryStore(config.statePath ?? path.join(config.vaultPath, '.synaipse', 'state.db'), {
+                legacyJsonPath: config.indexCachePath,
+                // Never rename a file that belongs to another vault.
+                renameLegacy: isInside(config.vaultPath, config.indexCachePath)
+            })
         );
         this.history = overrides.history ?? new VaultHistory(this.vault);
         this.assetStore = overrides.assetStore ?? new FilesystemAssetStore(this.vault.root);

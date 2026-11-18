@@ -56,6 +56,13 @@ const fromRow = (row: EntryRow): CacheEntry => ({
 export interface EntryStoreOptions {
     /** Old JSON sidecar to import on first start (then renamed to `*.migrated-<ts>`). */
     legacyJsonPath?: string;
+    /**
+     * Rename the legacy JSON after importing it (default true). The service
+     * passes false when the file lies outside its own vault — e.g. an env
+     * still pointing SYNAIPSE_INDEX_CACHE at another vault — so a foreign
+     * file is only read, never touched.
+     */
+    renameLegacy?: boolean;
     /** Debounce for writing changed rows (default 500 ms). */
     debounceMs?: number;
 }
@@ -131,6 +138,10 @@ export class EntryStore implements EntryCache {
         state.transaction(() => {
             for (const id of json.ids()) this.writeRow(id, json.get(id)!);
         });
+        if (this.opts.renameLegacy === false) {
+            log.info('index cache imported into state DB; source left untouched (outside the vault)', {db: this.file, entries: json.size(), source: legacy});
+            return;
+        }
         const target = `${legacy}.migrated-${Date.now()}`;
         await rename(legacy, target).catch((error: unknown) => {
             // Harmless: the non-empty table blocks a second import anyway.

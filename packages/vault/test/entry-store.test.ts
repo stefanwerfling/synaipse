@@ -103,6 +103,15 @@ describe('EntryStore', () => {
         expect(b.has('b.md')).toBe(false);
     });
 
+    it('with renameLegacy=false imports but leaves the file untouched', async () => {
+        const json = path.join(dir, 'other-vault-index.json');
+        await writeFile(json, JSON.stringify({'a.md': {hash: 'h', mtime: 5}}), 'utf8');
+        const a = store({legacyJsonPath: json, renameLegacy: false});
+        await a.load();
+        expect(a.get('a.md')?.hash).toBe('h');
+        expect(await readdir(dir)).toContain('other-vault-index.json');
+    });
+
     it('survives a corrupt legacy JSON (backed up, nothing imported)', async () => {
         const json = path.join(dir, '.synaipse-index.json');
         await writeFile(json, '{"a.md": {"hash": ', 'utf8');
