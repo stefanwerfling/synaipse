@@ -1,4 +1,5 @@
 import {isPathInScope, type SynaipseService} from '@synaipse/service';
+import {ageOf, modifiedOf} from './Format.js';
 import {asLimit, asSearchMode, asString, filterByConsent, filterNotesByConsent, ok, type ToolHandler} from './Shared.js';
 
 /** Retrieval, listing and the session primer. */
@@ -22,9 +23,11 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const query = asString(args.query, 'query');
             const explain = args.explain === true;
             const raw = await service.search(query, asSearchMode(args.mode), asLimit(args.limit, 10));
+            // Brief hits: `path` duplicates noteId and chunkId is internal;
+            // both (and the score breakdown) only come back with explain.
             const stripped = explain
                 ? raw
-                : raw.map(({components: _components, ...rest}) => rest);
+                : raw.map(({components: _c, path: _p, chunkId: _id, score, ...rest}) => ({...rest, score: Math.round(score * 1000) / 1000}));
             const filtered = filterByConsent(service, stripped, (h) => h.noteId);
             return {
                 response: ok({
@@ -38,7 +41,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_list_notes',
-            description: 'List notes in the vault (returns id, title, tags, mtime). Useful for browsing or building a sitemap.',
+            description: 'List notes in the vault (id, title, tags, modified, age). Useful for browsing or building a sitemap.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -55,7 +58,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const filtered = filterNotesByConsent(raw);
             const notes = filtered.items
                 .slice(0, limit)
-                .map((n) => ({id: n.id, title: n.title, tags: n.tags, mtime: n.mtime}));
+                .map((n) => ({id: n.id, title: n.title, tags: n.tags, ...modifiedOf(n.mtime)}));
 
             return {
                 response: ok({
@@ -127,7 +130,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const filtered = filterNotesByConsent(sorted);
             const notes = filtered.items
                 .slice(0, limit)
-                .map((n) => ({id: n.id, title: n.title, mtime: n.mtime}));
+                .map((n) => ({id: n.id, title: n.title, ...modifiedOf(n.mtime)}));
             return {
                 response: ok({
                     notes,
@@ -160,7 +163,8 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const skipped = filteredCtx.skipped + filteredTodos.skipped;
             const primed = {
                 ...result,
-                context: filteredCtx.items,
+                // Relative age is all a primer needs and costs ~2 tokens.
+                context: filteredCtx.items.map(({mtime, ...rest}) => ({...rest, age: ageOf(mtime)})),
                 todoSample: filteredTodos.items,
                 ...(skipped > 0 ? {skippedByConsent: skipped} : {})
             };
@@ -244,7 +248,11 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const filtered = filterByConsent(service, raw, (n) => n.id);
             return {
                 response: ok({
-                    notes: filtered.items,
+                    notes: filtered.items.map(({mtime: _m, lastAccessed, lastReferenced, ...rest}) => ({
+                        ...rest,
+                        ...(lastAccessed !== undefined ? {lastAccessed: ageOf(lastAccessed)} : {}),
+                        ...(lastReferenced !== undefined ? {lastReferenced: ageOf(lastReferenced)} : {})
+                    })),
                     count: filtered.items.length,
                     olderThanDays,
                     ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})

@@ -55,7 +55,9 @@ describe('synaipse_edit_note tool', () => {
         }, EMPTY_CTX);
 
         const payload = JSON.parse(outcome.response.content[0]!.text);
-        expect(payload.note.content.trimEnd()).toBe('alpha DELTA gamma');
+        expect(payload).toMatchObject({id: 'Memory/proj/n.md', changed: true});
+        expect(payload.note).toBeUndefined();
+        expect(service.readNote(payload.id).content.trimEnd()).toBe('alpha DELTA gamma');
 
         const onDisk = await readFile(path.join(vaultDir, 'Memory/proj/n.md'), 'utf8');
         expect(onDisk).toContain('alpha DELTA gamma');
@@ -74,7 +76,9 @@ describe('synaipse_edit_note tool', () => {
         }, EMPTY_CTX);
 
         const payload = JSON.parse(outcome.response.content[0]!.text);
-        expect(payload.note.content.trimEnd()).toBe('baz');
+        expect(payload).toMatchObject({id: 'Memory/proj/n.md', changed: true});
+        expect(payload.note).toBeUndefined();
+        expect(service.readNote(payload.id).content.trimEnd()).toBe('baz');
     });
 
     it('rejects a non-unique oldString unless replaceAll:true', async () => {
@@ -97,7 +101,9 @@ describe('synaipse_edit_note tool', () => {
         }, EMPTY_CTX);
 
         const payload = JSON.parse(outcome.response.content[0]!.text);
-        expect(payload.note.content.trimEnd()).toBe('bar bar bar');
+        expect(payload).toMatchObject({id: 'Memory/proj/n.md', changed: true});
+        expect(payload.note).toBeUndefined();
+        expect(service.readNote(payload.id).content.trimEnd()).toBe('bar bar bar');
     });
 
     it('throws when oldString is not found', async () => {
@@ -166,7 +172,9 @@ describe('synaipse_edit_note tool', () => {
         }, EMPTY_CTX);
 
         const payload = JSON.parse(outcome.response.content[0]!.text);
-        expect(payload.note.content.trimEnd()).toBe('keep rest');
+        expect(payload).toMatchObject({id: 'Memory/proj/n.md', changed: true});
+        expect(payload.note).toBeUndefined();
+        expect(service.readNote(payload.id).content.trimEnd()).toBe('keep rest');
     });
 
     it('is registered as a write-mode tool with pathArg=id', async () => {

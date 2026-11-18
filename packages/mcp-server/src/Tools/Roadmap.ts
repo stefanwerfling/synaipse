@@ -103,6 +103,55 @@ const roadmapResult = (roadmap: Roadmap): unknown => ({
     steps: roadmap.steps
 });
 
+interface StepOutline {
+    id: string;
+    title: string;
+    status: RoadmapStep['status'];
+    progress?: number;
+    plannedHours?: number;
+    actualHours?: number;
+    children?: StepOutline[];
+}
+
+/** Tree skeleton without activity logs, texts or deleted steps — what a write needs to confirm. */
+const outlineSteps = (steps: readonly RoadmapStep[]): StepOutline[] => steps
+    .filter((step) => step.deleted !== true)
+    .map((step) => {
+        const children = outlineSteps(step.children ?? []);
+        return {
+            id: step.id,
+            title: step.title,
+            status: step.status,
+            ...(step.progress !== undefined ? {progress: step.progress} : {}),
+            ...(step.plannedHours !== undefined ? {plannedHours: step.plannedHours} : {}),
+            ...(step.actualHours !== undefined ? {actualHours: step.actualHours} : {}),
+            ...(children.length > 0 ? {children} : {})
+        };
+    });
+
+/**
+ * Result of tree-changing writes (plan/move/rollback): summary plus the
+ * outline. Full step bodies with activity logs are only in roadmap_get —
+ * echoing them after every write cost thousands of tokens per call.
+ */
+const roadmapWriteResult = (roadmap: Roadmap): Record<string, unknown> => ({
+    project: roadmap.project,
+    summary: summarize(roadmap),
+    active: roadmap.active,
+    steps: outlineSteps(roadmap.steps)
+});
+
+/** One step after update_step: its own fields, the latest activity entry, child count instead of the subtree. */
+const stepResult = (step: RoadmapStep | null): unknown => {
+    if (step === null) return null;
+    const {children, activity, ...rest} = step;
+    return {
+        ...rest,
+        ...(activity !== undefined && activity.length > 0 ? {activity: activity.slice(-1)} : {}),
+        ...(children !== undefined && children.length > 0 ? {childCount: children.length} : {})
+    };
+};
+
 /** Per-project roadmap planning (Memory/<project>/_roadmap.md). */
 export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
@@ -172,7 +221,7 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
             const saved = await service.writeRoadmap({...current, steps: nextSteps});
             const noteId = `Memory/${project}/_roadmap.md`;
             return {
-                response: ok(roadmapResult(saved)),
+                response: ok(roadmapWriteResult(saved)),
                 event: {kind: 'write', touched: [noteId]}
             };
         }
@@ -211,7 +260,7 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
             );
             const saved = await service.writeRoadmap({...current, steps: logged});
             return {
-                response: ok(roadmapResult(saved)),
+                response: ok(roadmapWriteResult(saved)),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }
@@ -261,7 +310,7 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
             }
             const saved = await service.writeRoadmap({...current, steps: nextSteps});
             return {
-                response: ok({project, step: findStep(saved.steps, stepId), summary: summarize(saved)}),
+                response: ok({project, step: stepResult(findStep(saved.steps, stepId)), summary: summarize(saved)}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }
@@ -376,7 +425,7 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
             const commitSha = asString(args.commitSha, 'commitSha');
             const saved = await service.rollbackRoadmap(project, commitSha);
             return {
-                response: ok({project, restoredFrom: commitSha, ...(roadmapResult(saved) as object)}),
+                response: ok({project, restoredFrom: commitSha, ...roadmapWriteResult(saved)}),
                 event: {kind: 'write', touched: [`Memory/${project}/_roadmap.md`]}
             };
         }

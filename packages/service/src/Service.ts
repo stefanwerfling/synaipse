@@ -512,6 +512,15 @@ export class SynaipseService {
         return this.cachedLinkKeys;
     }
 
+    /**
+     * Wikilink targets of `note` that resolve to no note (same rule as
+     * graph/backlinks). Lets write tools warn about dead links up front.
+     */
+    public unresolvedWikilinks(note: Pick<Note, 'wikilinks'>): string[] {
+        const keys = this.linkKeyMap();
+        return [...new Set(note.wikilinks)].filter((target) => !keys.has(target));
+    }
+
     public async start(): Promise<void> {
         await this.notes.load();
         await this.chats.load();

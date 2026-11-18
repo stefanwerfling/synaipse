@@ -1,5 +1,10 @@
-import {isAllowedAssetMime, MIME_TO_EXT, type SynaipseService} from '@synaipse/service';
+import {canonicalNoteLink, resolveNoteRefTarget} from '@synaipse/core';
+import {isAllowedAssetMime, isPathInScope, MIME_TO_EXT, type SynaipseService} from '@synaipse/service';
+import {extractSection, headingsOf, modifiedOf, resolveNoteId, writeResult} from './Format.js';
 import {asString, enforceReadConsent, ok, type ToolHandler} from './Shared.js';
+
+/** Default cap for read_note bodies; long notes are cut with a hint how to page. */
+const READ_DEFAULT_MAX_CHARS = 20_000;
 
 const DEFAULT_ASSET_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -56,25 +61,58 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_read_note',
-            description: 'Read a single note by id (relative path from vault root, e.g. "Memory/decisions/auth.md").',
+            description: 'Read a note. `id` may be the vault path ("Memory/decisions/auth.md"), the path without .md, the title or an alias. Use `section` to read only the part under one heading, `offset`/`maxChars` to page through long notes.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    id: {type: 'string', description: 'Note id (relative path)'}
+                    id: {type: 'string', description: 'Vault path, title or alias'},
+                    section: {type: 'string', description: 'Only return the section under this heading (case-insensitive, up to the next heading of the same level).'},
+                    offset: {type: 'integer', minimum: 0, description: 'Start at this character of the (section) body. Default 0.'},
+                    maxChars: {type: 'integer', minimum: 1, maximum: 100000, description: `Max body characters to return (default ${READ_DEFAULT_MAX_CHARS}).`}
                 },
                 required: ['id']
             }
         },
         handle: async (args) => {
-            const id = asString(args.id, 'id');
+            const id = resolveNoteId(service, asString(args.id, 'id'));
             const note = await enforceReadConsent(service, id);
-            return {response: ok({note}), event: {kind: 'read', touched: [id]}};
+
+            let body = note.content;
+            if (typeof args.section === 'string' && args.section.trim().length > 0) {
+                const section = extractSection(note.content, args.section);
+                if (section === null) {
+                    const headings = headingsOf(note.content);
+                    throw new Error(
+                        `Section "${args.section}" not found in ${id}.`
+                        + (headings.length > 0 ? ` Headings: ${headings.slice(0, 30).map((h) => `"${h}"`).join(', ')}` : ' The note has no headings.')
+                    );
+                }
+                body = section;
+            }
+
+            const offset = typeof args.offset === 'number' && args.offset > 0 ? Math.trunc(args.offset) : 0;
+            const maxChars = typeof args.maxChars === 'number' ? Math.min(100_000, Math.max(1, Math.trunc(args.maxChars))) : READ_DEFAULT_MAX_CHARS;
+            const end = Math.min(body.length, offset + maxChars);
+            const truncated = offset > 0 || end < body.length;
+
+            const {path: _path, mtime, content: _content, ...rest} = note;
+            return {
+                response: ok({
+                    note: {
+                        ...rest,
+                        ...modifiedOf(mtime),
+                        content: body.slice(offset, end),
+                        ...(truncated ? {range: {offset, end, total: body.length}, ...(end < body.length ? {next: `offset: ${end}`} : {})} : {})
+                    }
+                }),
+                event: {kind: 'read', touched: [id]}
+            };
         }
     },
     {
         definition: {
             name: 'synaipse_write_note',
-            description: 'Create or overwrite a note. Provide id/path (relative to vault), markdown content and optional YAML frontmatter. Returns the parsed note.',
+            description: 'Create or overwrite a note. Provide path (relative to vault), markdown content and optional YAML frontmatter. Search first so you do not create a duplicate. Returns {id, title, hash, modified, warnings?} — warnings name wikilinks that point at no note.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -96,7 +134,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 content: asString(args.content, 'content'),
                 ...(frontmatter ? {frontmatter} : {})
             }, ctx);
-            return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
+            return {response: ok(writeResult(service, note)), event: {kind: 'write', touched: [note.id]}};
         }
     },
     {
@@ -217,7 +255,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_link_note',
-            description: 'Append wikilinks to a target note under a section heading (default: "References"). Idempotent — existing links are skipped. Use this to add cross-references without rewriting the whole note.',
+            description: 'Append wikilinks to a note under a section heading (default: "References"). Targets may be titles, aliases or vault paths; each must resolve to an existing note and is stored as its canonical [[Title]] — unresolvable targets reject the whole call, so no dead links form. Idempotent — existing links are skipped.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -225,7 +263,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                     toTitles: {
                         type: 'array',
                         items: {type: 'string'},
-                        description: 'Titles of notes to link to (will become [[Title]] wikilinks)'
+                        description: 'Notes to link to: titles, aliases or vault paths (become [[Title]] wikilinks)'
                     },
                     section: {type: 'string', description: 'Section heading to append under (default: "References")'}
                 },
@@ -238,9 +276,33 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 ? args.toTitles.filter((t): t is string => typeof t === 'string')
                 : [];
             const section = typeof args.section === 'string' ? args.section : 'References';
-            const {note, added} = await service.linkNote(fromId, toTitles, section, ctx);
+
+            // Same resolution + validation as roadmap_link_note: store the
+            // canonical title so graph/backlinks pick the link up.
+            const targets = service.listNotes()
+                .filter((n) => isPathInScope(n.id))
+                .map((n) => ({
+                    id: n.id,
+                    title: n.title,
+                    aliases: Array.isArray(n.frontmatter.aliases) ? n.frontmatter.aliases.filter((a): a is string => typeof a === 'string') : []
+                }));
+            const resolved: string[] = [];
+            const unresolved: string[] = [];
+            for (const ref of toTitles) {
+                const target = resolveNoteRefTarget(ref, targets);
+                if (target === null) unresolved.push(ref);
+                else resolved.push(canonicalNoteLink(target));
+            }
+            if (unresolved.length > 0) {
+                throw new Error(
+                    `These link targets resolve to no existing note: ${unresolved.map((r) => `"${r}"`).join(', ')}. `
+                    + 'Use an exact title, alias or vault path (synaipse_search finds it). Nothing was linked.'
+                );
+            }
+
+            const {note, added} = await service.linkNote(fromId, resolved, section, ctx);
             return {
-                response: ok({noteId: note.id, added, skipped: toTitles.filter((t) => !added.includes(t))}),
+                response: ok({noteId: note.id, added, skipped: resolved.filter((t) => !added.includes(t))}),
                 event: {kind: 'write', touched: [note.id]}
             };
         }
@@ -248,7 +310,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_update_note',
-            description: 'Partial update: change content and/or merge into frontmatter without rewriting unchanged parts. frontmatterPatch shallow-merges over existing keys.',
+            description: 'Partial update: replace the body and/or shallow-merge frontmatterPatch over existing keys. To change a few lines of a long body prefer synaipse_edit_note. Returns {id, title, hash, modified, changed, warnings?}.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -275,14 +337,15 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 patch.frontmatterPatch = args.frontmatterPatch as Record<string, unknown>;
             }
 
+            const previousHash = service.tryReadNote(id)?.hash;
             const note = await service.updateNote(id, patch, ctx);
-            return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
+            return {response: ok(writeResult(service, note, previousHash)), event: {kind: 'write', touched: [note.id]}};
         }
     },
     {
         definition: {
             name: 'synaipse_edit_note',
-            description: 'Find/replace inside a note body without resending the whole content — the point of this tool over update_note is to avoid transferring an unchanged 400-line note back through MCP just to change three lines. Each edit fails loudly (Error) if oldString isn\'t found or matches more than once; use replaceAll:true to opt into multi-match. Edits are applied in the given order against the intermediate body, so a later edit sees the earlier ones. Frontmatter is not touched — use update_note for that.',
+            description: 'Find/replace inside a note body without resending the whole content — the point of this tool over update_note is to avoid transferring an unchanged 400-line note back through MCP just to change three lines. Each edit fails loudly (Error) if oldString isn\'t found or matches more than once; use replaceAll:true to opt into multi-match. Edits are applied in the given order against the intermediate body, so a later edit sees the earlier ones. Frontmatter is not touched — use update_note for that. Returns {id, title, hash, modified, changed, warnings?}.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -352,7 +415,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
             }
 
             const note = await service.updateNote(id, {content: body}, ctx);
-            return {response: ok({note}), event: {kind: 'write', touched: [note.id]}};
+            return {response: ok(writeResult(service, note, existing.hash)), event: {kind: 'write', touched: [note.id]}};
         }
     }
 ];
