@@ -1,6 +1,6 @@
 export {SynaipseService} from './Service.js';
 export type {ServiceOverrides} from './Service.js';
-export {auditContextStorage, getAuditTokenLabel} from './AuditContext.js';
+export {auditContextStorage, getAuditTokenLabel, isPathInScope} from './AuditContext.js';
 export type {AuditContext} from './AuditContext.js';
 export {fulltextSearch} from './Fulltext.js';
 export {HashCache} from '@synaipse/vault';

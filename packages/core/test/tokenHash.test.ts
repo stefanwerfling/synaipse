@@ -69,3 +69,24 @@ describe('hintOf', () => {
         expect(hintOf('xyz')).toBe('xyz');
     });
 });
+describe('verifyTokenAsync', () => {
+    it('agrees with the sync verifier', async () => {
+        const {verifyTokenAsync} = await import('../src/TokenHash.js');
+        const t = generateToken();
+        expect(await verifyTokenAsync(t.plain, t.hashHex, t.saltHex)).toBe(true);
+        expect(await verifyTokenAsync(t.plain + 'x', t.hashHex, t.saltHex)).toBe(false);
+        expect(await verifyTokenAsync('', t.hashHex, t.saltHex)).toBe(false);
+        expect(await verifyTokenAsync(t.plain, 'abcd', t.saltHex)).toBe(false);
+    });
+
+    it('does not block the event loop', async () => {
+        const {verifyTokenAsync} = await import('../src/TokenHash.js');
+        const t = generateToken();
+        let ticked = false;
+        const tick = new Promise<void>((resolve) => setImmediate(() => { ticked = true; resolve(); }));
+        const verify = verifyTokenAsync(t.plain, t.hashHex, t.saltHex);
+        await tick;
+        expect(ticked).toBe(true);
+        expect(await verify).toBe(true);
+    });
+});

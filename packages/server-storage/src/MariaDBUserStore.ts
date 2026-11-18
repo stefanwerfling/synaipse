@@ -6,7 +6,7 @@ import {
     type UserRecord,
     type UserStore
 } from '@synaipse/core';
-import {generateToken, verifyToken} from '@synaipse/core/token-hash';
+import {generateToken, verifyTokenAsync} from '@synaipse/core/token-hash';
 import type {ResolvedMariaDBConfig} from './Pool.js';
 
 interface UserRow {
@@ -132,7 +132,7 @@ export class MariaDBUserStore implements UserStore {
             );
 
             for (const row of rows) {
-                if (verifyToken(plainToken, row.token_hash, row.token_salt)) {
+                if (await verifyTokenAsync(plainToken, row.token_hash, row.token_salt)) {
                     return rowToRecord(row);
                 }
             }

@@ -23,7 +23,7 @@ import {
     upsertStep,
     withoutDeletedEntries
 } from '@synaipse/core';
-import {SynaipseService, getAuditTokenLabel, isAllowedAssetMime, MIME_TO_EXT} from '@synaipse/service';
+import {SynaipseService, getAuditTokenLabel, isAllowedAssetMime, isPathInScope, MIME_TO_EXT} from '@synaipse/service';
 import type {EventKind} from './EventPublisher.js';
 
 const CONSENT_TIMEOUT_MS = 60_000;
@@ -84,6 +84,9 @@ const filterByConsent = <T>(
 
     for (const item of items) {
         const id = getId(item);
+        // Out-of-scope items are dropped silently (not counted) so a
+        // path-scoped token can't even learn how many hidden notes matched.
+        if (!isPathInScope(id)) continue;
         const note = service.tryReadNote(id);
         const status = note?.frontmatter.mcp_consent;
         if (status === 'pending' || status === 'denied') {
@@ -105,6 +108,7 @@ const filterNotesByConsent = (
     const kept: Note[] = [];
     let skipped = 0;
     for (const note of notes) {
+        if (!isPathInScope(note.id)) continue;
         const status = note.frontmatter.mcp_consent;
         if (status === 'pending' || status === 'denied') {
             skipped++;
@@ -211,6 +215,11 @@ export interface ToolHandler {
      * this undefined and skip the path-prefix check.
      */
     pathArg?: string;
+    /**
+     * Tool output can't be filtered per path (history forensics over the
+     * whole vault). Denied for tokens with a path-prefix scope.
+     */
+    unscopedOnly?: boolean;
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 
@@ -220,13 +229,13 @@ export interface ToolHandler {
  * definition) so the 24-tool list stays scannable and adding/removing
  * write tools is one line, not a hunt-for-the-right-position edit.
  */
-const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
+const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string; unscopedOnly?: boolean}> = {
     synaipse_write_note:   {mode: 'write', pathArg: 'path'},
-    synaipse_update_note:  {mode: 'write', pathArg: 'path'},
+    synaipse_update_note:  {mode: 'write', pathArg: 'id'},
     synaipse_edit_note:    {mode: 'write', pathArg: 'id'},
     synaipse_delete_note:  {mode: 'write', pathArg: 'id'},
     synaipse_write_asset:  {mode: 'write', pathArg: 'noteId'},
-    synaipse_link_note:    {mode: 'write', pathArg: 'source'},
+    synaipse_link_note:    {mode: 'write', pathArg: 'fromId'},
     synaipse_log_session:  {mode: 'write'},
     synaipse_remember:     {mode: 'write'},
     // Roadmap tools scope on ctx.project (no pathArg — the note path is derived
@@ -246,7 +255,9 @@ const ACL_TABLE: Record<string, {mode: 'read' | 'write'; pathArg?: string}> = {
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
     synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
     synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
-    synaipse_related:      {mode: 'read',  pathArg: 'id'}
+    synaipse_related:      {mode: 'read',  pathArg: 'id'},
+    synaipse_verify_history: {mode: 'read', unscopedOnly: true},
+    synaipse_snapshot_list:   {mode: 'read', unscopedOnly: true}
 };
 
 const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t) => {
@@ -254,7 +265,8 @@ const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t)
     return {
         ...t,
         mode: entry?.mode ?? 'read',
-        ...(entry?.pathArg !== undefined ? {pathArg: entry.pathArg} : {})
+        ...(entry?.pathArg !== undefined ? {pathArg: entry.pathArg} : {}),
+        ...(entry?.unscopedOnly === true ? {unscopedOnly: true} : {})
     };
 });
 
@@ -633,7 +645,8 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
         },
         handle: async () => {
             const tags = [...service.tags().entries()]
-                .map(([tag, ids]) => ({tag, count: ids.length}))
+                .map(([tag, ids]) => ({tag, count: ids.filter(isPathInScope).length}))
+                .filter((t) => t.count > 0)
                 .sort((a, b) => b.count - a.count);
             return {response: ok({tags}), event: {kind: 'tags', touched: []}};
         }
@@ -720,7 +733,14 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             description: 'Return the knowledge graph (nodes + wikilink edges). Use for visualisation or structural reasoning.',
             inputSchema: {type: 'object', properties: {}}
         },
-        handle: async () => ({response: ok({graph: service.graph()}), event: {kind: 'graph', touched: []}})
+        handle: async () => {
+            const full = service.graph();
+            const graph = {
+                nodes: full.nodes.filter((n) => isPathInScope(n.id)),
+                edges: full.edges.filter((e) => isPathInScope(e.from) && isPathInScope(e.to))
+            };
+            return {response: ok({graph}), event: {kind: 'graph', touched: []}};
+        }
     },
     {
         definition: {
@@ -825,7 +845,8 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
             const limit = asNumber(args.limit, 20);
             const minScore = typeof args.minScore === 'number' ? args.minScore : 0.65;
             const pathPrefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
-            const suggestions = await service.suggestLinks({limit, minScore, pathPrefix});
+            const suggestions = (await service.suggestLinks({limit, minScore, pathPrefix}))
+                .filter((s) => isPathInScope(s.a) && isPathInScope(s.b));
             return {
                 response: ok({suggestions, count: suggestions.length}),
                 event: {
@@ -991,7 +1012,9 @@ export const buildTools = (service: SynaipseService): ToolHandler[] => applyAcl(
                 throw new Error('edits must be a non-empty array');
             }
 
-            const existing = service.readNote(id);
+            // Same consent gate as read_note: edit_note returns the note,
+            // so a pending/denied note must not leak through here.
+            const existing = await enforceReadConsent(service, id);
             let body = existing.content;
 
             for (let i = 0; i < rawEdits.length; i++) {

@@ -171,7 +171,7 @@ export const isAdminScope = (scope: TokenScope): boolean => {
  */
 export const checkScope = (
     scope: TokenScope,
-    tool: {name: string; mode: 'read' | 'write'},
+    tool: {name: string; mode: 'read' | 'write'; unscopedOnly?: boolean},
     pathArg: string | undefined
 ): string | null => {
     if (tool.mode === 'write' && !scope.write) {
@@ -182,6 +182,9 @@ export const checkScope = (
     }
     if (scope.tools.length > 0 && !scope.tools.includes(tool.name)) {
         return `token "${scope.label}" is not allowed to call tool ${tool.name} (tool whitelist set)`;
+    }
+    if (tool.unscopedOnly === true && scope.pathPrefixes.length > 0) {
+        return `token "${scope.label}" has a path-prefix scope; tool ${tool.name} spans the whole vault and needs an unscoped token`;
     }
     if (pathArg !== undefined && scope.pathPrefixes.length > 0) {
         const allowed = scope.pathPrefixes.some((p) => pathArg.startsWith(p));

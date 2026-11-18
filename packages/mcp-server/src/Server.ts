@@ -35,6 +35,20 @@ export interface StartServerOptions {
     httpPath: string;
 }
 
+/**
+ * Extract the path argument the ACL checks against. Fail-closed: when the
+ * tool's schema marks its path field as required but the caller sent a
+ * non-string (or nothing), return '' — which matches no prefix — so a
+ * path-scoped token can't skip the prefix check by omitting the field.
+ */
+export const resolvePathArg = (tool: ToolHandler, args: Record<string, unknown>): string | undefined => {
+    if (tool.pathArg === undefined) return undefined;
+    const value = args[tool.pathArg];
+    if (typeof value === 'string') return value;
+    const required = (tool.definition.inputSchema as {required?: unknown}).required;
+    return Array.isArray(required) && required.includes(tool.pathArg) ? '' : undefined;
+};
+
 const buildMcpServer = (
     config: Config,
     tools: ToolHandler[],
@@ -72,11 +86,11 @@ const buildMcpServer = (
         }
 
         const args = (request.params.arguments ?? {}) as Record<string, unknown>;
-        const pathArg = tool.pathArg !== undefined && typeof args[tool.pathArg] === 'string'
-            ? args[tool.pathArg] as string
-            : undefined;
-
-        const denial = checkScope(scope, {name: tool.definition.name, mode: tool.mode ?? 'read'}, pathArg);
+        const denial = checkScope(
+            scope,
+            {name: tool.definition.name, mode: tool.mode ?? 'read', ...(tool.unscopedOnly === true ? {unscopedOnly: true} : {})},
+            resolvePathArg(tool, args)
+        );
         if (denial !== null) {
             return {
                 isError: true,
@@ -90,7 +104,7 @@ const buildMcpServer = (
             // entries get tagged with the calling MCP token without
             // threading the label through every service-method signature.
             const outcome = await auditContextStorage.run(
-                {tokenLabel: scope.label},
+                {tokenLabel: scope.label, pathPrefixes: scope.pathPrefixes},
                 () => tool.handle(args, ctx)
             );
 

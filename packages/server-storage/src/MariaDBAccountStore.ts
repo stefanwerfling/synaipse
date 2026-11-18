@@ -4,7 +4,7 @@ import {
     type AccountStore,
     type CreateAccountInput
 } from '@synaipse/core';
-import {generatePasswordHash, verifyPassword} from '@synaipse/core/password-hash';
+import {generatePasswordHash, verifyPasswordAsync} from '@synaipse/core/password-hash';
 import type {ResolvedMariaDBConfig} from './Pool.js';
 
 interface AccountRow {
@@ -117,7 +117,7 @@ export class MariaDBAccountStore implements AccountStore {
                 return null;
             }
 
-            if (!verifyPassword(password, row.password_hash, row.password_salt)) {
+            if (!(await verifyPasswordAsync(password, row.password_hash, row.password_salt))) {
                 return null;
             }
 

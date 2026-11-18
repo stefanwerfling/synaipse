@@ -55,3 +55,12 @@ describe('verifyPassword', () => {
         expect(verifyPassword('hunter2', h.hashHex, 'not-hex')).toBe(false);
     });
 });
+describe('verifyPasswordAsync', () => {
+    it('agrees with the sync verifier', async () => {
+        const {verifyPasswordAsync} = await import('../src/PasswordHash.js');
+        const h = generatePasswordHash('hunter2');
+        expect(await verifyPasswordAsync('hunter2', h.hashHex, h.saltHex)).toBe(true);
+        expect(await verifyPasswordAsync('hunter3', h.hashHex, h.saltHex)).toBe(false);
+        expect(await verifyPasswordAsync('', h.hashHex, h.saltHex)).toBe(false);
+    });
+});

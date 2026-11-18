@@ -17,6 +17,13 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 export interface AuditContext {
     /** Operator-defined label from the resolved TokenScope, or undefined when the request didn't go through MCP auth. */
     tokenLabel?: string;
+    /**
+     * Path-prefix scope of the calling token. Empty/undefined = unrestricted.
+     * Aggregate MCP tools (search, list, graph, …) consult it via
+     * {@link isPathInScope} so a path-scoped token can't read notes outside
+     * its prefixes through a list/search response.
+     */
+    pathPrefixes?: readonly string[];
 }
 
 export const auditContextStorage = new AsyncLocalStorage<AuditContext>();
@@ -24,4 +31,13 @@ export const auditContextStorage = new AsyncLocalStorage<AuditContext>();
 /** Return the active token label (undefined when no context is set or the context doesn't carry one). */
 export const getAuditTokenLabel = (): string | undefined => {
     return auditContextStorage.getStore()?.tokenLabel;
+};
+/**
+ * True when `id` is visible to the active request's path-prefix scope.
+ * No context or an empty prefix list means unrestricted.
+ */
+export const isPathInScope = (id: string): boolean => {
+    const prefixes = auditContextStorage.getStore()?.pathPrefixes;
+    if (prefixes === undefined || prefixes.length === 0) return true;
+    return prefixes.some((p) => id.startsWith(p));
 };

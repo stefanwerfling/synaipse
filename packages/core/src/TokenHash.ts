@@ -1,4 +1,4 @@
-import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
+import {randomBytes, scrypt, scryptSync, timingSafeEqual} from 'node:crypto';
 
 // scrypt cost parameters. N=2^14 ≈ 50ms on modern hardware. Bearer tokens
 // have 256 bits of entropy from randomBytes(32), so we don't need a slow
@@ -69,3 +69,40 @@ export const verifyToken = (plain: string, hashHex: string, saltHex: string): bo
 };
 
 export const hintOf = (plain: string): string => plain.slice(0, HINT_LEN);
+
+/**
+ * Non-blocking variant of {@link verifyToken}. scrypt at N=2^14 costs ~50 ms of
+ * CPU; the sync version blocks the event loop for that long on every
+ * auth miss, which stalls every other request (MCP included). Request
+ * paths must use this one; the sync variant stays for CLIs and tests.
+ */
+export const verifyTokenAsync = async (plain: string, hashHex: string, saltHex: string): Promise<boolean> => {
+    if (plain.length === 0 || hashHex.length === 0 || saltHex.length === 0) {
+        return false;
+    }
+
+    let expectedBuf: Buffer;
+    let salt: Buffer;
+    try {
+        expectedBuf = Buffer.from(hashHex, 'hex');
+        salt = Buffer.from(saltHex, 'hex');
+    } catch {
+        return false;
+    }
+
+    if (expectedBuf.length !== HASH_LEN_BYTES) {
+        return false;
+    }
+
+    const candidateBuf = await new Promise<Buffer | null>((resolve) => {
+        scrypt(plain, salt, HASH_LEN_BYTES, {N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P}, (err, derived) => {
+            resolve(err ? null : derived);
+        });
+    });
+
+    if (candidateBuf === null) {
+        return false;
+    }
+
+    return timingSafeEqual(candidateBuf, expectedBuf);
+};
