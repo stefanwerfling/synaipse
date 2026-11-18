@@ -7,6 +7,7 @@ export {HashCache} from './Cache.js';
 export {EntryStore} from './EntryStore.js';
 export type {EntryCache, EntryStoreOptions} from './EntryStore.js';
 export {StateDb} from './StateDb.js';
+export {NO_CACHE as MATTER_NO_CACHE} from './MatterOptions.js';
 export {QueryVectorCache} from './QueryVectorCache.js';
 export type {QueryVectorCacheOptions} from './QueryVectorCache.js';
 export type {CacheEntry, TouchSeed} from './Cache.js';

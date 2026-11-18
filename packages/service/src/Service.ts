@@ -57,7 +57,7 @@ import {
 import type {ChatAdapter} from '@synaipse/core';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
-import {EntryStore, QueryVectorCache} from '@synaipse/vault';
+import {EntryStore, MATTER_NO_CACHE, QueryVectorCache} from '@synaipse/vault';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, ChatPrivacyStats, SummarizeEvent} from './Chat.js';
 export type {RedactionHit, RedactionResult} from './Privacy.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
@@ -2513,7 +2513,7 @@ export class SynaipseService {
     public async rollbackRoadmap(project: string, commitSha: string): Promise<Roadmap> {
         const id = roadmapPathFor(project);
         const raw = await this.noteVersion(id, commitSha);
-        const parsed = matter(raw);
+        const parsed = matter(raw, MATTER_NO_CACHE);
         const roadmap = parseRoadmap(project, parsed.data as Record<string, unknown>);
         if (roadmap === null) {
             throw new Error(`commit ${commitSha.slice(0, 8)} has no valid roadmap for project "${project}"`);

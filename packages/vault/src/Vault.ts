@@ -1,6 +1,7 @@
 import {mkdir, readFile, stat, writeFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 import matter from 'gray-matter';
+import {NO_CACHE} from './MatterOptions.js';
 import {access} from 'node:fs/promises';
 import {constants as fsConstants} from 'node:fs';
 import {Repo, type PersonInput} from 'ngit';
@@ -336,7 +337,7 @@ export class Vault {
             return content;
         }
 
-        return matter.stringify(content, frontmatter);
+        return matter.stringify(content, frontmatter, NO_CACHE);
     }
 
     private async ensureRoot(): Promise<void> {

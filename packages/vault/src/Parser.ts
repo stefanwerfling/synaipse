@@ -1,5 +1,6 @@
 import path from 'node:path';
 import matter from 'gray-matter';
+import {NO_CACHE} from './MatterOptions.js';
 import {extractTags, extractWikilinks, type Frontmatter, type Note} from '@synaipse/core';
 import {sha1} from './Hash.js';
 
@@ -34,7 +35,10 @@ export interface ParseInput {
 }
 
 export const parseNote = (input: ParseInput): Note => {
-    const parsed = matter(input.raw);
+    // Options object on purpose: without one gray-matter keeps every input
+    // (string + Buffer copy) in a process-wide cache that is never evicted,
+    // so each edited version of every note stayed in memory (plan P4 / A4).
+    const parsed = matter(input.raw, NO_CACHE);
     const frontmatter = parsed.data as Frontmatter;
     const body = parsed.content;
 
