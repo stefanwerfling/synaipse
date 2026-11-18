@@ -13,7 +13,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-    await rm(dir, {recursive: true, force: true});
+    // A debounced (0 ms) flush from a test that didn't await it can still
+    // be writing its tmp file — retry instead of failing with ENOTEMPTY.
+    await rm(dir, {recursive: true, force: true, maxRetries: 5, retryDelay: 20});
 });
 
 describe('HashCache', () => {

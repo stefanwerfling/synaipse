@@ -1,5 +1,5 @@
 import {existsSync} from 'node:fs';
-import {mkdir, readFile, rename, stat, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rename, rm, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {LEGACY_EMBED_MODEL} from '@synaipse/core';
 
@@ -287,8 +287,14 @@ export class HashCache {
         // Atomic replace: a crash mid-write must never leave a truncated
         // JSON behind (that would force a full re-embed on next start).
         const tmp = `${this.file}.tmp-${process.pid}`;
-        await writeFile(tmp, JSON.stringify(obj), 'utf8');
-        await rename(tmp, this.file);
+        try {
+            await writeFile(tmp, JSON.stringify(obj), 'utf8');
+            await rename(tmp, this.file);
+        } catch (error) {
+            this.dirty = true;
+            await rm(tmp, {force: true}).catch(() => undefined);
+            throw error;
+        }
         this.knownMtime = await this.diskMtime();
     }
 }
