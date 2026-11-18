@@ -3,7 +3,7 @@ import {mkdtemp, rm, writeFile, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {SynaipseService, auditContextStorage} from '@synaipse/service';
-import {buildTools, EMPTY_CTX, type ToolHandler} from '../src/Tools.js';
+import {buildTools, EMPTY_CTX, TOOLSETS, type ToolHandler} from '../src/Tools.js';
 import {resolvePathArg} from '../src/Server.js';
 import {checkScope, type TokenScope} from '../src/Auth.js';
 
@@ -57,7 +57,7 @@ beforeEach(async () => {
     await writeNote(vaultDir, 'Memory/b/two.md', '---\ntitle: Two\ntags: [shared, secret]\n---\nalpha [[One]]\n\n- [ ] todo b');
     service = new SynaipseService(buildConfig(vaultDir));
     await service.start();
-    tools = buildTools(service);
+    tools = buildTools(service, {toolsets: TOOLSETS});
 });
 
 afterEach(async () => {
@@ -130,9 +130,13 @@ describe('aggregate tools respect the path-prefix scope', () => {
     });
 
     it('graph keeps only in-scope nodes and edges', async () => {
-        const res = await callScoped<{graph: {nodes: Array<{id: string}>; edges: Array<{from: string; to: string}>}}>('synaipse_graph', {});
-        expect(res.graph.nodes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
-        expect(res.graph.edges).toEqual([]);
+        const res = await callScoped<{nodes: Array<{id: string}>; edges: Array<[string, string]>}>('synaipse_graph', {});
+        expect(res.nodes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
+        expect(res.edges).toEqual([]);
+        // An out-of-scope center is invisible, not a leak.
+        await expect(callScoped('synaipse_graph', {center: 'Memory/b/two.md'})).rejects.toThrow(/not found/);
+        const links = await callScoped<{in: string[]}>('synaipse_links', {id: 'Memory/a/one.md', direction: 'in'});
+        expect(links.in).toEqual([]);
     });
 
     it('todos and backlinks', async () => {
@@ -155,7 +159,7 @@ describe('edit_note consent gate', () => {
         await service.stop();
         service = new SynaipseService(buildConfig(vaultDir));
         await service.start();
-        tools = buildTools(service);
+        tools = buildTools(service, {toolsets: TOOLSETS});
         const outcome = await tool('synaipse_edit_note').handle(
             {id: 'Memory/a/locked.md', edits: [{oldString: 'secret', newString: 'x'}]},
             EMPTY_CTX

@@ -39,7 +39,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_get_project',
-            description: 'Return the active project context. When set, write_note auto-prefixes paths to Memory/<project>/, injects a project/<name> tag and frontmatter.project; update/delete/link/log_session are restricted to Memory/<project>/. Useful for Claude to verify scope before acting.',
+            description: 'Active project context: folder, tag, extra tags, git author. Project-scoped writes go to Memory/<project>/.',
             inputSchema: {type: 'object', properties: {}}
         },
         handle: async (_args, ctx) => {
@@ -61,14 +61,14 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_read_note',
-            description: 'Read a note. `id` may be the vault path ("Memory/decisions/auth.md"), the path without .md, the title or an alias. Use `section` to read only the part under one heading, `offset`/`maxChars` to page through long notes.',
+            description: 'Read a note by vault path, title or alias. `section` returns only the part under one heading; `offset`/`maxChars` page through long notes.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     id: {type: 'string', description: 'Vault path, title or alias'},
-                    section: {type: 'string', description: 'Only return the section under this heading (case-insensitive, up to the next heading of the same level).'},
-                    offset: {type: 'integer', minimum: 0, description: 'Start at this character of the (section) body. Default 0.'},
-                    maxChars: {type: 'integer', minimum: 1, maximum: 100000, description: `Max body characters to return (default ${READ_DEFAULT_MAX_CHARS}).`}
+                    section: {type: 'string', description: 'Heading text (case-insensitive)'},
+                    offset: {type: 'integer', minimum: 0, description: 'Default 0'},
+                    maxChars: {type: 'integer', minimum: 1, maximum: 100000, description: 'Default 20000'}
                 },
                 required: ['id']
             }
@@ -112,15 +112,15 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_write_note',
-            description: 'Create or overwrite a note. Provide path (relative to vault), markdown content and optional YAML frontmatter. Search first so you do not create a duplicate. Returns {id, title, hash, modified, warnings?} — warnings name wikilinks that point at no note.',
+            description: 'Create or overwrite a note; relative paths land in the project folder. Search first to avoid duplicates. Returns {id, hash, warnings?} — warnings name dead wikilinks.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    path: {type: 'string', description: 'Note path relative to vault, e.g. "Memory/decisions/2026-06-11-auth.md"'},
-                    content: {type: 'string', description: 'Markdown body (without frontmatter)'},
+                    path: {type: 'string', description: 'e.g. "decisions/auth.md"'},
+                    content: {type: 'string', description: 'Markdown body without frontmatter'},
                     frontmatter: {
                         type: 'object',
-                        description: 'Optional YAML frontmatter (title, tags, aliases, created, updated, ...)',
+                        description: 'title, tags, aliases, …',
                         additionalProperties: true
                     }
                 },
@@ -140,13 +140,13 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_write_asset',
-            description: `Upload a binary asset (image/svg/png/jpg/gif/webp/avif) into the project's _assets/ folder. The file is hashed and deduped — re-uploading the same bytes returns the existing assetId. When noteId is given, the response includes a note-relative relativePath ready to drop into a markdown ![](…) link. Use this BEFORE synaipse_write_note / synaipse_update_note when adding images to a note. Allowed MIME types: ${Object.keys(MIME_TO_EXT).join(', ')}.`,
+            description: `Upload an image (base64) into the project's _assets/ folder, deduped by content hash. With noteId the result includes a relativePath for ![](…). Upload before writing the note that embeds it. Allowed: ${Object.keys(MIME_TO_EXT).join(', ')}.`,
             inputSchema: {
                 type: 'object',
                 properties: {
-                    data: {type: 'string', description: 'Base64-encoded file bytes (no data: URL prefix). Max size configurable via SYNAIPSE_ASSET_MAX_BYTES (default 10 MB).'},
-                    contentType: {type: 'string', description: 'MIME type, e.g. "image/png", "image/svg+xml". Determines the file extension.'},
-                    noteId: {type: 'string', description: 'Optional vault-relative note id (e.g. "Memory/proj/decision-x.md"). When given, the asset is anchored to that note and the response carries a ready-to-embed relativePath. When omitted, the asset still lands in Memory/<project>/_assets/ but you build the link yourself.'}
+                    data: {type: 'string', description: 'Base64 bytes, no data: prefix (max SYNAIPSE_ASSET_MAX_BYTES, default 10 MB)'},
+                    contentType: {type: 'string', description: 'MIME type, e.g. "image/png"'},
+                    noteId: {type: 'string', description: 'Note that will embed the asset'}
                 },
                 required: ['data', 'contentType']
             }
@@ -177,7 +177,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_delete_note',
-            description: 'Permanently delete a note from the vault and remove it from the vector index.',
+            description: 'Delete a note and drop it from the index (recoverable from version history when enabled).',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -195,15 +195,15 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_log_session',
-            description: 'Append a structured entry to today\'s session log in Memory/sessions/YYYY-MM-DD.md. Use this to record what you worked on, key insights, and the notes you referenced. Each call appends a new heading-3 entry with the current time. Wikilinks to references are added automatically.',
+            description: 'Append to today\'s session log: what you did, insights, and the notes you used — references become [[links]] and count as "used" for ranking.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    summary: {type: 'string', description: 'Short narrative of what was worked on and any insights (1-5 sentences)'},
+                    summary: {type: 'string', description: '1-5 sentences'},
                     references: {
                         type: 'array',
                         items: {type: 'string'},
-                        description: 'Note titles to wikilink (e.g. ["Voyage Embeddings", "Qdrant Setup"]). These become [[Wikilinks]] in the log entry.'
+                        description: 'Titles of notes you used'
                     }
                 },
                 required: ['summary']
@@ -225,15 +225,15 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_remember',
-            description: 'Append a one-line insight to today\'s inbox at Memory/<project>/inbox/YYYY-MM-DD.md. Use this for lightweight captures that don\'t deserve a full note yet (e.g. "qdrant client v2 drops the legacy upsert API" or "Stefan prefers PascalCase for src/ files") — somewhere between log_session (narrative) and write_note (curated note). Each call appends a heading-3 entry with the current time; tags are rendered inline as #foo #bar.',
+            description: 'Append a one-line insight to today\'s inbox (Memory/<project>/inbox/YYYY-MM-DD.md) — for captures not yet worth a curated note.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    text: {type: 'string', description: 'The insight in 1-3 sentences. Leading/trailing whitespace is trimmed.'},
+                    text: {type: 'string', description: '1-3 sentences'},
                     tags: {
                         type: 'array',
                         items: {type: 'string'},
-                        description: 'Optional inline tags (without #). Rendered as #tag on a separate line below the text. Not added to frontmatter to keep the inbox file tag list clean.'
+                        description: 'Inline tags, without #'
                     }
                 },
                 required: ['text']
@@ -255,17 +255,17 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_link_note',
-            description: 'Append wikilinks to a note under a section heading (default: "References"). Targets may be titles, aliases or vault paths; each must resolve to an existing note and is stored as its canonical [[Title]] — unresolvable targets reject the whole call, so no dead links form. Idempotent — existing links are skipped.',
+            description: 'Append [[links]] to a note under a heading (default "References"). Targets (titles, aliases, paths) must resolve to existing notes, else nothing is linked. Idempotent.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    fromId: {type: 'string', description: 'Source note id (relative path)'},
+                    fromId: {type: 'string', description: 'Note to add the links to'},
                     toTitles: {
                         type: 'array',
                         items: {type: 'string'},
-                        description: 'Notes to link to: titles, aliases or vault paths (become [[Title]] wikilinks)'
+                        description: 'Titles, aliases or vault paths'
                     },
-                    section: {type: 'string', description: 'Section heading to append under (default: "References")'}
+                    section: {type: 'string'}
                 },
                 required: ['fromId', 'toTitles']
             }
@@ -310,15 +310,14 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_update_note',
-            description: 'Partial update: replace the body and/or shallow-merge frontmatterPatch over existing keys. To change a few lines of a long body prefer synaipse_edit_note. Returns {id, title, hash, modified, changed, warnings?}.',
+            description: 'Replace the body and/or shallow-merge frontmatterPatch. For a few changed lines prefer synaipse_edit_note. Returns {id, hash, changed, warnings?}.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    id: {type: 'string', description: 'Note id (relative path)'},
-                    content: {type: 'string', description: 'New markdown body (optional, leaves content unchanged if omitted)'},
+                    id: {type: 'string'},
+                    content: {type: 'string', description: 'New body (omit to keep)'},
                     frontmatterPatch: {
                         type: 'object',
-                        description: 'Shallow-merged into existing frontmatter (optional)',
                         additionalProperties: true
                     }
                 },
@@ -345,20 +344,19 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_edit_note',
-            description: 'Find/replace inside a note body without resending the whole content — the point of this tool over update_note is to avoid transferring an unchanged 400-line note back through MCP just to change three lines. Each edit fails loudly (Error) if oldString isn\'t found or matches more than once; use replaceAll:true to opt into multi-match. Edits are applied in the given order against the intermediate body, so a later edit sees the earlier ones. Frontmatter is not touched — use update_note for that. Returns {id, title, hash, modified, changed, warnings?}.',
+            description: 'Find/replace in a note body without resending it. Each oldString must match exactly once (or set replaceAll); edits apply in order, and nothing is written if one fails. Frontmatter: use update_note. Returns {id, hash, changed, warnings?}.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    id: {type: 'string', description: 'Note id (relative path)'},
+                    id: {type: 'string'},
                     edits: {
                         type: 'array',
-                        description: 'Ordered list of body edits',
                         items: {
                             type: 'object',
                             properties: {
-                                oldString: {type: 'string', description: 'Literal text to find in the current body. Must match exactly once (or set replaceAll).'},
-                                newString: {type: 'string', description: 'Replacement text. May be empty to delete.'},
-                                replaceAll: {type: 'boolean', description: 'Replace every occurrence instead of requiring uniqueness. Default false.'}
+                                oldString: {type: 'string', description: 'Exact text'},
+                                newString: {type: 'string', description: 'May be empty'},
+                                replaceAll: {type: 'boolean'}
                             },
                             required: ['oldString', 'newString']
                         },

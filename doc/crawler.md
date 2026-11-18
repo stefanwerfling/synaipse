@@ -80,8 +80,8 @@ Body: title, blockquoted description, link, stats list, truncated README.
 ### What you can do with it
 
 - `synaipse_search "rust web framework" mode:semantic` → finds candidate libraries from your stars
-- `synaipse_notes_by_tag language/rust` → all your Rust stars
-- `synaipse_graph` → topic clusters visualised next to your own notes
+- `synaipse_list {tag: "language/rust"}` → all your Rust stars
+- `synaipse_graph {center: …}` → the link neighbourhood of a note, next to your own notes
 - `synaipse_related "Memory/decisions/picked-tooling.md"` → which of your starred repos cover the same ground as your decision
 
 ### Cron
@@ -166,8 +166,8 @@ Body: title, blockquoted description, author byline + back-link `[[Dev.to — la
 ### What you can do with it
 
 - `synaipse_search "type inference benchmarks" mode:semantic` → finds matching dev.to articles by body content
-- `synaipse_notes_by_tag tag/rust` → all dev.to Rust articles you crawled
-- `synaipse_recent {pathPrefix: "Crawler/devto/"}` → newest crawls
+- `synaipse_list {tag: "tag/rust"}` → all dev.to Rust articles you crawled
+- `synaipse_list {prefix: "Crawler/devto/"}` → newest crawls
 - Compose with a cron job for a daily feed digest
 
 ### Cron

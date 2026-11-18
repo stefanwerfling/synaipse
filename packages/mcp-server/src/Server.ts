@@ -72,6 +72,7 @@ export const buildMcpServer = (
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: tools
             .filter((t) => {
+                if (t.hidden === true) return false;
                 if (scope.tools.length > 0 && !scope.tools.includes(t.definition.name)) return false;
                 if ((t.mode ?? 'read') === 'write' && !scope.write) return false;
                 if ((t.mode ?? 'read') === 'read' && !scope.read) return false;

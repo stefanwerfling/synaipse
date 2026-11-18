@@ -114,7 +114,7 @@ Resolution order:
 3. case-insensitive title match
 4. unresolved (rendered, but stays a dangling link in the graph)
 
-Wikilinks are the source of truth for the graph (`synaipse_graph`) and backlinks (`synaipse_backlinks`).
+Wikilinks are the source of truth for the graph (`synaipse_graph`) and backlinks (`synaipse_links`).
 
 ## Tags
 

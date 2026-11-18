@@ -74,22 +74,22 @@ export const benchmarkTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_benchmark_add',
-            description: 'Log a benchmark result for the active project: a speed/quality number tagged with an open set of dimensions (e.g. {machine, backend, technique} for an inference-engine project, or {language, algorithm, input_size} for another — the project decides its own vocabulary). Before inventing new dimension key names, call synaipse_benchmark_list to see what keys this project already uses and stay consistent. This is additive alongside your usual narrative research note, not a replacement — link back to it via noteLinks. Writes Memory/<project>/_benchmarks.md.',
+            description: 'Log a benchmark result for the active project: metric, value and unit, tagged with open dimensions (e.g. {machine, backend, technique}). Call synaipse_benchmark_list first and reuse its dimension keys; link the research note via noteLinks.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     dimensions: {
                         type: 'object',
                         additionalProperties: {type: 'string'},
-                        description: 'Open key/value tags describing what was measured, e.g. {"machine":"GB10","backend":"vLLM","technique":"NVFP4"}. At least one key required.'
+                        description: 'e.g. {"machine":"GB10","backend":"vLLM"}; at least one key'
                     },
-                    metric: {type: 'string', description: 'What was measured, e.g. "decode_tok_s", "prefill_ms".'},
+                    metric: {type: 'string', description: 'e.g. "decode_tok_s"'},
                     value: {type: 'number'},
-                    unit: {type: 'string', description: 'e.g. "tok/s", "ms".'},
-                    higherIsBetter: {type: 'boolean', description: 'Required — never inferred from the metric name.'},
-                    context: {type: 'string', description: 'Free text, e.g. "single-user, 2316-tok prompt".'},
-                    noteLinks: {type: 'array', items: {type: 'string'}, description: 'Wikilink targets to the narrative research note this result came from.'},
-                    recordedAt: {type: 'string', description: 'ISO timestamp. Defaults to now.'}
+                    unit: {type: 'string', description: 'e.g. "tok/s"'},
+                    higherIsBetter: {type: 'boolean', description: 'Required, never inferred'},
+                    context: {type: 'string'},
+                    noteLinks: {type: 'array', items: {type: 'string'}},
+                    recordedAt: {type: 'string', description: 'ISO, default now'}
                 },
                 required: ['dimensions', 'metric', 'value', 'unit', 'higherIsBetter']
             }
@@ -125,21 +125,21 @@ export const benchmarkTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_benchmark_list',
-            description: 'List benchmark results for the active project, optionally filtered by metric and/or dimensions (e.g. {"machine":"GB10"} to see only that machine\'s entries). Returns the filtered entries, a per-metric leaderboard (or scoped by groupBy, e.g. ["metric","machine"] to rank within each machine), the union of dimension keys this project actually uses (so you know its vocabulary before adding new entries), and a summary. Call this before synaipse_benchmark_add to reuse existing dimension key names.',
+            description: 'Benchmark results of the active project, filtered by metric and/or dimensions, with a leaderboard (per metric, or within groupBy keys), the dimension keys in use and a summary. Call before benchmark_add.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    metric: {type: 'string', description: 'Only entries with this exact metric.'},
+                    metric: {type: 'string'},
                     dimensions: {
                         type: 'object',
                         additionalProperties: {type: 'string'},
-                        description: 'Only entries matching ALL given key/value pairs.'
+                        description: 'Match all pairs'
                     },
-                    includeDeleted: {type: 'boolean', description: 'Include soft-deleted entries (default false).'},
+                    includeDeleted: {type: 'boolean'},
                     groupBy: {
                         type: 'array',
                         items: {type: 'string'},
-                        description: 'Dimension keys (plus implicit "metric") to rank within. Default ["metric"] — a pure per-metric leaderboard across everything.'
+                        description: 'Default ["metric"]'
                     }
                 }
             }
@@ -179,12 +179,12 @@ export const benchmarkTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_benchmark_update',
-            description: 'Patch a single benchmark entry by id: correct a value, add missing dimensions/context/noteLinks, or soft-delete/restore it. Only the fields you pass change. Pass deleted:true to hide a bad entry (reversible via deleted:false) — entries are never hard-removed.',
+            description: 'Patch one benchmark entry; only passed fields change. deleted:true hides it (reversible).',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    id: {type: 'string', description: 'Id of the entry to update.'},
-                    dimensions: {type: 'object', additionalProperties: {type: 'string'}, description: 'Replaces the whole dimensions object when passed.'},
+                    id: {type: 'string'},
+                    dimensions: {type: 'object', additionalProperties: {type: 'string'}, description: 'Replaces all dimensions'},
                     metric: {type: 'string'},
                     value: {type: 'number'},
                     unit: {type: 'string'},
@@ -192,7 +192,7 @@ export const benchmarkTools = (service: SynaipseService): ToolHandler[] => [
                     context: {type: 'string'},
                     noteLinks: {type: 'array', items: {type: 'string'}},
                     recordedAt: {type: 'string'},
-                    deleted: {type: 'boolean', description: 'Soft-delete (true) or restore (false) this entry.'}
+                    deleted: {type: 'boolean'}
                 },
                 required: ['id']
             }

@@ -186,6 +186,11 @@ export interface ToolHandler {
      * whole vault). Denied for tokens with a path-prefix scope.
      */
     unscopedOnly?: boolean;
+    /**
+     * Deprecated alias kept callable for one version but left out of
+     * tools/list, so it costs no context tokens (plan P2 / B2).
+     */
+    hidden?: boolean;
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 

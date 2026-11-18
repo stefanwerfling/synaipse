@@ -157,11 +157,11 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_get',
-            description: 'Read the active project\'s roadmap: the full step tree (arbitrarily nested), the live "AI is working here" cursor, and a rolled-up summary (progress %, planned vs actual hours, done/blocked counts). Pass stepId to return only that step and its subtree. Returns an empty roadmap if none exists yet. Read this before planning or updating so you build on the current state.',
+            description: 'The active project\'s roadmap: step tree, live cursor and rolled-up summary; stepId returns just that subtree. Read before planning or updating.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    stepId: {type: 'string', description: 'Optional: return only this step and its children.'}
+                    stepId: {type: 'string'}
                 }
             }
         },
@@ -182,17 +182,17 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_plan',
-            description: 'Plan the roadmap for the active project. Two modes: (1) pass `steps` — an array of step objects — to REPLACE the whole tree (use for initial planning or restructuring); (2) pass a single `step` plus optional `parentId` to add or replace one step (append under a parent, or at root when parentId is omitted). Steps nest arbitrarily via each step\'s `children` array. Hours and progress roll up to parents automatically; open dependencies flip a step to "blocked". Writes Memory/<project>/_roadmap.md. SAFETY: the full-tree replace is non-destructive — per-step activity/audit logs are merged by id (an omitted activity list keeps existing history) and any step you leave out is kept as soft-deleted (hidden), never dropped. Prefer mode (2) for incremental edits.',
+            description: 'Plan the active project\'s roadmap. `steps` replaces the whole tree (non-destructive: activity merged by id, omitted steps soft-deleted); `step` (+ parentId) upserts one step — prefer it for incremental edits. Steps nest via children; hours/progress roll up; open dependsOn → blocked.',
             inputSchema: {
                 type: 'object',
                 properties: {
                     steps: {
                         type: 'array',
-                        description: 'Full step tree to replace the roadmap with. Each step: {id, title, status, plannedHours?, actualHours?, owner?("ai"|"human"), priority?("low"|"med"|"high"), noteLinks?, dependsOn?, acceptance?, evaluation?, children?}. Status one of: backlog, planned, in_progress, ai_active, review, blocked, done, cancelled. Use hierarchical ids like "1", "1.1", "2.3.1".',
+                        description: `Step: {id ("1", "1.2"), title, status, plannedHours?, actualHours?, owner? (ai|human), priority? (low|med|high), noteLinks?, dependsOn?, acceptance?, evaluation?, children?}. status: ${ROADMAP_STATUSES.join('|')}`,
                         items: {type: 'object'}
                     },
-                    step: {type: 'object', description: 'Single step to upsert (alternative to steps).'},
-                    parentId: {type: 'string', description: 'When upserting a single step, the parent step id to append under. Omit for a top-level step.'}
+                    step: {type: 'object'},
+                    parentId: {type: 'string', description: 'For `step`; omit for top level'}
                 }
             }
         },
@@ -229,13 +229,13 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_move',
-            description: 'Move an existing roadmap step (with its whole subtree) to a new parent, or to the top level. This is the RE-PARENT / RE-ORDER tool: roadmap_plan replaces a step in place and never relocates it, so passing parentId there to an existing id does nothing. Pass stepId and newParentId (the id to nest it under; null/omit = top level). Optional position (0-based) places it among its new siblings; omit to append at the end. The step keeps its id — ids are labels, not positions, so "5.20" living under "5" is fine. Rejected: moving a step under itself or one of its own descendants (would detach the subtree). Non-destructive — nothing is dropped and it is versioned, so roadmap_rollback can undo it.',
+            description: 'Re-parent or re-order a step with its subtree (roadmap_plan cannot move). Omit newParentId for top level; position is the 0-based index among new siblings (default: append). Ids stay; cycles are rejected; undo via roadmap_rollback.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    stepId: {type: 'string', description: 'Id of the step to move.'},
-                    newParentId: {type: 'string', description: 'Id of the new parent to nest under. Omit or pass null/empty to move to the top level.'},
-                    position: {type: 'number', description: '0-based index among the new siblings. Omit to append at the end.'}
+                    stepId: {type: 'string'},
+                    newParentId: {type: 'string'},
+                    position: {type: 'number'}
                 },
                 required: ['stepId']
             }
@@ -268,23 +268,23 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_update_step',
-            description: 'Patch a single roadmap step by id: change status, book time (actualHours), adjust the estimate (plannedHours), set progress (0-100), owner, priority, acceptance criteria, or write your evaluation/rationale. Only the fields you pass change. Appends an activity-log entry to the step. Use this as you work — e.g. mark a step "review" and record what you did in `evaluation`.',
+            description: 'Patch one step; only passed fields change and an activity entry is appended. Use while working, e.g. status "review" plus what you did in evaluation. deleted:true soft-deletes (cascades, reversible).',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    stepId: {type: 'string', description: 'Id of the step to update.'},
+                    stepId: {type: 'string'},
                     status: {type: 'string', enum: [...ROADMAP_STATUSES], description: 'New status.'},
                     title: {type: 'string'},
-                    plannedHours: {type: 'number', description: 'Planned implementation time in hours.'},
-                    actualHours: {type: 'number', description: 'Actual time spent in hours.'},
+                    plannedHours: {type: 'number'},
+                    actualHours: {type: 'number'},
                     progress: {type: 'number', minimum: 0, maximum: 100},
                     owner: {type: 'string', enum: ['ai', 'human']},
                     priority: {type: 'string', enum: ['low', 'med', 'high']},
-                    acceptance: {type: 'string', description: 'Definition of done.'},
-                    evaluation: {type: 'string', description: 'Your assessment / rationale / remaining-estimate for this step.'},
-                    dependsOn: {type: 'array', items: {type: 'string'}, description: 'Step ids this step depends on.'},
-                    deleted: {type: 'boolean', description: 'Soft-delete (true) or restore (false) this step. Deleting cascades to sub-steps and hides them from KPIs/table/body, but the step is kept in the vault and stays reversible — steps are never hard-deleted.'},
-                    note: {type: 'string', description: 'Optional activity-log message (defaults to a summary of changed fields).'}
+                    acceptance: {type: 'string', description: 'Definition of done'},
+                    evaluation: {type: 'string', description: 'Your assessment / remaining estimate'},
+                    dependsOn: {type: 'array', items: {type: 'string'}},
+                    deleted: {type: 'boolean'},
+                    note: {type: 'string', description: 'Activity message (default: changed fields)'}
                 },
                 required: ['stepId']
             }
@@ -318,11 +318,11 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_set_active',
-            description: 'Set the live "AI is working here" cursor to a step: it becomes status "ai_active" and any previously-active step drops back to "in_progress". Pass stepId=null (or omit) to clear the cursor. At most one step is active at a time. Call this when you start working on a step so the UI shows a live indicator; call update_step to record progress and clear when you move on.',
+            description: 'Set the live "AI is working here" cursor to a step (status ai_active; the previous one returns to in_progress). Omit stepId to clear.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    stepId: {type: 'string', description: 'Step to mark active. Omit or pass empty to clear the cursor.'}
+                    stepId: {type: 'string'}
                 }
             }
         },
@@ -345,12 +345,12 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_link_note',
-            description: 'Attach note links to a roadmap step. Pass note titles, aliases, vault paths or ids — each is resolved against the vault to an EXISTING note and stored in its canonical wikilink form, so backlinks and graph edges work. References that match no note are REJECTED (the whole call fails, naming the offenders) so a step never accumulates dead links. Idempotent: already-linked notes are skipped.',
+            description: 'Link notes to a roadmap step. Titles, aliases or paths must resolve to existing notes (else nothing is linked); stored as canonical titles. Idempotent.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    stepId: {type: 'string', description: 'Step to link notes to.'},
-                    notes: {type: 'array', items: {type: 'string'}, description: 'Note titles, aliases, paths or ids to link. Must resolve to existing notes; unresolvable refs are rejected.'}
+                    stepId: {type: 'string'},
+                    notes: {type: 'array', items: {type: 'string'}, description: 'Titles, aliases or vault paths'}
                 },
                 required: ['stepId', 'notes']
             }
@@ -390,11 +390,11 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_history',
-            description: 'List past versions (ngit commits) of the active project\'s roadmap, newest first. Each entry has a sha, commit message, author and date. Use this to find a good version to restore with synaipse_roadmap_rollback when an edit went wrong. Empty when history is disabled or the roadmap was never written.',
+            description: 'Past versions of the active project\'s roadmap (sha, message, author, date), newest first — input for roadmap_rollback.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    limit: {type: 'number', description: 'Max commits to return (default 30).'}
+                    limit: {type: 'number', description: 'Default 30'}
                 }
             }
         },
@@ -411,11 +411,11 @@ export const roadmapTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_roadmap_rollback',
-            description: 'Restore the active project\'s roadmap to a past version by commit sha (from synaipse_roadmap_history). Reads the roadmap as it stood at that commit and writes it forward as a NEW commit — nothing is lost and the rollback is itself reversible (roll forward again to any later sha). Use this as the escape hatch when a plan/replace or move went wrong. Throws if history is disabled or the sha has no valid roadmap.',
+            description: 'Restore the active project\'s roadmap to a past version (sha from roadmap_history), written as a new commit — itself reversible.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    commitSha: {type: 'string', description: 'The commit sha to restore (full or the abbreviated sha from roadmap_history).'}
+                    commitSha: {type: 'string', description: 'Full or short sha'}
                 },
                 required: ['commitSha']
             }

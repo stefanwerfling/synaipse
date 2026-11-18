@@ -72,9 +72,9 @@ server at `http://localhost:3001/mcp`.
 Tools available include:
 - `synaipse_search` — semantic + fulltext search over my notes
 - `synaipse_read_note` / `synaipse_write_note` — read/write markdown
-- `synaipse_recent` — recently modified notes
+- `synaipse_list` — notes by folder/tag, newest first
 - `synaipse_related` — notes thematically related to a given id
-- `synaipse_graph` — backlinks/outgoing for graph queries
+- `synaipse_links` / `synaipse_graph` — links of a note / its neighbourhood
 
 Always check the vault before answering questions about personal
 projects, decisions, or past work.

@@ -1,34 +1,58 @@
 # MCP tools reference
 
-Synaipse exposes the following tools over MCP (stdio). All tools return JSON.
+Synaipse exposes its tools over MCP (stdio or Streamable HTTP). Results are **compact JSON**.
+
+## Protocol
+
+- **Instructions.** The initialize result carries `instructions` with the working protocol (prime first, search before writing, lightest write, edit instead of resend, link instead of copy) and the active project folder. Clients such as Claude Code put this into the model context, so it no longer has to live in `CLAUDE.md`.
+- **Annotations.** Every tool has a `title` and `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint: false`, derived from the same ACL table that drives the token scope check ([`Tools/Acl.ts`](../packages/mcp-server/src/Tools/Acl.ts)).
+- **Errors.** Failures, unknown tools and invalid arguments come back as tool results with `isError: true`, so the model can correct itself. Invalid enum values (search `mode`, roadmap `status`/`owner`/`priority`, list `sort`, links `direction`) are rejected, not silently replaced. Every `limit` is an integer in `[1, 500]`.
+- **Note references.** `read_note`, `links` and `graph.center` accept a vault path, the path without `.md`, a title or an alias. When nothing matches, the error names close candidates.
+- **Times** are ISO timestamps plus a relative `age` (`"3d"`), not epoch milliseconds.
+
+## Toolsets
+
+`SYNAIPSE_MCP_TOOLSETS` selects which tool groups are registered (comma-separated, or `all`). Tools of disabled sets are neither listed nor callable.
+
+| Toolset | Default | Tools |
+|---|---|---|
+| `core` | always | notes, search, list, links, graph, prime, capture |
+| `roadmap` | on | `synaipse_roadmap_*` |
+| `benchmark` | on | `synaipse_benchmark_*` |
+| `admin` | off | `synaipse_verify_history`, `synaipse_snapshot_list` |
+
+With `SYNAIPSE_MCP_TOOLSETS=core` the tool list costs roughly 2.6k tokens (20 tools); with the defaults about 4.5k (31 tools).
+
+## Tools
 
 | Tool | Purpose |
 |---|---|
 | [`synaipse_get_project`](#synaipse_get_project)       | Read the active project context                        |
-| [`synaipse_verify_history`](#synaipse_verify_history) | Re-hash every stored object — vault integrity check    |
-| [`synaipse_snapshot_list`](#synaipse_snapshot_list)   | List entries of the vault at a past commit             |
+| [`synaipse_prime`](#synaipse_prime)                   | Curated context bundle for the active project          |
 | [`synaipse_search`](#synaipse_search)                 | Search notes (fulltext / semantic / hybrid)            |
-| [`synaipse_read_note`](#synaipse_read_note)           | Read a single note                                     |
-| [`synaipse_write_note`](#synaipse_write_note)         | Create or overwrite a note                             |
-| [`synaipse_update_note`](#synaipse_update_note)       | Partial update (content and/or frontmatter)            |
-| [`synaipse_delete_note`](#synaipse_delete_note)       | Delete a note + remove from vector index               |
-| [`synaipse_list_notes`](#synaipse_list_notes)         | List note metadata, optionally filtered                |
+| [`synaipse_read_note`](#synaipse_read_note)           | Read a note, a section of it, or a page of it          |
+| [`synaipse_list`](#synaipse_list)                     | List notes by folder / tag, newest first or by title   |
 | [`synaipse_list_tags`](#synaipse_list_tags)           | Tag cloud with counts                                  |
-| [`synaipse_notes_by_tag`](#synaipse_notes_by_tag)     | All notes carrying a given tag                         |
-| [`synaipse_backlinks`](#synaipse_backlinks)           | Notes linking to a given note                          |
-| [`synaipse_outgoing_links`](#synaipse_outgoing_links) | Wikilinks contained in a note                          |
-| [`synaipse_link_note`](#synaipse_link_note)           | Append wikilinks under a section (idempotent)          |
+| [`synaipse_links`](#synaipse_links)                   | Incoming and outgoing links of a note                  |
+| [`synaipse_graph`](#synaipse_graph)                   | Bounded wikilink neighbourhood                         |
 | [`synaipse_related`](#synaipse_related)               | Related-notes ranking (semantic + links + tags)        |
 | [`synaipse_suggest_links`](#synaipse_suggest_links)   | Missing-links finder — related pairs without a wikilink |
-| [`synaipse_graph`](#synaipse_graph)                   | Knowledge graph (nodes + edges)                        |
-| [`synaipse_recent`](#synaipse_recent)                 | Most recently modified notes                           |
-| [`synaipse_prime`](#synaipse_prime)                   | Curated context bundle for the active project          |
 | [`synaipse_stale`](#synaipse_stale)                   | Notes that gathered dust — knowledge decay              |
 | [`synaipse_todos`](#synaipse_todos)                   | Open `- [ ]` items across the vault                    |
+| [`synaipse_write_note`](#synaipse_write_note)         | Create or overwrite a note                             |
+| [`synaipse_update_note`](#synaipse_update_note)       | Replace body and/or patch frontmatter                  |
+| `synaipse_edit_note`                                  | Find/replace inside a note body                        |
+| `synaipse_write_asset`                                | Upload an image into the project's `_assets/`          |
+| [`synaipse_delete_note`](#synaipse_delete_note)       | Delete a note + remove from vector index               |
+| [`synaipse_link_note`](#synaipse_link_note)           | Append validated wikilinks under a section             |
 | [`synaipse_log_session`](#synaipse_log_session)       | Append to today's session log                          |
 | [`synaipse_remember`](#synaipse_remember)             | One-line insight capture into today's inbox            |
+| [Roadmap tools](#roadmap-tools)                       | Per-project roadmap (toolset `roadmap`)                |
+| `synaipse_benchmark_*`                                | Per-project benchmark log (toolset `benchmark`)        |
+| [`synaipse_verify_history`](#synaipse_verify_history) | Vault integrity check (toolset `admin`)                |
+| [`synaipse_snapshot_list`](#synaipse_snapshot_list)   | Vault tree at a past commit (toolset `admin`)          |
 
-The canonical schema lives in [`packages/mcp-server/src/Tools.ts`](../packages/mcp-server/src/Tools.ts).
+The canonical schemas live in [`packages/mcp-server/src/Tools/`](../packages/mcp-server/src/Tools/).
 
 ---
 
@@ -115,9 +139,14 @@ With `explain: true` each hit additionally carries:
 
 ## `synaipse_read_note`
 
-| Arg | Type   | Notes                            |
-|---|---|---|
-| `id` | string | Vault-relative path, e.g. `Memory/decisions/auth.md` |
+| Arg        | Type     | Default | Notes |
+|---|---|---|---|
+| `id`       | string   |         | Vault path, path without `.md`, title or alias |
+| `section`  | string?  |         | Only the part under this heading (case-insensitive; up to the next heading of the same level; headings inside code fences are ignored) |
+| `offset`   | integer? | `0`     | Start character of the (section) body |
+| `maxChars` | integer? | `20000` | Max body characters |
+
+Returns `{note: {id, title, content, frontmatter, tags, wikilinks, backlinks, hash, modified, age}}`. A cut body adds `range: {offset, end, total}` and `next: "offset: <end>"`. An unknown section lists the note's headings.
 
 ---
 
@@ -125,11 +154,11 @@ With `explain: true` each hit additionally carries:
 
 | Arg           | Type     | Notes                                    |
 |---|---|---|
-| `path`        | string   | Vault-relative                           |
+| `path`        | string   | Vault-relative; relative paths land in `Memory/<project>/` |
 | `content`     | string   | Markdown body without frontmatter        |
 | `frontmatter` | object?  | Optional YAML frontmatter                |
 
-Overwrites the whole file. Use `synaipse_update_note` for partial edits.
+Overwrites the whole file. Returns `{id, title, hash, modified, age, warnings?}` — not the note. `warnings` names wikilinks that resolve to no note. `synaipse_update_note` and `synaipse_edit_note` return the same shape plus `changed` (did the stored file change).
 
 ---
 
@@ -155,14 +184,17 @@ Removes the file and the matching vector chunks.
 
 ---
 
-## `synaipse_list_notes`
+## `synaipse_list`
 
-| Arg          | Type     | Default | Notes                                  |
+| Arg      | Type    | Default    | Notes |
 |---|---|---|---|
-| `pathPrefix` | string?  | `""`    | Filter by path prefix                  |
-| `limit`      | number?  | `200`   |                                        |
+| `prefix` | string? | `""`       | Folder prefix, e.g. `Memory/decisions/` |
+| `tag`    | string? |            | Only notes with this tag |
+| `sort`   | string? | `modified` | `modified` (newest first) or `title` |
+| `limit`  | integer?| `50`       | |
+| `cursor` | string? |            | `nextCursor` of the previous page |
 
-Returns `{id, title, tags, mtime}` per note.
+Returns `{notes: [{id, title, tags, modified, age}], total, nextCursor?}`. Replaces `list_notes`, `recent` and `notes_by_tag`.
 
 ---
 
@@ -172,43 +204,28 @@ No arguments. Returns `[{tag, count}, …]` sorted by count descending.
 
 ---
 
-## `synaipse_notes_by_tag`
 
-| Arg  | Type   |
-|---|---|
-| `tag` | string |
+## `synaipse_links`
 
----
+| Arg         | Type    | Default | Notes |
+|---|---|---|---|
+| `id`        | string  |         | Vault path, title or alias |
+| `direction` | string? | `both`  | `in`, `out` or `both` |
 
-## `synaipse_backlinks`
-
-| Arg  | Type   |
-|---|---|
-| `id` | string |
-
-Returns the ids of notes that wikilink to this one.
+Returns `{id, in?: [noteId], out?: [wikilink], unresolved?: [wikilink], typed?: [{target, kind}]}`. `typed` are frontmatter `links:` (`supersedes`, `duplicates`, `relates_to`, `replies_to`). Replaces `backlinks` and `outgoing_links`.
 
 ---
 
-## `synaipse_outgoing_links`
-
-| Arg  | Type   |
-|---|---|
-| `id` | string |
-
-Returns the wikilinks contained in the note (resolved + unresolved).
-
----
 
 ## `synaipse_link_note`
 
 | Arg        | Type      | Default        | Notes                                       |
 |---|---|---|---|
-| `fromId`   | string    | required       | Source note                                 |
-| `toTitles` | string[]  | required       | Becomes `[[Title]]` wikilinks               |
+| `fromId`   | string    | required       | Note to add the links to                    |
+| `toTitles` | string[]  | required       | Titles, aliases or vault paths              |
 | `section`  | string?   | `"References"` | Heading to append under (created if absent) |
 
-Idempotent — links that already exist are skipped.
+Every target must resolve to an existing note and is stored as its canonical `[[Title]]`; one unresolvable target rejects the whole call, so no dead links form. Idempotent — links that already exist are skipped.
 
 ---
 
@@ -258,17 +275,16 @@ Without an embeddings provider (`EMBEDDINGS_PROVIDER=none`), only tag-overlap su
 
 ## `synaipse_graph`
 
-No arguments. Returns `{nodes, edges}` for visualisation.
+| Arg      | Type     | Default | Notes |
+|---|---|---|---|
+| `center` | string?  |         | Vault path, title or alias |
+| `depth`  | integer? | `1`     | Hops from `center` (1–3) |
+| `limit`  | integer? | `100`   | Max nodes |
+
+Returns `{center?, depth?, nodes: [{id, title}], edges: [[from, to]], truncated?, totalNodes?}` over wikilink edges. Without `center`: the `limit` best-connected notes. Never the whole vault.
 
 ---
 
-## `synaipse_recent`
-
-| Arg     | Type    | Default |
-|---|---|---|
-| `limit` | number? | `20`    |
-
----
 
 ## `synaipse_prime`
 
@@ -442,6 +458,17 @@ Sets the live "AI is working here" cursor: the step becomes `ai_active`, any pre
 | `notes` | string[] | Note titles or paths — stored on the step, rendered as `[[wikilinks]]` so backlinks/graph work. |
 
 Idempotent: already-linked notes are skipped.
+
+---
+
+## Deprecated aliases
+
+These names still work for one version but are no longer listed in `tools/list`:
+
+| Old | Use instead |
+|---|---|
+| `synaipse_list_notes`, `synaipse_recent`, `synaipse_notes_by_tag` | `synaipse_list` |
+| `synaipse_backlinks`, `synaipse_outgoing_links` | `synaipse_links` |
 
 ---
 

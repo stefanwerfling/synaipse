@@ -6,15 +6,61 @@ import {asLimit, asSearchMode, asString, filterByConsent, filterNotesByConsent, 
 export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
-            name: 'synaipse_search',
-            description: 'Search the Synaipse knowledge base. Modes: fulltext (keywords), semantic (meaning), hybrid (both). Use semantic for concept questions, fulltext for exact terms, hybrid by default. Pass explain:true to receive a per-signal score breakdown for each hit — useful when ranking is surprising.',
+            name: 'synaipse_list',
+            description: 'List notes (id, title, tags, modified, age), newest first or by title. Filter by folder prefix and/or tag; page with cursor.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    query: {type: 'string', description: 'Search query'},
-                    mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid'], description: 'Search strategy (default: hybrid)'},
-                    limit: {type: 'number', description: 'Max results (default: 10)'},
-                    explain: {type: 'boolean', description: 'Include per-signal components ({score, rank} per fulltext/title/semantic/graph + demote multiplier) on each hit. Default false to keep responses compact.'}
+                    prefix: {type: 'string', description: 'Folder prefix, e.g. "Memory/decisions/"'},
+                    tag: {type: 'string'},
+                    sort: {type: 'string', enum: ['modified', 'title'], description: 'Default modified (newest first)'},
+                    limit: {type: 'number', description: 'Default 50'},
+                    cursor: {type: 'string', description: 'nextCursor from the previous page'}
+                }
+            }
+        },
+        handle: async (args) => {
+            const prefix = typeof args.prefix === 'string' ? args.prefix : '';
+            const sort = args.sort === undefined || args.sort === null ? 'modified' : args.sort;
+            if (sort !== 'modified' && sort !== 'title') {
+                throw new Error(`Invalid sort "${String(sort)}" — expected one of: modified, title`);
+            }
+            const limit = asLimit(args.limit, 50);
+            const offset = typeof args.cursor === 'string' && /^\d+$/.test(args.cursor) ? Number(args.cursor) : 0;
+
+            let candidates = service.listNotes().filter((n) => n.id.startsWith(prefix));
+            if (typeof args.tag === 'string' && args.tag.length > 0) {
+                const tagged = new Set(service.tags().get(args.tag) ?? []);
+                candidates = candidates.filter((n) => tagged.has(n.id));
+            }
+            const filtered = filterNotesByConsent(candidates);
+            const sorted = sort === 'title'
+                ? [...filtered.items].sort((a, b) => a.title.localeCompare(b.title))
+                : [...filtered.items].sort((a, b) => b.mtime - a.mtime);
+            const page = sorted.slice(offset, offset + limit);
+
+            return {
+                response: ok({
+                    notes: page.map((n) => ({id: n.id, title: n.title, tags: n.tags, ...modifiedOf(n.mtime)})),
+                    total: sorted.length,
+                    ...(offset + limit < sorted.length ? {nextCursor: String(offset + limit)} : {}),
+                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
+                }),
+                event: {kind: 'list', touched: page.slice(0, 5).map((n) => n.id)}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_search',
+            description: 'Search the vault. mode: hybrid (default), fulltext (exact terms) or semantic (concepts). explain:true adds a per-signal score breakdown.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    query: {type: 'string'},
+                    mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid']},
+                    limit: {type: 'number', description: 'Default 10'},
+                    explain: {type: 'boolean'}
                 },
                 required: ['query']
             }
@@ -41,7 +87,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_list_notes',
-            description: 'List notes in the vault (id, title, tags, modified, age). Useful for browsing or building a sitemap.',
+            description: 'Deprecated: use synaipse_list.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -86,7 +132,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_notes_by_tag',
-            description: 'Return all notes that carry a given tag.',
+            description: 'Deprecated: use synaipse_list with tag.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -115,7 +161,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_recent',
-            description: 'Return the N most recently modified notes.',
+            description: 'Deprecated: use synaipse_list (sorted by modified by default).',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -143,13 +189,13 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_prime',
-            description: 'Return a curated context bundle for the current project: pinned notes, recent sessions, project decisions, topic-relevant notes (when topic is given), referenced notes (explicitly cited via synaipse_log_session in past sessions — real evidence of usefulness, ranked above hot), hot notes (by backlink count), and recently-edited notes — plus a TODO digest. Each entry carries a "reason" tag so you can prioritise. Crawler/ content (external imports — GitHub stars, dev.to articles) is excluded from referenced/hot/recent/todos by default; pass includeCrawler:true to include it. Topic search always includes Crawler/ — if you ask for a topic, you want hits. Call this once at session start (or when switching context) to prime yourself with what matters most before doing anything else.',
+            description: 'Context bundle for the active project — call once at session start or when switching topic: pinned notes, recent sessions, decisions, topic hits, notes cited in past sessions, hot and recent notes, plus a TODO digest; each entry has a reason. Crawler/ imports are excluded unless includeCrawler.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    limit: {type: 'number', description: 'Max entries in the context list (default: 15). Pinned notes always count toward the limit but are added first.'},
-                    topic: {type: 'string', description: 'Optional query to bias selection — adds up to 5 topic-relevant notes via hybrid search, prioritised above hot/recent. Topic always includes Crawler/ hits.'},
-                    includeCrawler: {type: 'boolean', description: 'Include crawler-imported notes (Crawler/**) in hot/recent/todos. Default false — these tend to dominate (large indexes, third-party TODOs). Does not affect topic search, which always considers Crawler/.'}
+                    limit: {type: 'number', description: 'Default 15'},
+                    topic: {type: 'string', description: 'Adds up to 5 hybrid-search hits for this'},
+                    includeCrawler: {type: 'boolean'}
                 }
             }
         },
@@ -177,12 +223,12 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_related',
-            description: 'Find notes related to a given note via semantic similarity, wikilinks (in & out), and shared tags. Returns ranked list with reasons.',
+            description: 'Notes related to a note by semantic similarity, links and shared tags, ranked with reasons.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    id: {type: 'string', description: 'Note id (relative path) to find related notes for'},
-                    limit: {type: 'number', description: 'Max results (default: 10)'}
+                    id: {type: 'string', description: 'Vault path'},
+                    limit: {type: 'number', description: 'Default 10'}
                 },
                 required: ['id']
             }
@@ -203,12 +249,12 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_todos',
-            description: 'Collect open todos (- [ ]) across the vault. Optionally filter by path prefix or include completed items.',
+            description: 'Open "- [ ]" items across the vault.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    pathPrefix: {type: 'string', description: 'Filter by note path prefix, e.g. "Memory/projects/"'},
-                    includeDone: {type: 'boolean', description: 'Include completed - [x] items (default: false)'}
+                    pathPrefix: {type: 'string', description: 'Folder'},
+                    includeDone: {type: 'boolean', description: 'Include "- [x]"'}
                 }
             }
         },
@@ -230,13 +276,13 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_stale',
-            description: 'List notes that have not been written or surfaced (read/searched/related/backlinks) for a long time. Use to find knowledge gathering dust — candidates for review, refresh, or deletion.',
+            description: 'Notes not written, read or cited for a long time — candidates for review or deletion.',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    olderThanDays: {type: 'number', description: 'Threshold in days (default: 90). A note is stale when max(mtime, lastAccessed, lastReferenced) is older than this — lastReferenced tracks explicit citations via synaipse_log_session, distinct from mere retrieval.'},
-                    pathPrefix: {type: 'string', description: 'Restrict to a folder, e.g. "Memory/research/"'},
-                    limit: {type: 'number', description: 'Max results (default: 100)'}
+                    olderThanDays: {type: 'number', description: 'Default 90'},
+                    pathPrefix: {type: 'string', description: 'Folder'},
+                    limit: {type: 'number', description: 'Default 100'}
                 }
             }
         },
