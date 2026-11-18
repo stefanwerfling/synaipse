@@ -76,6 +76,27 @@ export interface CanvasSummary {
     size: number;
 }
 
+export interface InboxSummary {
+    project: string;
+    entries: number;
+}
+
+/** Identifies one `remember` entry (the text tells entries of the same minute apart). */
+export interface InboxRef {
+    inbox: string;
+    time: string;
+    text: string;
+}
+
+export interface InboxItem extends InboxRef {
+    date: string;
+    tags: string[];
+    /** Notes that already hold this: the entry can go. */
+    alreadyIn: Array<{id: string; title: string; similarity: number}>;
+    /** Curated notes on the same topic, best first. */
+    targets: Array<{id: string; title: string}>;
+}
+
 export const api = {
     listNotes: async (): Promise<NoteSummary[]> => {
         return (await api.listNotesVersioned()).data;
@@ -127,6 +148,34 @@ export const api = {
             body: JSON.stringify(roadmap)
         });
         return json(response);
+    },
+    listInboxes: async (): Promise<InboxSummary[]> => {
+        const {inboxes} = await json<{inboxes: InboxSummary[]}>(await fetch(apiUrl('/api/inboxes')));
+        return inboxes;
+    },
+    getInbox: async (project: string): Promise<{entries: InboxItem[]; total: number}> => {
+        const url = new URL(apiUrl('/api/inbox'), window.location.origin);
+        url.searchParams.set('project', project);
+        return json(await fetch(url));
+    },
+    /** Move an entry into a note ({id}) or a new one ({newTitle}); `content` overrides the entry text. */
+    promoteInboxEntry: async (project: string, ref: InboxRef, target: {id: string} | {newTitle: string; newPath?: string}, content?: string): Promise<{id: string; title: string}> => {
+        const url = new URL(apiUrl('/api/inbox/promote'), window.location.origin);
+        url.searchParams.set('project', project);
+        return json(await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({...ref, target, ...(content !== undefined ? {content} : {})})
+        }));
+    },
+    discardInboxEntry: async (project: string, ref: InboxRef): Promise<void> => {
+        const url = new URL(apiUrl('/api/inbox/discard'), window.location.origin);
+        url.searchParams.set('project', project);
+        await json(await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(ref)
+        }));
     },
     listBenchmarks: async (): Promise<BenchmarkSummary[]> => {
         const {benchmarks} = await json<{benchmarks: BenchmarkSummary[]}>(await fetch(apiUrl('/api/benchmarks')));

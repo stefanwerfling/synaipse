@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {bestSection, isInboxNote, parseInbox} from '../src/Inbox.js';
+import {bestSection, isInboxNote, parseInbox, withoutInboxEntry} from '../src/Inbox.js';
 
 describe('parseInbox', () => {
     it('splits ### HH:MM blocks and takes a trailing #tag line as tags', () => {
@@ -30,5 +30,20 @@ describe('bestSection', () => {
         expect(bestSection('# Only\n\nRollback text.', 'rollback')).toBeNull();
         expect(bestSection(note, 'kubernetes')).toBeNull();
         expect(bestSection(note, 'a an')).toBeNull();
+    });
+});
+
+describe('withoutInboxEntry', () => {
+    const id = 'Memory/k/inbox/2025-11-10.md';
+    const content = '### 09:12\n\nFirst.\n\n#a\n\n### 09:12\n\nSecond.\n\n### 10:00\n\nThird.\n';
+
+    it('drops the entry with that time and text, keeps the rest', () => {
+        expect(withoutInboxEntry(id, content, '09:12', 'Second.')).toBe('### 09:12\n\nFirst.\n\n#a\n\n### 10:00\n\nThird.\n');
+        expect(withoutInboxEntry(id, content, '09:12', 'First.')).toBe('### 09:12\n\nSecond.\n\n### 10:00\n\nThird.\n');
+    });
+
+    it('is null for an entry that is not there', () => {
+        expect(withoutInboxEntry(id, content, '09:12', 'Third.')).toBeNull();
+        expect(withoutInboxEntry(id, content, '11:00', 'First.')).toBeNull();
     });
 });

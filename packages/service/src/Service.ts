@@ -86,7 +86,7 @@ import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.j
 import {buildLocalGraph, type LocalGraph, type LocalGraphOptions} from './LocalGraph.js';
 import {InvertedIndex} from './InvertedIndex.js';
 import {duplicateQuery, pickDuplicates, type DuplicateCandidate, type DuplicateText} from './Duplicates.js';
-import {bestSection, isInboxNote, parseInbox, type InboxEntry, type SectionAnchor} from './Inbox.js';
+import {bestSection, isInboxNote, parseInbox, withoutInboxEntry, type InboxEntry, type SectionAnchor} from './Inbox.js';
 import {applyKnowledgeState, buildSuccessors, isOutdated, knowledgeStateOf, type KnowledgeState} from './KnowledgeState.js';
 import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
@@ -255,6 +255,16 @@ export interface RemovedNote {
     at: number;
     how: 'deleted' | 'archived';
 }
+
+/** Which inbox entry: the text tells entries of the same minute apart. */
+export interface InboxEntryRef {
+    inbox: NoteId;
+    time: string;
+    text: string;
+}
+
+/** Where a promoted entry goes: an existing note, or a new one (title + project-relative path). */
+export type InboxTarget = {id: NoteId} | {newTitle: string; newPath?: string};
 
 /** One inbox entry with where its knowledge could go (plan P8 / B4). */
 export interface InboxCandidate extends InboxEntry {
@@ -922,6 +932,18 @@ export class SynaipseService {
         return [...out.values()];
     }
 
+    /** Projects with entries in their remember inbox, most entries first. */
+    public listInboxes(): Array<{project: string; entries: number}> {
+        const counts = new Map<string, number>();
+        for (const note of this.notes.list()) {
+            const m = /^Memory\/([^/]+)\/inbox\//.exec(note.id);
+            if (m === null || !isInboxNote(note.id)) continue;
+            const n = parseInbox(note.id, note.content).length;
+            if (n > 0) counts.set(m[1]!, (counts.get(m[1]!) ?? 0) + n);
+        }
+        return [...counts].map(([project, entries]) => ({project, entries})).sort((a, b) => b.entries - a.entries || a.project.localeCompare(b.project));
+    }
+
     /** Inbox entries of a project, newest day first (entries in file order). */
     public inboxEntries(project: string, opts: {sinceMs?: number} = {}): InboxEntry[] {
         const prefix = `${this.projectFolder(project)}inbox/`;
@@ -932,6 +954,76 @@ export class SynaipseService {
             .flatMap((n) => parseInbox(n.id, n.content))
             .filter((e) => since === null || e.date >= since)
             .sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    /**
+     * Remove one inbox entry (plan P8 / C5 "Verwerfen"). An inbox note
+     * without entries left is deleted; both are versioned like any write.
+     */
+    public async discardInboxEntry(project: string, ref: InboxEntryRef): Promise<void> {
+        const inbox = this.inboxNote(project, ref.inbox);
+        const rest = withoutInboxEntry(inbox.id, inbox.content, ref.time, ref.text);
+        if (rest === null) throw new Error(`inbox entry ${ref.time} not found in ${ref.inbox} (changed meanwhile?)`);
+
+        const opts = {project};
+        if (parseInbox(inbox.id, rest).length === 0) {
+            await this.deleteNote(inbox.id, opts);
+            return;
+        }
+        await this.writeNote({path: inbox.id, content: rest, frontmatter: inbox.frontmatter, expectedHash: inbox.hash}, opts, 'inbox_discard');
+    }
+
+    /**
+     * Move one inbox entry into a curated note (plan P8 / C5 "In Note
+     * übernehmen"): `text` (default the entry's own) is appended to the
+     * target, or becomes the body of a new note, then the entry leaves
+     * the inbox. Returns the target note.
+     */
+    public async promoteInboxEntry(project: string, ref: InboxEntryRef, target: InboxTarget, text?: string): Promise<Note> {
+        const inbox = this.inboxNote(project, ref.inbox);
+        if (withoutInboxEntry(inbox.id, inbox.content, ref.time, ref.text) === null) {
+            throw new Error(`inbox entry ${ref.time} not found in ${ref.inbox} (changed meanwhile?)`);
+        }
+
+        const body = (text ?? ref.text).trim();
+        if (body.length === 0) throw new Error('promote: text must not be empty');
+        const opts = {project};
+        let note: Note;
+
+        if ('id' in target) {
+            const existing = this.notes.tryGet(target.id);
+            if (existing === undefined) throw new Error(`target note not found: ${target.id}`);
+            if (isInboxNote(existing.id)) throw new Error('target must not be an inbox note');
+            note = await this.writeNote({
+                path: existing.id,
+                content: `${existing.content.trimEnd()}\n\n${body}\n`,
+                frontmatter: existing.frontmatter,
+                expectedHash: existing.hash
+            }, opts, 'inbox_promote');
+        } else {
+            const title = target.newTitle.trim();
+            if (title.length === 0) throw new Error('promote: a new note needs a title');
+            const slug = title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'note';
+            note = await this.writeNote({
+                path: target.newPath?.trim() || `${slug}.md`,
+                content: `${body}\n`,
+                frontmatter: {title, created: new Date().toISOString().slice(0, 10)},
+                mode: 'create'
+            }, opts, 'inbox_promote');
+        }
+
+        // Reads the inbox afresh, so a remember in between is kept.
+        await this.discardInboxEntry(project, ref);
+        return note;
+    }
+
+    private inboxNote(project: string, id: NoteId): Note {
+        if (!id.startsWith(`${this.projectFolder(project)}inbox/`) || !isInboxNote(id)) {
+            throw new Error(`not an inbox note of project ${project}: ${id}`);
+        }
+        const note = this.notes.tryGet(id);
+        if (note === undefined) throw new Error(`inbox note not found: ${id}`);
+        return note;
     }
 
     /**

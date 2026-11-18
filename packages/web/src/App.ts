@@ -168,6 +168,7 @@ export class App {
         this.events.onReconnect(() => this.scheduleVaultReload());
         // Only panels that were opened can show stale data.
         this.events.subscribe((event) => this.loadedPanel('roadmap')?.onVaultEvent(event.touched));
+        this.events.subscribe((event) => this.loadedPanel('inbox')?.onVaultEvent(event.touched));
         this.events.subscribe((event) => this.loadedPanel('benchmarks')?.onVaultEvent(event.touched));
 
         this.element = el('div', {class: 'root synaipse-app'}, this.topbar, this.body, this.activityLog.element);

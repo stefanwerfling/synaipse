@@ -50,6 +50,22 @@ export const parseInbox = (id: NoteId, content: string): InboxEntry[] => {
     return entries;
 };
 
+/**
+ * The inbox body without the entry `time` + `text` (the text identifies
+ * it: several entries can share a minute). Null when no such entry.
+ */
+export const withoutInboxEntry = (id: NoteId, content: string, time: string, text: string): string | null => {
+    const parts = content.split(/^(?=###\s+)/m);
+    const index = parts.findIndex((part) => {
+        const entry = parseInbox(id, part)[0];
+        return entry !== undefined && entry.time === time && entry.text === text.trim();
+    });
+    if (index === -1) return null;
+
+    parts.splice(index, 1);
+    return parts.map((p) => p.trimEnd()).filter((p) => p.length > 0).join('\n\n') + '\n';
+};
+
 export interface SectionAnchor {
     /** Heading text, as read_note `section` expects it. */
     section: string;

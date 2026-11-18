@@ -10,6 +10,7 @@ import {handleSchedulesRoute} from './schedules-routes.js';
 import {HttpError, Router, json, withErrorMapping} from './router.js';
 import {registerChatRoutes} from './routes/chat-routes.js';
 import {registerGraphRoutes} from './routes/graph-routes.js';
+import {registerInboxRoutes} from './routes/inbox-routes.js';
 import {registerIngestRoutes} from './routes/ingest-routes.js';
 import {registerMemoryRoutes} from './routes/memory-routes.js';
 import {registerNotesRoutes} from './routes/notes-routes.js';
@@ -42,6 +43,7 @@ export const buildRouter = (deps: RouteDeps): Router => {
     registerChatRoutes(router, deps);
     registerMemoryRoutes(router, deps);
     registerIngestRoutes(router, deps);
+    registerInboxRoutes(router, deps);
 
     return router;
 };

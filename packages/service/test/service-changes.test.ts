@@ -79,3 +79,37 @@ describe('inboxCandidates', () => {
         expect(candidates.every((c) => c.targets.every((t) => !t.id.includes('/inbox/')))).toBe(true);
     });
 });
+
+describe('inbox promote and discard', () => {
+    const entries = () => service.inboxEntries('demo');
+
+    it('appends an entry to a note and removes it from the inbox; the last one removes the inbox note', async () => {
+        await service.writeNote({path: 'howto/deploy.md', content: 'Deploys run on Tuesdays.', frontmatter: {title: 'Deploy'}}, P);
+        await service.appendInboxEntry('Deploys need a second approver.', [], P);
+        await service.appendInboxEntry('Unrelated thought.', [], P);
+        const [first, second] = entries();
+        const ref = second!.text === 'Deploys need a second approver.' ? second! : first!;
+
+        const target = await service.promoteInboxEntry('demo', ref, {id: 'Memory/demo/howto/deploy.md'}, 'Deploys need a second approver (since 2025-11).');
+        expect(target.content).toBe('Deploys run on Tuesdays.\n\nDeploys need a second approver (since 2025-11).\n');
+        expect(entries().map((e) => e.text)).toEqual(['Unrelated thought.']);
+
+        await service.discardInboxEntry('demo', entries()[0]!);
+        expect(entries()).toEqual([]);
+        expect(service.tryReadNote(ref.inbox)).toBeUndefined();
+    });
+
+    it('creates a new note from an entry and refuses stale or foreign refs', async () => {
+        await service.appendInboxEntry('Use pnpm workspaces.', ['tooling'], P);
+        const ref = entries()[0]!;
+
+        const note = await service.promoteInboxEntry('demo', ref, {newTitle: 'Package manager'});
+        expect(note.id).toBe('Memory/demo/package-manager.md');
+        expect(note.title).toBe('Package manager');
+        expect(note.content.trim()).toBe('Use pnpm workspaces.');
+
+        await expect(service.discardInboxEntry('demo', ref)).rejects.toThrow(/not found/);
+        await expect(service.discardInboxEntry('other', ref)).rejects.toThrow(/not an inbox note/);
+        await expect(service.promoteInboxEntry('demo', {...ref, inbox: 'Memory/demo/package-manager.md'}, {newTitle: 'x'})).rejects.toThrow(/not an inbox note/);
+    });
+});

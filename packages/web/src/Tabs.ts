@@ -3,6 +3,7 @@ import type {AuditPanel} from './AuditPanel.js';
 import type {BenchmarksPanel} from './BenchmarksPanel.js';
 import type {CanvasPanel} from './CanvasPanel.js';
 import type {ChatPanel} from './ChatPanel.js';
+import type {InboxPanel} from './InboxPanel.js';
 import type {JobsPanel} from './JobsPanel.js';
 import type {RoadmapPanel} from './RoadmapPanel.js';
 
@@ -11,7 +12,7 @@ import type {RoadmapPanel} from './RoadmapPanel.js';
  * every panel except Notes, Graph and Consent is constructed — and its
  * module imported — only when its tab is first opened.
  */
-export const TABS = ['notes', 'graph', 'canvas', 'roadmap', 'benchmarks', 'chat', 'jobs', 'activity', 'audit', 'consent'] as const;
+export const TABS = ['notes', 'graph', 'canvas', 'inbox', 'roadmap', 'benchmarks', 'chat', 'jobs', 'activity', 'audit', 'consent'] as const;
 export type Tab = typeof TABS[number];
 
 export interface TabDef {
@@ -24,6 +25,7 @@ export const TAB_DEFS: readonly TabDef[] = [
     {id: 'notes', label: 'Notes'},
     {id: 'graph', label: 'Graph'},
     {id: 'canvas', label: 'Canvas'},
+    {id: 'inbox', label: 'Inbox', title: 'remember-Einträge der Agenten: in Notizen übernehmen oder verwerfen'},
     {id: 'roadmap', label: 'Roadmap', title: 'Per-Projekt Roadmap — KI-geplante Umsetzungsschritte'},
     {id: 'benchmarks', label: 'Benchmarks', title: 'Per-Projekt Benchmarks — Speed-/Qualitäts-Vergleiche nach Maschine, Backend, Technik'},
     {id: 'chat', label: 'Chat'},
@@ -54,6 +56,7 @@ export interface PanelContext {
 
 export interface LazyPanels {
     canvas: CanvasPanel;
+    inbox: InboxPanel;
     roadmap: RoadmapPanel;
     benchmarks: BenchmarksPanel;
     chat: ChatPanel;
@@ -68,6 +71,11 @@ export const isLazyTab = (tab: Tab): tab is LazyTab => tab in PANEL_FACTORIES;
 
 export const PANEL_FACTORIES: {[K in LazyTab]: (ctx: PanelContext) => Promise<LazyPanels[K]>} = {
     canvas: async (ctx) => new (await import('./CanvasPanel.js')).CanvasPanel({onOpenNote: ctx.openNote}),
+    inbox: async (ctx) => new (await import('./InboxPanel.js')).InboxPanel({
+        onOpenNote: ctx.openNote,
+        resolveNoteLink: ctx.resolveNoteLink,
+        onChange: ctx.notesChanged
+    }),
     roadmap: async (ctx) => new (await import('./RoadmapPanel.js')).RoadmapPanel({
         onOpenNote: ctx.openRef,
         resolveNoteLink: ctx.resolveNoteLink
