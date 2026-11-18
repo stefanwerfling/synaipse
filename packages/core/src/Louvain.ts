@@ -9,6 +9,10 @@
  *
  * The result is a flat `Map<nodeId, communityId>` where communityIds are
  * arbitrary integers — callers turn them into colours via a hash palette.
+ *
+ * Pure (no Node APIs): the server layout and the 2D web view share it via
+ * `@synaipse/core/louvain`. Kept out of the barrel so it does not land in
+ * the initial web bundle.
  */
 
 export interface CommunityGraphNode {
@@ -81,6 +85,12 @@ const runOnePass = (graph: WeightedGraph): {partition: Map<number, number>; impr
         sigmaTot.set(n, graph.k.get(n) ?? 0);
     }
 
+    if (graph.m === 0) {
+        return {partition: community, improved: false};
+    }
+
+    const m = graph.m;
+
     let improved = false;
     let movedThisIter = true;
     let safety = 0;
@@ -102,22 +112,21 @@ const runOnePass = (graph: WeightedGraph): {partition: Map<number, number>; impr
                 weightToComm.set(c, (weightToComm.get(c) ?? 0) + w);
             }
 
-            // Pull n out of its current community for the gain comparison.
+            // Take n out of its community; then every candidate, its own
+            // community included, is scored by the gain of inserting n:
+            // ΔQ = k_i,C / m − Σ_tot(C) · k_i / (2 m²)
             const stOwn = (sigmaTot.get(ownComm) ?? 0) - kn;
             const kIntoOwn = weightToComm.get(ownComm) ?? 0;
-
-            // Gain of leaving and rejoining own community is 0 by construction.
             let bestComm = ownComm;
-            let bestGain = 0;
+            let bestGain = kIntoOwn / m - (stOwn * kn) / (2 * m * m);
 
             for (const [c, kIntoC] of weightToComm.entries()) {
                 if (c === ownComm) continue;
 
                 const stC = sigmaTot.get(c) ?? 0;
-                // ΔQ = (k_i,C / m) − (Σ_tot(C) · k_i) / (2 m²)
-                const gain = (kIntoC / graph.m) - (stC * kn) / (2 * graph.m * graph.m);
+                const gain = kIntoC / m - (stC * kn) / (2 * m * m);
 
-                if (gain > bestGain) {
+                if (gain > bestGain + 1e-12) {
                     bestGain = gain;
                     bestComm = c;
                 }
@@ -125,16 +134,10 @@ const runOnePass = (graph: WeightedGraph): {partition: Map<number, number>; impr
 
             if (bestComm !== ownComm) {
                 sigmaTot.set(ownComm, stOwn);
-                sigmaTot.set(bestComm, (sigmaTot.get(bestComm) ?? 0) + kn - 0);
+                sigmaTot.set(bestComm, (sigmaTot.get(bestComm) ?? 0) + kn);
                 community.set(n, bestComm);
                 movedThisIter = true;
                 improved = true;
-            } else {
-                // No move — restore sigmaTot adjustments that we computed above
-                // for the leave step are only applied on a successful move, so
-                // there's nothing to undo here. We left kIntoOwn unused on
-                // purpose: it's the within-community weight already captured.
-                void kIntoOwn;
             }
         }
     }
@@ -158,10 +161,12 @@ const collapseGraph = (graph: WeightedGraph, partition: Map<number, number>): We
             const b = Math.max(cu, cv);
             const key = `${a}|${b}`;
 
-            // adj is symmetric for non-self edges, so we'd double-count without
-            // the min/max canonicalisation. Self-loops appear once and are
-            // halved here to match the original weighted convention.
-            if (a === b) {
+            // A self-loop is stored once in adj and keeps its full weight. An
+            // edge inside one community appears in both endpoints' lists, so
+            // each half counts w/2; edges between communities count once (n < nb).
+            if (n === nb) {
+                edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + w);
+            } else if (a === b) {
                 edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + w / 2);
             } else if (n < nb) {
                 edgeWeights.set(key, (edgeWeights.get(key) ?? 0) + w);
@@ -191,7 +196,8 @@ const computeModularity = (graph: WeightedGraph, partition: Map<number, number>)
         for (const {n: nb, w} of graph.adj.get(n) ?? []) {
             const cb = partition.get(nb) ?? nb;
             if (cb === c) {
-                sumIn.set(c, (sumIn.get(c) ?? 0) + w);
+                // Other edges appear in both lists; a self-loop once, but counts as A_ii = 2w.
+                sumIn.set(c, (sumIn.get(c) ?? 0) + (nb === n ? 2 * w : w));
             }
         }
     }
@@ -233,7 +239,8 @@ export const detectCommunities = (
         intEdges.push({u, v, w: e.weight ?? 1});
     }
 
-    let graph = buildWeightedGraph(intNodes, intEdges);
+    const original = buildWeightedGraph(intNodes, intEdges);
+    let graph = original;
     let currentPartition = new Map<number, number>();
     for (const n of intNodes) currentPartition.set(n, n);
 
@@ -272,7 +279,8 @@ export const detectCommunities = (
         finalPartition.set(id, remap.get(comm) ?? 0);
     }
 
-    const modularity = computeModularity(graph, currentPartition);
+    // On the original graph: currentPartition maps original nodes.
+    const modularity = computeModularity(original, currentPartition);
 
     return {
         partition: finalPartition,

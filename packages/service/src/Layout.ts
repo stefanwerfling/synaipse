@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {detectCommunities, type CommunityGraphEdge, type CommunityGraphNode} from './Communities.js';
+import {detectCommunities, type CommunityGraphEdge, type CommunityGraphNode} from '@synaipse/core/louvain';
 
 /**
  * Deterministic, server-pre-computed graph layout for the "Atlas" view.
@@ -106,11 +106,19 @@ const layoutCommunityGrid = (
     return tiles;
 };
 
+/**
+ * Part of the layout hash (and so of the HTTP ETag). Bump it whenever the
+ * algorithm's output changes for the same graph, or browsers keep showing
+ * the old layout via 304. 2: Louvain fixes (move gain, modularity, self-loops).
+ */
+export const LAYOUT_ALGORITHM_VERSION = 2;
+
 const computeHash = (
     nodes: readonly CommunityGraphNode[],
     edges: readonly CommunityGraphEdge[]
 ): string => {
     const hash = createHash('sha1');
+    hash.update(`layout-v${LAYOUT_ALGORITHM_VERSION}\n`);
     const nodeIds = nodes.map((n) => n.id).sort();
     for (const id of nodeIds) hash.update(`${id}\n`);
     hash.update('---\n');

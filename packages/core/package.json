@@ -30,6 +30,10 @@
     "./worker-rpc": {
       "types": "./dist/WorkerRpc.d.ts",
       "import": "./dist/WorkerRpc.js"
+    },
+    "./louvain": {
+      "types": "./dist/Louvain.d.ts",
+      "import": "./dist/Louvain.js"
     }
   },
   "scripts": {
