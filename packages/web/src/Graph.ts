@@ -139,7 +139,8 @@ export class GraphView implements GraphRenderer {
     private feed: ServerLayoutFeed | null = null;
     private layout: ServerLayout | null = null;
     private layoutMs = 0;
-    private communitySizes = new Map<string, number>();
+    /** Tooltip per cluster id. */
+    private clusterTitles = new Map<string, string>();
     private fitted = false;
 
     public constructor(initial: GraphState, private readonly cb: GraphCallbacks) {
@@ -295,7 +296,7 @@ export class GraphView implements GraphRenderer {
         this.layout = null;
         this.fitted = false;
         this.hullLabels = new Map();
-        this.communitySizes = new Map();
+        this.clusterTitles = new Map();
         this.hoveredNode = false;
         this.graph?.destroy();
         this.graph = null;
@@ -362,7 +363,7 @@ export class GraphView implements GraphRenderer {
             const cluster = graph.isClustered() ? graph.clusterAt(x, y) : null;
 
             if (cluster !== null) {
-                title = `community ${cluster} · ${this.communitySizes.get(cluster) ?? 0} notes · click to zoom in`;
+                title = this.clusterTitles.get(cluster) ?? '';
             } else if (this.hullLabels.size > 0) {
                 title = graph.hullsAt(x, y).map((id) => this.hullLabels.get(id) ?? id).join('\n');
             }
@@ -439,7 +440,10 @@ export class GraphView implements GraphRenderer {
 
         const built = buildServerGraph(layout, this.state.data, this.state.showCommunities);
         this.notes = new Map(this.state.data.nodes.map((n) => [n.id, n]));
-        this.communitySizes = new Map(built.clusters.map((c) => [c.id, c.size ?? 0]));
+        this.clusterTitles = new Map(built.clusters.map((c) => {
+            const name = c.label ?? `community ${c.id}`;
+            return [c.id, `${name} · ${c.size ?? 0} notes · click to zoom in`];
+        }));
 
         graph.setData(built.nodes, built.edges);
         graph.setClusters(built.clusters, built.clusterEdges);

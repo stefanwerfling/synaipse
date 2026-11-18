@@ -448,6 +448,8 @@ export interface GraphLayoutCommunity {
     cx: number;
     cy: number;
     radius: number;
+    /** The group of notes without a link to another note. */
+    unlinked?: boolean;
 }
 
 export interface InterCommunityEdge {

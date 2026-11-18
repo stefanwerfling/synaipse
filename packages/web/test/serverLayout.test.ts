@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import type {Graph as GraphData} from '@synaipse/core';
 import type {GraphLayout} from '../src/Api.js';
-import {SERVER_EDGE_KIND, buildServerGraph, serverNodeRadius} from '../src/ServerLayout.js';
+import {SERVER_EDGE_KIND, UNLINKED_LABEL, buildServerGraph, serverNodeRadius} from '../src/ServerLayout.js';
 import {CLIENT_LAYOUT_BELOW, SERVER_LAYOUT_FROM, choosePlacement} from '../src/Graph.js';
 import {tagColor} from '../src/Colors.js';
 import {communityColor} from '../src/Communities.js';
@@ -70,6 +70,14 @@ describe('buildServerGraph', () => {
             {id: '1', x: 500, y: 60, size: 2, radius: 40, color: communityColor(1), nodeIds: ['c']}
         ]);
         expect(built.clusterEdges).toEqual([{source: '0', target: '1', weight: 3}]);
+    });
+
+    it('labels the group of notes without links', () => {
+        const withUnlinked: GraphLayout = {...layout, communities: [layout.communities[0]!, {...layout.communities[1]!, unlinked: true}]};
+        const built = buildServerGraph(withUnlinked, data, false);
+
+        expect(built.clusters[0]?.label).toBeUndefined();
+        expect(built.clusters[1]?.label).toBe(UNLINKED_LABEL);
     });
 });
 

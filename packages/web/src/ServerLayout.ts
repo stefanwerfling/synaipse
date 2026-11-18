@@ -6,6 +6,8 @@ import {communityColor} from './Communities.js';
 
 /** Edge kind of every server-layout edge: one solid neutral look, stroked in one batch. */
 export const SERVER_EDGE_KIND = 'layout';
+/** Cluster label of the group of notes without links. */
+export const UNLINKED_LABEL = 'unlinked notes';
 /** While the server still serves a stale layout, poll again after this delay. */
 const STALE_POLL_MS = 1500;
 
@@ -71,7 +73,8 @@ export const buildServerGraph = (layout: GraphLayout, data: GraphData, showCommu
         size: c.size,
         radius: c.radius,
         color: communityColor(c.id),
-        nodeIds: members.get(c.id) ?? []
+        nodeIds: members.get(c.id) ?? [],
+        ...(c.unlinked === true ? {label: UNLINKED_LABEL} : {})
     }));
 
     const clusterEdges: NGraphClusterEdge[] = layout.interCommunityEdges.map((e) => ({
