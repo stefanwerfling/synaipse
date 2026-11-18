@@ -1,5 +1,5 @@
 export {SynaipseService} from './Service.js';
-export type {ServiceOverrides, WriteGuard, WriteMode} from './Service.js';
+export type {InboxCandidate, RemovedNote, SearchFilter, ServiceOverrides, WriteGuard, WriteMode} from './Service.js';
 export {auditContextStorage, getAuditTokenLabel, isPathInScope} from './AuditContext.js';
 export type {AuditContext} from './AuditContext.js';
 export type {AuditEntry, AuditKind} from './AuditLog.js';
@@ -48,3 +48,5 @@ export {applyKnowledgeState, buildSuccessors, knowledgeStateOf, supersededTarget
 export type {AnnotatedHit, KnowledgeNote, KnowledgeState} from './KnowledgeState.js';
 export {DUPLICATE_THRESHOLD, pickDuplicates, similarity} from './Duplicates.js';
 export type {DuplicateCandidate, DuplicateText} from './Duplicates.js';
+export {bestSection, isInboxNote, parseInbox} from './Inbox.js';
+export type {InboxEntry, SectionAnchor} from './Inbox.js';

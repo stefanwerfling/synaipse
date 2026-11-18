@@ -15,7 +15,8 @@ import {regressions, type DedupeSummary, type EvalReport, type QuestionResult, t
 /**
  * LLM-usability eval (plan P8 / B7). A scripted agent answers each fixture
  * question the way the server instructions tell an LLM to: one
- * synaipse_search (limit 5), then synaipse_read_note on the top hit. It
+ * synaipse_search (limit 5), then synaipse_read_note on the top hit (only
+ * its matching section when the hit names one). It
  * measures whether the right note comes first and what that costs in
  * tokens, plus the fixed context cost (tool list, instructions, prime).
  *
@@ -65,7 +66,8 @@ const textOf = (result: Awaited<ReturnType<Client['callTool']>>): string =>
 
 const answer = async (client: Client, q: EvalQuestion): Promise<QuestionResult> => {
     const search = textOf(await client.callTool({name: 'synaipse_search', arguments: {query: q.query, limit: SEARCH_LIMIT}}));
-    const hits = ((JSON.parse(search) as {hits?: Array<{noteId: string}>}).hits ?? []).map((h) => h.noteId);
+    const hitList = (JSON.parse(search) as {hits?: Array<{noteId: string; section?: string}>}).hits ?? [];
+    const hits = hitList.map((h) => h.noteId);
 
     const best = q.relevant[0] as string;
     const relevant = new Set(q.relevant);
@@ -79,8 +81,11 @@ const answer = async (client: Client, q: EvalQuestion): Promise<QuestionResult> 
         return i !== -1 && (bestIndex === -1 || i < bestIndex);
     });
 
-    const top = hits[0];
-    const readTokens = top === undefined ? 0 : tokens(textOf(await client.callTool({name: 'synaipse_read_note', arguments: {id: top}})));
+    // Like the tool description says: read only the matching section when the hit names one.
+    const top = hitList[0];
+    const readTokens = top === undefined
+        ? 0
+        : tokens(textOf(await client.callTool({name: 'synaipse_read_note', arguments: {id: top.noteId, ...(top.section !== undefined ? {section: top.section} : {})}})));
 
     return {
         id: q.id,

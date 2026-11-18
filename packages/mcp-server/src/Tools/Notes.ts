@@ -1,7 +1,11 @@
 import {canonicalNoteLink, resolveNoteRefTarget} from '@synaipse/core';
 import {isAllowedAssetMime, isPathInScope, MIME_TO_EXT, type SynaipseService} from '@synaipse/service';
 import {extractSection, headingsOf, modifiedOf, resolveNoteId, writeResult} from './Format.js';
-import {asString, asWriteMode, enforceReadConsent, ok, type ToolHandler} from './Shared.js';
+
+/** Characters of a sha shown to the model (enough to be unique in one note's history). */
+const SHA_CHARS = 10;
+const DIFF_MAX_CHARS = 8000;
+import {asLimit, asSince, asString, asWriteMode, enforceReadConsent, ok, type ToolHandler} from './Shared.js';
 
 /** Default cap for read_note bodies; long notes are cut with a hint how to page. */
 const READ_DEFAULT_MAX_CHARS = 20_000;
@@ -271,6 +275,92 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
             return {
                 response: ok({noteId, tags, time: new Date().toISOString(), ...(duplicates.length > 0 ? {possibleDuplicates: duplicates} : {})}),
                 event: {kind: 'write', touched: [noteId]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_note_history',
+            description: 'Versions of a note, newest first ({sha, modified, age, tool}). With diff: a sha from that list, returns the unified diff from that version to now.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    id: {type: 'string', description: 'Vault path, title or alias'},
+                    diff: {type: 'string', description: 'sha (prefix) of the older version'},
+                    limit: {type: 'number', description: 'Default 20'}
+                },
+                required: ['id']
+            }
+        },
+        handle: async (args) => {
+            const id = resolveNoteId(service, asString(args.id, 'id'));
+            await enforceReadConsent(service, id);
+            const history = await service.noteHistory(id, asLimit(args.limit, 20));
+
+            if (typeof args.diff === 'string' && args.diff.length > 0) {
+                const prefix = args.diff;
+                const from = history.find((h) => h.sha.startsWith(prefix))
+                    ?? (await service.noteHistory(id, 500)).find((h) => h.sha.startsWith(prefix));
+                if (from === undefined) throw new Error(`No version ${prefix} of ${id}. Call without diff to list the versions.`);
+
+                const diff = await service.noteDiff(id, from.sha);
+                const truncated = diff.length > DIFF_MAX_CHARS;
+                return {
+                    response: ok({id, from: from.sha.slice(0, SHA_CHARS), diff: truncated ? diff.slice(0, DIFF_MAX_CHARS) : diff, ...(truncated ? {truncated: true} : {})}),
+                    event: {kind: 'read', touched: [id]}
+                };
+            }
+
+            return {
+                response: ok({
+                    id,
+                    versions: history.map((h) => ({
+                        sha: h.sha.slice(0, SHA_CHARS),
+                        ...modifiedOf(Date.parse(h.author.date)),
+                        tool: /^synaipse(?:\([^)]*\))?:\s+(\S+)/.exec(h.message)?.[1] ?? h.message.split('\n')[0]
+                    })),
+                    ...(history.length === 0 ? {note: 'No history: version history is off or the note was never committed.'} : {})
+                }),
+                event: {kind: 'read', touched: [id]}
+            };
+        }
+    },
+    {
+        definition: {
+            name: 'synaipse_consolidate_inbox',
+            description: 'Inbox entries (remember) of the project with where each belongs: alreadyIn = notes that already say it (drop the entry), targets = curated notes to merge it into. Merge with edit_note, then remove the entry from the inbox note (its section is the time).',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    since: {type: 'string', description: 'ISO date or span like "7d"; default all'},
+                    limit: {type: 'number', description: 'Entries, default 20'}
+                }
+            }
+        },
+        handle: async (args, ctx) => {
+            const project = ctx?.project;
+            if (project === undefined || project === null) {
+                throw new Error('consolidate_inbox needs a project (MCP URL /mcp/<project> or the x-synaipse-project header).');
+            }
+
+            const since = asSince(args.since);
+            const candidates = await service.inboxCandidates(project, {...(since !== undefined ? {sinceMs: since} : {}), limit: asLimit(args.limit, 20)});
+            const entries = candidates.map((c) => {
+                const alreadyIn = c.alreadyIn.filter((d) => isPathInScope(d.id));
+                const targets = c.targets.filter((t) => isPathInScope(t.id));
+                return {
+                    inbox: c.inbox,
+                    section: c.time,
+                    text: c.text,
+                    ...(c.tags.length > 0 ? {tags: c.tags} : {}),
+                    ...(alreadyIn.length > 0 ? {alreadyIn} : {}),
+                    targets
+                };
+            });
+
+            return {
+                response: ok({entries, total: service.inboxEntries(project, since !== undefined ? {sinceMs: since} : {}).length}),
+                event: {kind: 'list', touched: [...new Set(entries.map((e) => e.inbox))].slice(0, 5)}
             };
         }
     },

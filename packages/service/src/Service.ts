@@ -86,6 +86,7 @@ import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.j
 import {buildLocalGraph, type LocalGraph, type LocalGraphOptions} from './LocalGraph.js';
 import {InvertedIndex} from './InvertedIndex.js';
 import {duplicateQuery, pickDuplicates, type DuplicateCandidate, type DuplicateText} from './Duplicates.js';
+import {bestSection, isInboxNote, parseInbox, type InboxEntry, type SectionAnchor} from './Inbox.js';
 import {applyKnowledgeState, buildSuccessors, isOutdated, knowledgeStateOf, type KnowledgeState} from './KnowledgeState.js';
 import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
@@ -238,6 +239,30 @@ export interface WriteGuard {
 }
 
 export type WriteMode = 'create' | 'overwrite' | 'upsert';
+
+/** Extra search filters (plan P8 / B3), applied after ranking. */
+export interface SearchFilter {
+    /** Every one of these tags (without #). */
+    tags?: readonly string[];
+    /** Modified at or after this epoch-ms. */
+    sinceMs?: number;
+}
+
+/** A note that left the vault, from the version history. */
+export interface RemovedNote {
+    id: NoteId;
+    /** epoch-ms of the commit. */
+    at: number;
+    how: 'deleted' | 'archived';
+}
+
+/** One inbox entry with where its knowledge could go (plan P8 / B4). */
+export interface InboxCandidate extends InboxEntry {
+    /** Notes that already say this: the entry can be dropped. */
+    alreadyIn: DuplicateCandidate[];
+    /** Curated notes on the same topic to merge it into, best first. */
+    targets: Array<{id: NoteId; title: string}>;
+}
 
 export interface ProjectOpts {
     project?: string | null;
@@ -835,7 +860,7 @@ export class SynaipseService {
      * the scope instead of the global top-N minus everything outside.
      * An MCP token's path restriction is added automatically.
      */
-    public async search(query: string, mode: SearchMode, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
+    public async search(query: string, mode: SearchMode, limit: number, scope?: SearchScope, filter?: SearchFilter): Promise<SearchHit[]> {
         // A search hit is not an access: counting every hit made notes that
         // rank well rank better (they also became graph seeds of the next
         // search) and kept them out of `stale` without anyone reading them.
@@ -844,7 +869,93 @@ export class SynaipseService {
         const effective = intersectScopes(scope, tokenPrefixes !== undefined && tokenPrefixes.length > 0 ? {include: tokenPrefixes} : undefined);
         if (effective === null) return [];
 
-        return this.runSearch(query, mode, limit, isUnscoped(effective) ? undefined : effective);
+        const scoped = isUnscoped(effective) ? undefined : effective;
+        const tags = filter?.tags?.filter((t) => t.length > 0) ?? [];
+        const since = filter?.sinceMs;
+
+        if (tags.length === 0 && since === undefined) {
+            return this.runSearch(query, mode, limit, scoped);
+        }
+
+        // Filters apply after ranking, so fetch a wider candidate set.
+        const keep = (id: NoteId): boolean => {
+            const note = this.notes.tryGet(id);
+            if (note === undefined) return false;
+            if (since !== undefined && note.mtime < since) return false;
+            return tags.every((t) => note.tags.includes(t.replace(/^#/, '')));
+        };
+        const wide = await this.runSearch(query, mode, Math.max(limit * 5, 50), scoped);
+        return wide.filter((h) => keep(h.noteId)).slice(0, limit);
+    }
+
+    /** Where in a note a query lands (see Inbox.bestSection); null for short or unknown notes. */
+    public sectionFor(id: NoteId, query: string): SectionAnchor | null {
+        const note = this.notes.tryGet(id);
+        return note === undefined ? null : bestSection(note.content, query);
+    }
+
+    /**
+     * Notes removed since `sinceMs` (deleted, or archived by decay) that are
+     * still gone, newest first, from the version history; empty without it.
+     */
+    public async removedSince(sinceMs: number, limit = 200): Promise<RemovedNote[]> {
+        const repo = await this.history.getRepo();
+        if (repo === null) return [];
+
+        const entries = await repo.log({limit: 5000});
+        const out = new Map<NoteId, RemovedNote>();
+
+        for (const e of entries) {
+            const at = e.author.timestamp * 1000;
+            if (at < sinceMs) break;
+
+            const commit = toActivityCommit({sha: e.sha, author: {name: e.author.name, date: new Date(at)}, message: e.message});
+            const how = commit.tool === 'delete_note' ? 'deleted' : commit.tool === 'archive_stale' ? 'archived' : null;
+            const id = commit.noteId;
+
+            if (how === null || id === null || out.has(id) || this.notes.tryGet(id) !== undefined) continue;
+            // archive_stale also commits the archive copy; only the vanished original counts.
+            out.set(id, {id, at, how});
+            if (out.size >= limit) break;
+        }
+
+        return [...out.values()];
+    }
+
+    /** Inbox entries of a project, newest day first (entries in file order). */
+    public inboxEntries(project: string, opts: {sinceMs?: number} = {}): InboxEntry[] {
+        const prefix = `${this.projectFolder(project)}inbox/`;
+        const since = opts.sinceMs === undefined ? null : new Date(opts.sinceMs).toISOString().slice(0, 10);
+
+        return this.notes.list()
+            .filter((n) => n.id.startsWith(prefix) && isInboxNote(n.id))
+            .flatMap((n) => parseInbox(n.id, n.content))
+            .filter((e) => since === null || e.date >= since)
+            .sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    /**
+     * Consolidation candidates for the inbox (plan P8 / B4): per entry the
+     * notes that already hold it and the curated notes to merge it into.
+     * Synaipse only proposes; the agent (or the user in the UI) writes.
+     */
+    public async inboxCandidates(project: string, opts: {sinceMs?: number; limit?: number} = {}): Promise<InboxCandidate[]> {
+        const entries = this.inboxEntries(project, opts).slice(0, opts.limit ?? 30);
+        const out: InboxCandidate[] = [];
+
+        for (const entry of entries) {
+            const alreadyIn = await this.possibleDuplicates({title: '', content: entry.text}, [entry.inbox]);
+            const known = new Set(alreadyIn.map((d) => d.id));
+            const hits = await this.search(entry.text, 'hybrid', 8);
+            const targets = hits
+                .filter((h) => !isInboxNote(h.noteId) && !known.has(h.noteId) && h.noteId !== entry.inbox)
+                .slice(0, 3)
+                .map((h) => ({id: h.noteId, title: h.title}));
+
+            out.push({...entry, alreadyIn, targets});
+        }
+
+        return out;
     }
 
     /**

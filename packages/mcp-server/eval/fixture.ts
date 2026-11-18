@@ -203,6 +203,39 @@ export const EVAL_NOTES: readonly EvalNote[] = [
         fm: {updated: '2025-07-01'},
         body: 'Since July 2025 support on-call runs through PagerDuty: the schedule "kestrel-support" pages the on-call engineer, the public phone number forwards to it.'
     },
+    // ---- kestrel: long notes with sections (section anchors, P8 S4) ---------
+    {
+        path: `${K}/howto/runbook.md`,
+        title: 'Kestrel operations runbook',
+        tags: ['howto', 'ops'],
+        fm: {type: 'note', updated: '2025-10-20'},
+        body: [
+            '## Deploy',
+            'Production deploys run from the release pipeline after the staging smoke tests pass. Approve the "production" stage in the pipeline UI; the rollout replaces pods one at a time and waits for the readiness probe on /healthz. Watch the error rate panel in Grafana for ten minutes before closing the release ticket. Never deploy on Fridays after 14:00.',
+            '## Rollback',
+            'To roll back, re-run the production stage of the previous release tag; the pipeline keeps the last five images. Database migrations are backwards compatible for one release, so a rollback needs no schema change. If the previous release is older than that, restore the database first (see below) and tell Maria before you start.',
+            '## Database restore',
+            'Postgres is backed up every night with pgBackRest to the S3 bucket kestrel-backups, with point-in-time recovery from the WAL archive for 14 days. Restore into a new instance, check the row counts of accounts and invoices against the dashboard, then switch the connection string in Vault and restart the API pods.',
+            '## Escalation',
+            'Severity 1 (customers cannot log in or invoices are wrong): page the on-call engineer through PagerDuty and open an incident channel. Severity 2: ticket in the ops queue, answer within four working hours. Security incidents always go to the security lead as well, even at night.'
+        ].join('\n\n')
+    },
+    {
+        path: `${K}/architecture/billing.md`,
+        title: 'Kestrel billing architecture',
+        tags: ['architecture', 'billing'],
+        fm: {type: 'concept', updated: '2025-08-30'},
+        body: [
+            '## Invoice lifecycle',
+            'An invoice starts as a draft, is finalised (numbered, immutable) and then sent; payment moves it to paid, a credit note to cancelled. Invoice numbers are gapless per account and year, assigned in the finalise transaction with a row lock on the counter table.',
+            '## Payments',
+            'Card and SEPA payments go through Stripe. The webhook handler is idempotent on the Stripe event id and marks invoices paid; partial payments keep the invoice open with the remaining amount. Refunds are created in Kestrel and pushed to Stripe, never the other way round.',
+            '## Dunning',
+            'Unpaid invoices get reminders by email. The dunning job runs daily at 06:00 in the account time zone and stops as soon as a payment arrives or the customer disputes the invoice.',
+            '## Tax',
+            'VAT rates come from the account country and the customer VAT id; reverse charge applies to EU business customers with a valid id, checked against VIES when the invoice is finalised.'
+        ].join('\n\n')
+    },
     // ---- kestrel: inbox (raw remember entries) -----------------------------
     {
         path: `${K}/inbox/2025-11-10.md`,
@@ -346,6 +379,11 @@ export const EVAL_QUESTIONS: readonly EvalQuestion[] = [
     {id: 'S2', category: 'scoped', question: 'What are the Harbor rate limits?', query: 'Harbor rate limits', relevant: [`${H}/notes/rate-limits.md`], outdated: [`${K}/notes/rate-limits.md`, `${K}/notes/rate-limiting-public-api.md`]},
     {id: 'S3', category: 'scoped', question: 'How are sessions handled in Harbor?', query: 'Harbor session store', relevant: [`${H}/decisions/session-store.md`]},
     {id: 'S4', category: 'scoped', question: 'What is the Harbor architecture?', query: 'Harbor architecture overview', relevant: [`${H}/architecture/overview.md`], outdated: [`${K}/architecture/overview.md`]},
+
+    // ---- answers inside one section of a long note ---------------------------
+    {id: 'L15', category: 'lookup', question: 'How do I roll back a Kestrel release?', query: 'roll back Kestrel release', relevant: [`${K}/howto/runbook.md`]},
+    {id: 'L16', category: 'lookup', question: 'How are Kestrel database backups restored?', query: 'database backup restore pgBackRest', relevant: [`${K}/howto/runbook.md`]},
+    {id: 'L17', category: 'lookup', question: 'When does reverse charge apply on invoices?', query: 'reverse charge VAT invoices', relevant: [`${K}/architecture/billing.md`]},
 
     // ---- remembered facts that only live in the inbox ------------------------
     {id: 'L13', category: 'lookup', question: 'How long are old invoice file versions kept?', query: 'invoice bucket versioning lifecycle', relevant: [`${K}/inbox/2025-11-10.md`]},

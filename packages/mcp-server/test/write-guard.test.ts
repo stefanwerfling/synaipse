@@ -22,6 +22,7 @@ beforeEach(async () => {
         indexCachePath: path.join(vaultDir, '.cache.json'),
         chatStoreDir: path.join(vaultDir, '..', 'chats'),
         auditLogPath: path.join(vaultDir, '.audit.jsonl'),
+        schedulesPath: path.join(vaultDir, '..', 'schedules.json'),
         embeddings: {provider: 'none' as const},
         qdrant: {url: 'http://127.0.0.1:9', collection: 'test'},
         server: {name: 'synaipse-test', version: '0.0.0'},

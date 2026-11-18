@@ -1,10 +1,10 @@
 {
   "fixture": {
-    "notes": 38,
-    "questions": 32
+    "notes": 40,
+    "questions": 35
   },
   "context": {
-    "toolListTokens": 4644,
+    "toolListTokens": 5065,
     "instructionsTokens": 305,
     "primeTokens": 824
   },
@@ -37,21 +37,21 @@
     }
   },
   "overall": {
-    "questions": 32,
-    "hitAt1": 0.844,
-    "recallAt5": 0.984,
-    "mrr": 0.909,
+    "questions": 35,
+    "hitAt1": 0.829,
+    "recallAt5": 0.986,
+    "mrr": 0.893,
     "outdatedAbove": 0,
-    "tokensPerQuestion": 481
+    "tokensPerQuestion": 501
   },
   "byCategory": {
     "lookup": {
-      "questions": 14,
-      "hitAt1": 0.929,
-      "recallAt5": 0.964,
-      "mrr": 0.952,
+      "questions": 17,
+      "hitAt1": 0.882,
+      "recallAt5": 0.971,
+      "mrr": 0.922,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 441
+      "tokensPerQuestion": 478
     },
     "paraphrase": {
       "questions": 6,
@@ -59,15 +59,15 @@
       "recallAt5": 1,
       "mrr": 0.792,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 467
+      "tokensPerQuestion": 479
     },
     "current": {
       "questions": 6,
       "hitAt1": 0.667,
       "recallAt5": 1,
-      "mrr": 0.833,
+      "mrr": 0.806,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 541
+      "tokensPerQuestion": 563
     },
     "trust": {
       "questions": 2,
@@ -75,7 +75,7 @@
       "recallAt5": 1,
       "mrr": 1,
       "outdatedAbove": 0,
-      "tokensPerQuestion": 553
+      "tokensPerQuestion": 557
     },
     "scoped": {
       "questions": 4,
@@ -93,7 +93,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 350,
+      "searchTokens": 409,
       "readTokens": 159
     },
     {
@@ -102,7 +102,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 306,
+      "searchTokens": 407,
       "readTokens": 174
     },
     {
@@ -138,7 +138,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 250,
+      "searchTokens": 430,
       "readTokens": 206
     },
     {
@@ -156,7 +156,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 397,
+      "searchTokens": 409,
       "readTokens": 136
     },
     {
@@ -219,7 +219,7 @@
       "rank": 4,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 396,
+      "searchTokens": 409,
       "readTokens": 170
     },
     {
@@ -237,7 +237,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 350,
+      "searchTokens": 409,
       "readTokens": 220
     },
     {
@@ -255,7 +255,7 @@
       "rank": 2,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 335,
+      "searchTokens": 349,
       "readTokens": 132
     },
     {
@@ -264,7 +264,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 400,
+      "searchTokens": 418,
       "readTokens": 213
     },
     {
@@ -273,7 +273,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 344,
+      "searchTokens": 423,
       "readTokens": 195
     },
     {
@@ -288,10 +288,10 @@
     {
       "id": "C5",
       "category": "current",
-      "rank": 2,
+      "rank": 3,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 336,
+      "searchTokens": 357,
       "readTokens": 220
     },
     {
@@ -318,7 +318,7 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 389,
+      "searchTokens": 397,
       "readTokens": 133
     },
     {
@@ -358,13 +358,40 @@
       "readTokens": 166
     },
     {
+      "id": "L15",
+      "category": "lookup",
+      "rank": 3,
+      "recallAt5": 1,
+      "outdatedAbove": false,
+      "searchTokens": 424,
+      "readTokens": 174
+    },
+    {
+      "id": "L16",
+      "category": "lookup",
+      "rank": 1,
+      "recallAt5": 1,
+      "outdatedAbove": false,
+      "searchTokens": 170,
+      "readTokens": 176
+    },
+    {
+      "id": "L17",
+      "category": "lookup",
+      "rank": 1,
+      "recallAt5": 1,
+      "outdatedAbove": false,
+      "searchTokens": 432,
+      "readTokens": 149
+    },
+    {
       "id": "L13",
       "category": "lookup",
       "rank": 3,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 397,
-      "readTokens": 174
+      "searchTokens": 421,
+      "readTokens": 165
     },
     {
       "id": "L14",
@@ -372,8 +399,8 @@
       "rank": 1,
       "recallAt5": 1,
       "outdatedAbove": false,
-      "searchTokens": 163,
-      "readTokens": 153
+      "searchTokens": 260,
+      "readTokens": 117
     }
   ]
 }

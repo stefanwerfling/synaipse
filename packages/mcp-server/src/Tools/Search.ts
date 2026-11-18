@@ -1,13 +1,16 @@
 import {isPathInScope, type SynaipseService} from '@synaipse/service';
 import {ageOf, modifiedOf} from './Format.js';
-import {asLimit, asSearchMode, asString, filterByConsent, filterNotesByConsent, ok, type ToolHandler} from './Shared.js';
+import {asLimit, asSearchMode, asSince, asString, filterByConsent, filterNotesByConsent, ok, type ToolHandler} from './Shared.js';
+
+/** Hits that get a section anchor (it costs a pass over the note). */
+const SECTION_HITS = 5;
 
 /** Retrieval, listing and the session primer. */
 export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_list',
-            description: 'List notes (id, title, tags, modified, age), newest first or by title. Filter by folder prefix and/or tag; page with cursor.',
+            description: 'List notes (id, title, tags, modified, age), newest first or by title. Filter by folder prefix, tag and since; page with cursor. With since it answers "what changed": notes modified since then plus removed (deleted/archived) ones.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -15,11 +18,13 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
                     tag: {type: 'string'},
                     sort: {type: 'string', enum: ['modified', 'title'], description: 'Default modified (newest first)'},
                     limit: {type: 'number', description: 'Default 50'},
-                    cursor: {type: 'string', description: 'nextCursor from the previous page'}
+                    cursor: {type: 'string', description: 'nextCursor from the previous page'},
+                    since: {type: 'string', description: 'ISO date or span like "24h", "7d"'}
                 }
             }
         },
         handle: async (args) => {
+            const since = asSince(args.since);
             const prefix = typeof args.prefix === 'string' ? args.prefix : '';
             const sort = args.sort === undefined || args.sort === null ? 'modified' : args.sort;
             if (sort !== 'modified' && sort !== 'title') {
@@ -28,7 +33,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const limit = asLimit(args.limit, 50);
             const offset = typeof args.cursor === 'string' && /^\d+$/.test(args.cursor) ? Number(args.cursor) : 0;
 
-            let candidates = service.listNotes().filter((n) => n.id.startsWith(prefix));
+            let candidates = service.listNotes().filter((n) => n.id.startsWith(prefix) && (since === undefined || n.mtime >= since));
             if (typeof args.tag === 'string' && args.tag.length > 0) {
                 const tagged = new Set(service.tags().get(args.tag) ?? []);
                 candidates = candidates.filter((n) => tagged.has(n.id));
@@ -38,11 +43,16 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
                 ? [...filtered.items].sort((a, b) => a.title.localeCompare(b.title))
                 : [...filtered.items].sort((a, b) => b.mtime - a.mtime);
             const page = sorted.slice(offset, offset + limit);
+            // Removed notes only on the first page of a "since" listing.
+            const removed = since === undefined || offset > 0
+                ? []
+                : (await service.removedSince(since)).filter((r) => r.id.startsWith(prefix) && isPathInScope(r.id));
 
             return {
                 response: ok({
                     notes: page.map((n) => ({id: n.id, title: n.title, tags: n.tags, ...modifiedOf(n.mtime)})),
                     total: sorted.length,
+                    ...(removed.length > 0 ? {removed: removed.map((r) => ({id: r.id, how: r.how, ...modifiedOf(r.at)}))} : {}),
                     ...(offset + limit < sorted.length ? {nextCursor: String(offset + limit)} : {}),
                     ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
                 }),
@@ -53,7 +63,7 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_search',
-            description: 'Search the vault. mode: hybrid (default), fulltext (exact terms) or semantic (concepts). explain:true adds a per-signal score breakdown.',
+            description: 'Search the vault. mode: hybrid (default), fulltext (exact terms) or semantic (concepts). Filters: pathPrefix, tags (all), since. A hit with section points at the part that matches: pass it to read_note to read only that. explain:true adds a per-signal score breakdown.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -61,6 +71,8 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
                     mode: {type: 'string', enum: ['fulltext', 'semantic', 'hybrid']},
                     limit: {type: 'number', description: 'Default 10'},
                     pathPrefix: {type: 'string', description: 'Only notes under this path, e.g. "Memory/<project>/"'},
+                    tags: {type: 'array', items: {type: 'string'}, description: 'Only notes with all of these tags'},
+                    since: {type: 'string', description: 'Only notes modified since: ISO date or "7d"'},
                     explain: {type: 'boolean'}
                 },
                 required: ['query']
@@ -70,17 +82,25 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
             const query = asString(args.query, 'query');
             const explain = args.explain === true;
             const prefix = typeof args.pathPrefix === 'string' && args.pathPrefix.length > 0 ? args.pathPrefix : undefined;
+            const tags = Array.isArray(args.tags) ? args.tags.filter((t): t is string => typeof t === 'string') : [];
+            const since = asSince(args.since);
             const raw = await service.search(
                 query,
                 asSearchMode(args.mode),
                 asLimit(args.limit, 10),
-                prefix !== undefined ? {include: [prefix]} : undefined
+                prefix !== undefined ? {include: [prefix]} : undefined,
+                {...(tags.length > 0 ? {tags} : {}), ...(since !== undefined ? {sinceMs: since} : {})}
             );
             // Brief hits: `path` duplicates noteId and chunkId is internal;
             // both (and the score breakdown) only come back with explain.
-            const stripped = explain
-                ? raw
-                : raw.map(({components: _c, path: _p, chunkId: _id, score, ...rest}) => ({...rest, score: Math.round(score * 1000) / 1000}));
+            // The top hits carry the section that matches (notes with headings).
+            const stripped = raw.map((hit, i) => {
+                const anchor = i < SECTION_HITS ? service.sectionFor(hit.noteId, query) : null;
+                const base = explain
+                    ? hit
+                    : (({components: _c, path: _p, chunkId: _id, score, ...rest}) => ({...rest, score: Math.round(score * 1000) / 1000}))(hit);
+                return anchor === null ? base : {...base, section: anchor.section, lines: anchor.lines};
+            });
             const filtered = filterByConsent(service, stripped, (h) => h.noteId);
             return {
                 response: ok({

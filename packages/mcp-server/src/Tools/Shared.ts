@@ -166,6 +166,25 @@ const asSearchMode = (value: unknown): SearchMode => {
     return value as SearchMode;
 };
 
+const RELATIVE_SINCE = /^(\d+)\s*(h|d|w)$/i;
+const UNIT_MS: Record<string, number> = {h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000};
+
+/**
+ * `since` as epoch-ms: an ISO date/time ("2025-11-01", "2025-11-01T08:00Z")
+ * or a relative span ("24h", "7d", "2w"). Omitted → undefined.
+ */
+const asSince = (value: unknown, now: number = Date.now()): number | undefined => {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'string') throw new Error('since must be a string like "2025-11-01" or "7d"');
+
+    const relative = RELATIVE_SINCE.exec(value.trim());
+    if (relative !== null) return now - Number(relative[1]) * UNIT_MS[relative[2]!.toLowerCase()]!;
+
+    const ms = Date.parse(value.trim());
+    if (Number.isNaN(ms)) throw new Error(`Invalid since "${value}" — use an ISO date ("2025-11-01") or a span ("24h", "7d", "2w")`);
+    return ms;
+};
+
 const WRITE_MODES: readonly WriteMode[] = ['upsert', 'create', 'overwrite'];
 
 /** Omitted → undefined (the service default, upsert). An unknown value is rejected. */
@@ -210,4 +229,4 @@ export interface ToolHandler {
     handle: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolOutcome>;
 }
 
-export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asLimit, asSearchMode, asWriteMode, EMPTY_CTX, LIMIT_MAX};
+export {enforceReadConsent, filterByConsent, filterNotesByConsent, ok, asString, asLimit, asSearchMode, asSince, asWriteMode, EMPTY_CTX, LIMIT_MAX};

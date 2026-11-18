@@ -43,6 +43,7 @@ const ACL_TABLE: Record<string, AclEntry> = {
     synaipse_benchmark_update:    {mode: 'write', idempotent: true},
     synaipse_benchmark_list:      {mode: 'read'},
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
+    synaipse_note_history: {mode: 'read',  pathArg: 'id'},
     synaipse_links:        {mode: 'read',  pathArg: 'id'},
     synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
     synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
