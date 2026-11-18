@@ -18,4 +18,12 @@ export interface VectorStore {
      */
     deleteStaleChunks(keep: ReadonlyMap<NoteId, number>): Promise<void>;
     search(vector: number[], limit: number): Promise<SearchHit[]>;
+    /**
+     * Optional, for diff-embedding (plan P4 / A4): chunk ids and content
+     * hashes currently stored for these notes. Chunks without a stored
+     * hash are omitted.
+     */
+    chunkHashes?(noteIds: readonly NoteId[]): Promise<Map<string, string>>;
+    /** Optional: stored vectors by chunk id, to move an unchanged chunk to a new index without re-embedding. */
+    vectorsOf?(chunkIds: readonly string[]): Promise<Map<string, number[]>>;
 }

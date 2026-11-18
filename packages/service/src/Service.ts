@@ -465,6 +465,7 @@ export class SynaipseService {
         this.index = new VectorIndex({
             embedder,
             store,
+            fingerprint: this.embedModel,
             onBatch: ({batch, batches, chunks, chars}) => {
                 log.debug('embed batch', {batch, batches, chunks, chars});
             },
@@ -667,11 +668,16 @@ export class SynaipseService {
         // outage during a long first index keeps the progress made so far
         // instead of restarting from zero. If the embedder is unreachable,
         // stop early and serve fulltext — the rest is retried next start.
+        let chunksEmbedded = 0;
+        let chunksReused = 0;
+
         for (let i = 0; i < toReindex.length; i += STARTUP_EMBED_GROUP) {
             const group = toReindex.slice(i, i + STARTUP_EMBED_GROUP);
 
             try {
-                await this.index.indexNotes(group);
+                const result = await this.index.indexNotes(group);
+                chunksEmbedded += result.embedded;
+                chunksReused += result.reused;
             } catch (error) {
                 for (const note of toReindex.slice(i)) this.pendingEmbeds.add(note.id);
                 log.warn('embedding failed; remaining notes stay un-embedded (fulltext only) and are retried on next start', {
@@ -690,6 +696,10 @@ export class SynaipseService {
         }
 
         stats.pending = this.pendingEmbeds.size;
+
+        if (chunksEmbedded + chunksReused > 0) {
+            log.info('chunks embedded', {embedded: chunksEmbedded, reused: chunksReused});
+        }
 
         if (orphans.length > 0) {
             await this.index.deleteNotes(orphans);

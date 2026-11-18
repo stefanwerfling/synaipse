@@ -171,6 +171,8 @@ export interface Chunk {
     path: string;
     text: string;
     index: number;
+    /** Content hash (embedder fingerprint + text); lets re-indexing skip unchanged chunks. */
+    hash?: string;
 }
 
 export type VaultEvent =

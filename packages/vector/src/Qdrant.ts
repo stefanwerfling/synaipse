@@ -96,6 +96,7 @@ interface ChunkPayload {
     text: string;
     index: number;
     chunkId: string;
+    hash?: string;
 }
 
 const isChunkPayload = (value: unknown): value is ChunkPayload => {
@@ -136,10 +137,18 @@ const sanitiseText = (text: string): string => {
 /** Notes per stale-chunk delete request (one nested filter each). */
 const STALE_DELETE_GROUP = 256;
 
+/** Notes per hash-lookup scroll filter. */
+const HASH_LOOKUP_GROUP = 256;
+
+/** Search needs only these fields; the stored hash stays on the server. */
+const SEARCH_PAYLOAD = ['noteId', 'path', 'text', 'index', 'chunkId'];
+
 export class QdrantStore implements VectorStore {
     private readonly client: QdrantClient;
     private readonly retry: ResolvedRetry;
     private ready = false;
+    /** Cleared once the server turns out not to support the Query API. */
+    private queryApi = true;
 
     public constructor(private readonly options: QdrantStoreOptions) {
         this.client = new QdrantClient({
@@ -240,7 +249,8 @@ export class QdrantStore implements VectorStore {
                     path: chunk.path,
                     text: sanitiseText(chunk.text),
                     index: chunk.index,
-                    chunkId: chunk.id
+                    chunkId: chunk.id,
+                    ...(chunk.hash !== undefined ? {hash: chunk.hash} : {})
                 } satisfies ChunkPayload
             }))
         }));
@@ -289,18 +299,51 @@ export class QdrantStore implements VectorStore {
         }
     }
 
+    /**
+     * One hit per note, best chunk first (plan P4 / A4): the Query API
+     * with `group_by: noteId` replaces the deprecated `search`, which
+     * returned several chunks of the same note and crowded out others.
+     * Servers without the Query API (< 1.10) fall back to `search` with
+     * client-side de-duplication.
+     */
     public async search(vector: number[], limit: number): Promise<SearchHit[]> {
         await this.ensureCollection();
 
+        if (this.queryApi) {
+            try {
+                const result = await this.withRetry(() => this.client.queryGroups(this.options.collection, {
+                    query: vector,
+                    group_by: 'noteId',
+                    group_size: 1,
+                    limit,
+                    with_payload: SEARCH_PAYLOAD
+                }));
+
+                return this.toHits(result.groups.flatMap((g) => g.hits.slice(0, 1)));
+            } catch (error) {
+                if (isRetryableNetworkError(error)) throw error;
+                this.queryApi = false;
+            }
+        }
+
         const results = await this.withRetry(() => this.client.search(this.options.collection, {
             vector,
-            limit,
-            with_payload: true
+            limit: limit * 3,
+            with_payload: SEARCH_PAYLOAD
         }));
 
+        const seen = new Set<string>();
+        return this.toHits(results).filter((hit) => {
+            if (seen.has(hit.noteId)) return false;
+            seen.add(hit.noteId);
+            return true;
+        }).slice(0, limit);
+    }
+
+    private toHits(points: ReadonlyArray<{score: number; payload?: Record<string, unknown> | null | undefined}>): SearchHit[] {
         const hits: SearchHit[] = [];
 
-        for (const point of results) {
+        for (const point of points) {
             if (!isChunkPayload(point.payload)) {
                 continue;
             }
@@ -316,5 +359,66 @@ export class QdrantStore implements VectorStore {
         }
 
         return hits;
+    }
+
+    public async chunkHashes(noteIds: readonly NoteId[]): Promise<Map<string, string>> {
+        const out = new Map<string, string>();
+
+        if (noteIds.length === 0) {
+            return out;
+        }
+
+        await this.ensureCollection();
+
+        for (let i = 0; i < noteIds.length; i += HASH_LOOKUP_GROUP) {
+            const group = noteIds.slice(i, i + HASH_LOOKUP_GROUP);
+            let offset: string | number | Record<string, unknown> | null | undefined;
+
+            do {
+                const page = await this.withRetry(() => this.client.scroll(this.options.collection, {
+                    filter: {must: [{key: 'noteId', match: {any: [...group]}}]},
+                    with_payload: ['chunkId', 'hash'],
+                    with_vector: false,
+                    limit: 1024,
+                    ...(offset !== undefined && offset !== null ? {offset: offset as string | number} : {})
+                }));
+
+                for (const point of page.points) {
+                    const payload = point.payload as {chunkId?: unknown; hash?: unknown} | null | undefined;
+                    if (typeof payload?.chunkId === 'string' && typeof payload.hash === 'string') {
+                        out.set(payload.chunkId, payload.hash);
+                    }
+                }
+
+                offset = page.next_page_offset;
+            } while (offset !== undefined && offset !== null);
+        }
+
+        return out;
+    }
+
+    public async vectorsOf(chunkIds: readonly string[]): Promise<Map<string, number[]>> {
+        const out = new Map<string, number[]>();
+
+        if (chunkIds.length === 0) {
+            return out;
+        }
+
+        await this.ensureCollection();
+        const byPoint = new Map(chunkIds.map((id) => [toPointId(id), id]));
+        const points = await this.withRetry(() => this.client.retrieve(this.options.collection, {
+            ids: [...byPoint.keys()],
+            with_payload: false,
+            with_vector: true
+        }));
+
+        for (const point of points) {
+            const chunkId = byPoint.get(String(point.id));
+            if (chunkId !== undefined && Array.isArray(point.vector) && typeof point.vector[0] === 'number') {
+                out.set(chunkId, point.vector as number[]);
+            }
+        }
+
+        return out;
     }
 }

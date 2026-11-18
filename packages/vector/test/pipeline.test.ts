@@ -114,7 +114,7 @@ describe('VectorIndex.indexNotes', () => {
         const empty: Note = {...note('empty', 0), content: ''};
         const result = await index.indexNotes([empty]);
 
-        expect(result).toEqual({notes: 1, chunks: 0, batches: 0});
+        expect(result).toEqual({notes: 1, chunks: 0, batches: 0, embedded: 0, reused: 0});
         expect(embedder.calls).toEqual([]);
     });
 
