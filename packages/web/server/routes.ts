@@ -19,6 +19,7 @@ import {handleConsentRoute} from './consent-routes.js';
 import {handleSchedulesRoute} from './schedules-routes.js';
 import type {Scheduler} from './scheduler.js';
 import {BodyTooLargeError, readJsonBody, readRawBody} from './body.js';
+import {intParam, jsonCached} from './cached-json.js';
 
 type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
@@ -534,8 +535,7 @@ export const routes = (
             }
 
             const id = historyMatch[1] as string;
-            const limit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
-            const entries = await service.noteHistory(id, Number.isFinite(limit) ? limit : 50);
+            const entries = await service.noteHistory(id, intParam(url, 'limit', 50, 1, 500));
             json(res, 200, {entries});
             return;
         }
@@ -989,12 +989,9 @@ export const routes = (
             return;
         }
 
-        const sinceDays = Number.parseInt(url.searchParams.get('days') ?? '7', 10);
-        const limit = Number.parseInt(url.searchParams.get('limit') ?? '1000', 10);
-
         const report = await service.getActivity({
-            ...(Number.isFinite(sinceDays) && sinceDays > 0 ? {sinceDays} : {}),
-            ...(Number.isFinite(limit) && limit > 0 ? {limit} : {})
+            sinceDays: intParam(url, 'days', 7, 1, 365),
+            limit: intParam(url, 'limit', 1000, 1, 5000)
         });
 
         json(res, 200, report);
@@ -1081,8 +1078,7 @@ export const routes = (
             return;
         }
 
-        const limitRaw = Number.parseInt(url.searchParams.get('limit') ?? '15', 10);
-        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 15;
+        const limit = intParam(url, 'limit', 15, 1, 100);
         const topic = url.searchParams.get('topic') ?? '';
         const includeCrawler = url.searchParams.get('includeCrawler') === 'true';
         const format = url.searchParams.get('format') ?? 'json';
@@ -1386,7 +1382,7 @@ export const routes = (
 
         const q = url.searchParams.get('q') ?? '';
         const mode = (url.searchParams.get('mode') ?? 'hybrid') as 'fulltext' | 'semantic' | 'hybrid';
-        const limit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10);
+        const limit = intParam(url, 'limit', 20, 1, 200);
         const hits = await service.search(q, mode, limit);
         json(res, 200, hits);
         return;
@@ -1398,7 +1394,7 @@ export const routes = (
             return;
         }
 
-        await jsonLarge(req, res, 200, service.graph());
+        await jsonCached(req, res, service.graph());
         return;
     }
 
@@ -1409,11 +1405,9 @@ export const routes = (
         }
 
         const id = url.searchParams.get('id') ?? '';
-        const depth = Number.parseInt(url.searchParams.get('depth') ?? '1', 10);
-        const limit = Number.parseInt(url.searchParams.get('limit') ?? '60', 10);
         const local = service.localGraph(id, {
-            depth: Number.isFinite(depth) ? depth : 1,
-            limit: Number.isFinite(limit) ? limit : 60
+            depth: intParam(url, 'depth', 1, 1, 3),
+            limit: intParam(url, 'limit', 60, 1, 300)
         });
 
         if (local === null) {
@@ -1431,7 +1425,8 @@ export const routes = (
             return;
         }
 
-        await jsonLarge(req, res, 200, await service.graphLayout());
+        const layout = await service.graphLayout();
+        await jsonCached(req, res, layout, layout.stale === true ? `${layout.hash}-stale` : layout.hash);
         return;
     }
 
