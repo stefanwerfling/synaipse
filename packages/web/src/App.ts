@@ -2,20 +2,13 @@ import type {Graph} from '@synaipse/core';
 import {resolveNoteRef as resolveNoteRefCore, resolveNoteRefTarget as resolveNoteRefTargetCore, canonicalNoteLink} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
-import {CanvasPanel} from './CanvasPanel.js';
-import {RoadmapPanel} from './RoadmapPanel.js';
-import {BenchmarksPanel} from './BenchmarksPanel.js';
-import {ChatPanel} from './ChatPanel.js';
 import {CommandPalette} from './CommandPalette.js';
 import {clear, el} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap, type HeatState} from './Heat.js';
-import {ActivityPanel} from './ActivityPanel.js';
-import {AuditPanel} from './AuditPanel.js';
 import {ConsentInbox} from './ConsentInbox.js';
 import {ImportDialog} from './ImportDialog.js';
-import {JobsPanel} from './JobsPanel.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
@@ -24,6 +17,8 @@ import {Settings} from './Settings.js';
 import {TagBar, TagEntry} from './TagBar.js';
 import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 import {Disposables} from './Disposables.js';
+import type {ChatPanel} from './ChatPanel.js';
+import {isLazyTab, PANEL_FACTORIES, TAB_DEFS, TABS, type LazyPanels, type LazyTab, type PanelContext, type PanelView, type Tab} from './Tabs.js';
 
 const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
 const STORAGE_HIDE_ISOLATED = 'synaipse.graph.hideIsolated';
@@ -46,8 +41,6 @@ const HEAT_TICK_MS = 15_000;
 const HUGE_GRAPH_FORCE_ATLAS = 20_000;
 const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
 
-const TABS = ['notes', 'graph', 'canvas', 'roadmap', 'benchmarks', 'chat', 'jobs', 'activity', 'audit', 'consent'] as const;
-type Tab = typeof TABS[number];
 
 export class App {
     public readonly element: HTMLElement;
@@ -67,24 +60,12 @@ export class App {
 
     private body: HTMLElement;
     private graphWrap: HTMLElement;
-    private notesTabBtn!: HTMLButtonElement;
-    private graphTabBtn!: HTMLButtonElement;
-    private canvasTabBtn!: HTMLButtonElement;
-    private roadmapTabBtn!: HTMLButtonElement;
-    private benchmarksTabBtn!: HTMLButtonElement;
-    private chatTabBtn!: HTMLButtonElement;
-    private jobsTabBtn!: HTMLButtonElement;
-    private activityTabBtn!: HTMLButtonElement;
-    private auditTabBtn!: HTMLButtonElement;
-    private consentTabBtn!: HTMLButtonElement;
     private consentBadge!: HTMLElement;
-    private canvasPanel!: CanvasPanel;
-    private roadmapPanel!: RoadmapPanel;
-    private benchmarksPanel!: BenchmarksPanel;
-    private chatPanel!: ChatPanel;
-    private jobsPanel!: JobsPanel;
-    private activityPanel!: ActivityPanel;
-    private auditPanel!: AuditPanel;
+    private readonly tabButtons = new Map<Tab, HTMLButtonElement>();
+    /** Lazily built panels (plan P3 / D1): created on first open. */
+    private readonly panels = new Map<LazyTab, Promise<PanelView>>();
+    private readonly loadedPanels = new Map<LazyTab, PanelView>();
+    private chatInfo: Parameters<ChatPanel['setInfo']> | null = null;
     private consentPanel!: ConsentInbox;
     private palette!: CommandPalette<NoteSummary>;
     private activityBtn!: HTMLButtonElement;
@@ -131,28 +112,10 @@ export class App {
                 this.loadNotes();
             },
             onAskAboutSelection: (noteId, selection) => {
-                this.chatPanel.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
-                void this.switchTab('chat');
-            }
-        });
-
-        this.canvasPanel = new CanvasPanel({
-            onOpenNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
-            }
-        });
-
-        this.chatPanel = new ChatPanel({
-            onOpenNote: (noteId) => {
-                // Research results put the URL into noteId — open it externally.
-                if (noteId.startsWith('http://') || noteId.startsWith('https://')) {
-                    window.open(noteId, '_blank', 'noopener,noreferrer');
-                    return;
-                }
-
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.panel('chat').then((chat) => {
+                    chat.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
+                    void this.switchTab('chat');
+                });
             }
         });
 
@@ -170,50 +133,6 @@ export class App {
                 void this.loadNotes();
             }
         });
-
-        this.roadmapPanel = new RoadmapPanel({
-            onOpenNote: (ref) => {
-                const id = this.resolveNoteRef(ref);
-                if (id === null) {
-                    window.alert(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`);
-                    return;
-                }
-                this.notesPanel.openNote(id);
-                void this.switchTab('notes');
-            },
-            resolveNoteLink: (ref) => {
-                const target = resolveNoteRefTargetCore(ref, this.notes);
-                return target === null ? null : canonicalNoteLink(target);
-            }
-        });
-
-        this.benchmarksPanel = new BenchmarksPanel({
-            onOpenNote: (ref) => {
-                const id = this.resolveNoteRef(ref);
-                if (id === null) {
-                    window.alert(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`);
-                    return;
-                }
-                this.notesPanel.openNote(id);
-                void this.switchTab('notes');
-            }
-        });
-
-        this.jobsPanel = new JobsPanel({
-            onChange: () => {
-                this.graph = null;
-                void this.loadNotes();
-            }
-        });
-
-        this.activityPanel = new ActivityPanel({
-            onOpenNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
-            }
-        });
-
-        this.auditPanel = new AuditPanel();
 
         this.consentPanel = new ConsentInbox({
             onCountChange: (count) => this.setConsentBadge(count),
@@ -242,8 +161,9 @@ export class App {
 
         this.events = new EventStream();
         this.events.subscribe((event) => this.handleMcpEvent(event));
-        this.events.subscribe((event) => this.roadmapPanel.onVaultEvent(event.touched));
-        this.events.subscribe((event) => this.benchmarksPanel.onVaultEvent(event.touched));
+        // Only panels that were opened can show stale data.
+        this.events.subscribe((event) => this.loadedPanel('roadmap')?.onVaultEvent(event.touched));
+        this.events.subscribe((event) => this.loadedPanel('benchmarks')?.onVaultEvent(event.touched));
 
         this.element = el('div', {class: 'root'}, this.topbar, this.body, this.activityLog.element);
 
@@ -372,10 +292,10 @@ export class App {
         this.palette.destroy();
         this.importDialog.close();
         this.settings?.close();
-        this.chatPanel.destroy();
+        for (const panel of this.loadedPanels.values()) panel.destroy?.();
+        this.loadedPanels.clear();
+        this.panels.clear();
         this.notesPanel.destroy();
-        this.canvasPanel.destroy();
-        this.jobsPanel.destroy();
         for (const value of [this.selectedTags, this.hideIsolated, this.showHulls, this.showHeat, this.heatState,
             this.showRoomGrid, this.showCluster, this.showCommunities, this.viewMode]) {
             value.destroy();
@@ -385,12 +305,58 @@ export class App {
 
     /** Host tab became visible / hidden (forwarded to the active panel). */
     public onShow(): void {
-        if (this.tab === 'chat') this.chatPanel.onShow();
+        if (isLazyTab(this.tab)) void this.loadedPanels.get(this.tab)?.onShow?.();
     }
 
     public onHide(): void {
-        if (this.tab === 'chat') this.chatPanel.onHide();
-        if (this.tab === 'canvas') this.canvasPanel.onHide();
+        if (isLazyTab(this.tab)) this.loadedPanels.get(this.tab)?.onHide?.();
+    }
+
+    /** The panel behind a lazy tab, built (and its module imported) on first use. */
+    private panel<K extends LazyTab>(id: K): Promise<LazyPanels[K]> {
+        let pending = this.panels.get(id);
+        if (pending === undefined) {
+            pending = PANEL_FACTORIES[id](this.panelContext()).then((panel) => {
+                if (id === 'chat' && this.chatInfo !== null) {
+                    (panel as ChatPanel).setInfo(...this.chatInfo);
+                }
+                this.loadedPanels.set(id, panel);
+                return panel;
+            });
+            pending.catch(() => this.panels.delete(id));
+            this.panels.set(id, pending);
+        }
+        return pending as Promise<LazyPanels[K]>;
+    }
+
+    private loadedPanel<K extends LazyTab>(id: K): LazyPanels[K] | undefined {
+        return this.loadedPanels.get(id) as LazyPanels[K] | undefined;
+    }
+
+    private panelContext(): PanelContext {
+        return {
+            openNote: (noteId) => {
+                this.notesPanel.openNote(noteId);
+                void this.switchTab('notes');
+            },
+            openRef: (ref) => {
+                const id = this.resolveNoteRef(ref);
+                if (id === null) {
+                    window.alert(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`);
+                    return;
+                }
+                this.notesPanel.openNote(id);
+                void this.switchTab('notes');
+            },
+            resolveNoteLink: (ref) => {
+                const target = resolveNoteRefTargetCore(ref, this.notes);
+                return target === null ? null : canonicalNoteLink(target);
+            },
+            notesChanged: () => {
+                this.graph = null;
+                void this.loadNotes();
+            }
+        };
     }
 
     /** Route from the host: a tab name, or anything else is opened as a note. */
@@ -485,7 +451,8 @@ export class App {
             this.project = info.project;
             this.notesPanel.setHistoryEnabled(info.historyEnabled);
             this.notesPanel.setChatEnabled(info.chatEnabled);
-            this.chatPanel.setInfo(info.chatEnabled, info.chatModel, info.chatProvider, info.researchEnabled, info.chatProviderIsLocal);
+            this.chatInfo = [info.chatEnabled, info.chatModel, info.chatProvider, info.researchEnabled, info.chatProviderIsLocal];
+            this.loadedPanel('chat')?.setInfo(...this.chatInfo);
         } catch {
             // info endpoint failed — degrade silently to fulltext-only mode
         }
@@ -507,78 +474,16 @@ export class App {
     }
 
     private buildTopbar(): HTMLElement {
-        this.notesTabBtn = el('button', {
-            class: 'tab active',
-            attrs: {type: 'button'},
-            text: 'Notes',
-            on: {click: () => void this.switchTab('notes')}
-        }) as HTMLButtonElement;
-
-        this.graphTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button'},
-            text: 'Graph',
-            on: {click: () => void this.switchTab('graph')}
-        }) as HTMLButtonElement;
-
-        this.canvasTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button'},
-            text: 'Canvas',
-            on: {click: () => void this.switchTab('canvas')}
-        }) as HTMLButtonElement;
-
-        this.roadmapTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button', title: 'Per-Projekt Roadmap — KI-geplante Umsetzungsschritte'},
-            text: 'Roadmap',
-            on: {click: () => void this.switchTab('roadmap')}
-        }) as HTMLButtonElement;
-
-        this.benchmarksTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button', title: 'Per-Projekt Benchmarks — Speed-/Qualitäts-Vergleiche nach Maschine, Backend, Technik'},
-            text: 'Benchmarks',
-            on: {click: () => void this.switchTab('benchmarks')}
-        }) as HTMLButtonElement;
-
-        this.chatTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button'},
-            text: 'Chat',
-            on: {click: () => void this.switchTab('chat')}
-        }) as HTMLButtonElement;
-
-        this.jobsTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button'},
-            text: 'Jobs',
-            on: {click: () => void this.switchTab('jobs')}
-        }) as HTMLButtonElement;
-
-        this.activityTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button'},
-            text: 'Activity',
-            on: {click: () => void this.switchTab('activity')}
-        }) as HTMLButtonElement;
-
-        this.auditTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button', title: 'DSGVO Layer 4 — Audit-Log externer LLM-Aufrufe'},
-            text: 'Audit',
-            on: {click: () => void this.switchTab('audit')}
-        }) as HTMLButtonElement;
-
         this.consentBadge = el('span', {class: 'tab-badge', style: {display: 'none'}, text: '0'});
-        this.consentTabBtn = el('button', {
-            class: 'tab',
-            attrs: {type: 'button', title: 'Just-in-time consent requests from MCP note reads'},
-            on: {click: () => void this.switchTab('consent')}
-        },
-            el('span', {text: 'Consent'}),
-            this.consentBadge
-        ) as HTMLButtonElement;
+        for (const def of TAB_DEFS) {
+            const btn = el('button', {
+                class: def.id === this.tab ? 'tab active' : 'tab',
+                attrs: {type: 'button', ...(def.title !== undefined ? {title: def.title} : {})},
+                on: {click: () => void this.switchTab(def.id)}
+            }, el('span', {text: def.label})) as HTMLButtonElement;
+            if (def.id === 'consent') btn.appendChild(this.consentBadge);
+            this.tabButtons.set(def.id, btn);
+        }
 
         const brand = el('div', {class: 'brand'});
         const logo = el('span', {class: 'brand-logo'});
@@ -640,7 +545,7 @@ export class App {
 
         return el('header', {class: 'topbar'},
             brand,
-            el('nav', {class: 'tabs'}, this.notesTabBtn, this.graphTabBtn, this.canvasTabBtn, this.roadmapTabBtn, this.benchmarksTabBtn, this.chatTabBtn, this.jobsTabBtn, this.activityTabBtn, this.auditTabBtn, this.consentTabBtn),
+            el('nav', {class: 'tabs'}, ...this.tabButtons.values()),
             paletteBtn,
             el('div', {class: 'topbar-spacer'}),
             ...trailing
@@ -670,10 +575,10 @@ export class App {
         if (count > 0) {
             this.consentBadge.style.display = '';
             this.consentBadge.textContent = count > 9 ? '9+' : String(count);
-            this.consentTabBtn.classList.add('has-unread');
+            this.tabButtons.get('consent')?.classList.add('has-unread');
         } else {
             this.consentBadge.style.display = 'none';
-            this.consentTabBtn.classList.remove('has-unread');
+            this.tabButtons.get('consent')?.classList.remove('has-unread');
         }
     }
 
@@ -684,62 +589,17 @@ export class App {
 
         // Lifecycle: tell the panel we're leaving so it can snapshot
         // any state that won't survive a DOM detach (chat: scroll pos).
-        if (this.tab === 'chat') {
-            this.chatPanel.onHide();
-        }
-        if (this.tab === 'canvas') {
-            this.canvasPanel.onHide();
+        if (isLazyTab(this.tab)) {
+            this.loadedPanels.get(this.tab)?.onHide?.();
         }
 
         this.tab = tab;
-        this.notesTabBtn.className = tab === 'notes' ? 'tab active' : 'tab';
-        this.graphTabBtn.className = tab === 'graph' ? 'tab active' : 'tab';
-        this.canvasTabBtn.className = tab === 'canvas' ? 'tab active' : 'tab';
-        this.roadmapTabBtn.className = tab === 'roadmap' ? 'tab active' : 'tab';
-        this.benchmarksTabBtn.className = tab === 'benchmarks' ? 'tab active' : 'tab';
-        this.chatTabBtn.className = tab === 'chat' ? 'tab active' : 'tab';
-        this.jobsTabBtn.className = tab === 'jobs' ? 'tab active' : 'tab';
-        this.activityTabBtn.className = tab === 'activity' ? 'tab active' : 'tab';
-        this.auditTabBtn.className = tab === 'audit' ? 'tab active' : 'tab';
-        this.consentTabBtn.className = tab === 'consent' ? 'tab active' : 'tab';
+        for (const [id, btn] of this.tabButtons) {
+            btn.classList.toggle('active', id === tab);
+        }
 
         if (tab === 'notes') {
             this.showNotes();
-            return;
-        }
-
-        if (tab === 'canvas') {
-            void this.showCanvas();
-            return;
-        }
-
-        if (tab === 'roadmap') {
-            void this.showRoadmap();
-            return;
-        }
-
-        if (tab === 'benchmarks') {
-            void this.showBenchmarks();
-            return;
-        }
-
-        if (tab === 'chat') {
-            this.showChat();
-            return;
-        }
-
-        if (tab === 'jobs') {
-            void this.showJobs();
-            return;
-        }
-
-        if (tab === 'activity') {
-            void this.showActivity();
-            return;
-        }
-
-        if (tab === 'audit') {
-            void this.showAudit();
             return;
         }
 
@@ -748,31 +608,34 @@ export class App {
             return;
         }
 
+        if (isLazyTab(tab)) {
+            await this.showPanel(tab);
+            return;
+        }
+
         await this.showGraph();
+    }
+
+    private async showPanel(id: LazyTab): Promise<void> {
+        let panel: PanelView;
+        try {
+            panel = await this.panel(id);
+        } catch (error) {
+            console.error(`failed to load the ${id} panel`, error);
+            return;
+        }
+        // The user may have switched on while the module was loading.
+        if (this.tab !== id) return;
+        clear(this.body);
+        this.body.appendChild(panel.element);
+        await panel.onShow?.();
+        if (id === 'chat') (panel as ChatPanel).focusInput();
     }
 
     private async showConsent(): Promise<void> {
         clear(this.body);
         this.body.appendChild(this.consentPanel.element);
         await this.consentPanel.onShow();
-    }
-
-    private async showCanvas(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.canvasPanel.element);
-        await this.canvasPanel.onShow();
-    }
-
-    private async showRoadmap(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.roadmapPanel.element);
-        await this.roadmapPanel.onShow();
-    }
-
-    private async showBenchmarks(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.benchmarksPanel.element);
-        await this.benchmarksPanel.onShow();
     }
 
     /**
@@ -783,31 +646,6 @@ export class App {
      */
     private resolveNoteRef(ref: string): string | null {
         return resolveNoteRefCore(ref, this.notes);
-    }
-
-    private async showActivity(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.activityPanel.element);
-        await this.activityPanel.onShow();
-    }
-
-    private async showAudit(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.auditPanel.element);
-        await this.auditPanel.onShow();
-    }
-
-    private showChat(): void {
-        clear(this.body);
-        this.body.appendChild(this.chatPanel.element);
-        this.chatPanel.onShow();
-        this.chatPanel.focusInput();
-    }
-
-    private async showJobs(): Promise<void> {
-        clear(this.body);
-        this.body.appendChild(this.jobsPanel.element);
-        await this.jobsPanel.onShow();
     }
 
     private async loadNotes(): Promise<void> {
