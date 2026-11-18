@@ -4,28 +4,24 @@ import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
-import {CallToolRequestSchema, ElicitResultSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {createLogger} from '@synaipse/core';
 import type {Config, UserStore} from '@synaipse/core';
-import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
+import {NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
-import {buildTools, type ToolCall, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
+import {buildTools, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
 import {buildInstructions} from './Instructions.js';
 import {resolveContextFromRequest} from './Project.js';
-import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
+import {isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
 import {registerExtras, withNoteLink} from './Resources.js';
 import {resolveSessionLimits, SessionTable} from './Sessions.js';
+import {createToolRunner, isToolVisible, toolCallFor} from './ToolRunner.js';
 
 const log = createLogger('mcp');
 
 const ADMIN_FLUSH_AUTH_CACHE_PATH = '/admin/flush-auth-cache';
-
-/** While a tool runs and the client asked for progress, a notification this often (keeps request timeouts from firing). */
-const PROGRESS_HEARTBEAT_MS = 5_000;
-/** A confirmation the user leaves open this long counts as cancelled. */
-const ELICIT_TIMEOUT_MS = 10 * 60_000;
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
@@ -46,19 +42,7 @@ export interface StartServerOptions {
     httpPath: string;
 }
 
-/**
- * Extract the path argument the ACL checks against. Fail-closed: when the
- * tool's schema marks its path field as required but the caller sent a
- * non-string (or nothing), return '' — which matches no prefix — so a
- * path-scoped token can't skip the prefix check by omitting the field.
- */
-export const resolvePathArg = (tool: ToolHandler, args: Record<string, unknown>): string | undefined => {
-    if (tool.pathArg === undefined) return undefined;
-    const value = args[tool.pathArg];
-    if (typeof value === 'string') return value;
-    const required = (tool.definition.inputSchema as {required?: unknown}).required;
-    return Array.isArray(required) && required.includes(tool.pathArg) ? '' : undefined;
-};
+export {resolvePathArg} from './ToolRunner.js';
 
 export const buildMcpServer = (
     config: Config,
@@ -80,124 +64,21 @@ export const buildMcpServer = (
         }
     );
 
-    // ListTools filters by tool whitelist when the scope has one set —
-    // a write-restricted token shouldn't see write tools in the catalog
-    // even if it wouldn't be allowed to call them. Keeps the client UI
-    // honest.
+    // A write-restricted token doesn't see write tools in the catalog.
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: tools
-            .filter((t) => {
-                if (t.hidden === true) return false;
-                if (scope.tools.length > 0 && !scope.tools.includes(t.definition.name)) return false;
-                if ((t.mode ?? 'read') === 'write' && !scope.write) return false;
-                if ((t.mode ?? 'read') === 'read' && !scope.read) return false;
-                return true;
-            })
-            .map((t) => t.definition)
+        tools: tools.filter((t) => isToolVisible(t, scope)).map((t) => t.definition)
     }));
 
-    /**
-     * One tool call with scope check, audit context and live event. Tool
-     * calls and resource reads (which reuse the read tools) both go
-     * through here, so a resource can never see more than the tool would.
-     */
-    const runTool = async (name: string, args: Record<string, unknown>, callCtx: ToolContext = ctx): Promise<ToolResponse> => {
-        const tool = byName.get(name);
-
-        // Tool-level error, not a protocol error: the model sees it and can
-        // correct itself instead of the client aborting the turn.
-        if (!tool) {
-            return {
-                isError: true,
-                content: [{type: 'text', text: `Unknown tool: ${name}. Call tools/list for the available synaipse_* tools.`}]
-            };
-        }
-
-        const denial = checkScope(
-            scope,
-            {name: tool.definition.name, mode: tool.mode ?? 'read', ...(tool.unscopedOnly === true ? {unscopedOnly: true} : {})},
-            resolvePathArg(tool, args)
-        );
-        if (denial !== null) {
-            return {
-                isError: true,
-                content: [{type: 'text', text: `Forbidden: ${denial}`}]
-            };
-        }
-
-        try {
-            // Audit-context: the service-layer audit-log writer reads the
-            // active TokenScope.label via AsyncLocalStorage so embed/chat
-            // entries get tagged with the calling MCP token without
-            // threading the label through every service-method signature.
-            const outcome = await auditContextStorage.run(
-                {tokenLabel: scope.label, pathPrefixes: scope.pathPrefixes},
-                () => tool.handle(args, callCtx)
-            );
-
-            if (outcome.event !== undefined) {
-                publisher.publish({
-                    tool: name,
-                    kind: outcome.event.kind,
-                    touched: outcome.event.touched,
-                    ...(outcome.event.query !== undefined ? {query: outcome.event.query} : {}),
-                    ts: Date.now()
-                });
-            }
-
-            return outcome.response;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            return {
-                isError: true,
-                content: [{type: 'text', text: `Error: ${message}`}]
-            };
-        }
-    };
+    const runTool = createToolRunner({tools: byName, ctx, scope, publisher});
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<ToolResponse> => {
         const name = request.params.name;
-        const progressToken = request.params._meta?.progressToken;
-        let step = 0;
-
-        // Progress values must increase; one counter for the heartbeat and the tool's own messages.
-        const progress = progressToken === undefined
-            ? undefined
-            : (message: string): Promise<void> => extra.sendNotification({
-                method: 'notifications/progress',
-                params: {progressToken, progress: ++step, message}
-            }).catch(() => undefined);
-
-        // Form elicitation: an empty capability object means form (older clients).
-        const elicitation = server.getClientCapabilities()?.elicitation;
-        const confirm = elicitation === undefined || (elicitation.form === undefined && elicitation.url !== undefined)
-            ? undefined
-            : async (message: string): Promise<'accept' | 'decline' | 'cancel'> => {
-                try {
-                    const result = await server.request(
-                        {method: 'elicitation/create', params: {message, requestedSchema: {type: 'object', properties: {}}}},
-                        ElicitResultSchema,
-                        {relatedRequestId: extra.requestId, signal: extra.signal, timeout: ELICIT_TIMEOUT_MS}
-                    );
-                    return result.action;
-                } catch (error) {
-                    // No answer (timeout, client error) never counts as yes.
-                    log.warn('elicitation failed, treated as cancel', {tool: name, error: error instanceof Error ? error.message : String(error)});
-                    return 'cancel';
-                }
-            };
-
-        const call: ToolCall = {signal: extra.signal, ...(progress !== undefined ? {progress} : {}), ...(confirm !== undefined ? {confirm} : {})};
-        const started = Date.now();
-        const heartbeat = progress === undefined
-            ? undefined
-            : setInterval(() => void progress(`${name} running for ${Math.round((Date.now() - started) / 1000)} s`), PROGRESS_HEARTBEAT_MS);
-
+        const {call, done} = toolCallFor(server, name, request.params._meta?.progressToken, extra);
         try {
             const response = await runTool(name, (request.params.arguments ?? {}) as Record<string, unknown>, {...ctx, call});
             return service === undefined ? response : withNoteLink(name, response);
         } finally {
-            if (heartbeat !== undefined) clearInterval(heartbeat);
+            done();
         }
     });
 

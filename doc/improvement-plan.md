@@ -283,12 +283,14 @@ P8-Bilanz (Eval, ohne Embeddings): veraltete Notiz vor der Antwort 45 % → 0, h
 | Slice | Inhalt | Stand |
 |---|---|---|
 | S1 E3 Tokens | `var(--sh-*, eigener Wert)` für Flächen, Linien, Text, Akzent, Status, Radien, Schrift; `onThemeChange` im Mount-Vertrag | erledigt |
-| S2 E2 MCP-Registrar | Tools, Resources und Prompts auf das `McpServer` des Host-Gateways | offen |
+| S2 E2 MCP-Registrar | Synaipse-Tools auf dem `McpServer` des Host-Gateways | erledigt |
 | S3 E4 Lib-Build | `mount` als ESM-Library mit eigener CSS-Datei aus `dist/`, Export statt Source-Alias | offen |
 | S4 E4 Manifest | `pkgstudio.module.json` (id, label, color, entries, capabilities) | offen |
 | S5 E4 Paket-Split | `@synaipse/web-client` und `@synaipse/web-api`, Server-Image ohne Browser-Abhängigkeiten | offen |
 
 S1: Alle Grund-Tokens in `Styles.css` lesen zuerst den Host-Token (`--bg-1: var(--sh-surface, #11141a)`); Fokusring, `--accent-soft` und `--gold-soft` werden per `color-mix` aus Akzent bzw. Warnfarbe abgeleitet und folgen damit dem Host. Standalone ist nichts gesetzt: Im Browser geprüft, dass alle abgeleiteten Farben exakt den alten `rgba`-Werten entsprechen; mit gesetzten `--sh-accent`/`--sh-surface` übernimmt Synaipse sie, ohne sie wieder die eigenen. `mount()` hat jetzt `onThemeChange` (einmal nach dem Mount und bei jedem Wechsel) und `handle.getTheme()`, damit der Host seine Shell-Tokens zum gezeigten Theme passend setzt. Vertrag mit Token-Tabelle in `doc/embedding.md`.
+
+S2: `createSynaipseRegistrar(service, {project, toolsets})` in `@synaipse/mcp-server` und `embed.mcpRegistrar` für PKG Studios `mountMcp(app, path, registrars)`. Tool-Ausführung (Scope-Prüfung, Audit-Kontext, Live-Event, Bestätigung, Fortschritt) liegt jetzt in `ToolRunner.ts` und ist für den eigenen Endpoint und das Gateway dieselbe. Die JSON Schemas werden per `z.fromJSONSchema` zu zod (das verlangt `McpServer`); Feldnamen und Pflichtfelder überstehen den Rundweg für alle 35 sichtbaren Tools, auch gegen SDK 1.32.1 und zod 4.6.5 aus dem PKG-Studio-Repo geprüft. Volle Rechte im Projekt der Host-Config; im Server-Modus registriert der Registrar nichts. Resources, Prompts, Completions und Server-Instructions bleiben am Synaipse-Endpoint, weil sie Protokoll-Handler belegen, die die des Gateways ersetzen würden; dafür bräuchte das Gateway eine Registrar-API mit Resources und Prompts (Gegenplan). Eval unverändert (Tool-Liste 4244 Tokens).
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.

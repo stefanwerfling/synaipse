@@ -5,6 +5,7 @@ import type {AccountStore, Config, ScheduleStore, UserStore} from '@synaipse/cor
 import type {ServiceOverrides} from '@synaipse/service';
 import type {SynaipseService as SynaipseServiceType} from '@synaipse/service';
 import type {AuthContext} from './auth-routes.js';
+import type {SynaipseRegistrar} from '@synaipse/mcp-server';
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
@@ -42,6 +43,14 @@ export interface SynaipseEmbed {
     mcpHandler: RequestListener;
     /** The MCP base path this embed answers on (e.g. "/mcp"). */
     mcpBasePath: string;
+    /**
+     * Registers the Synaipse tools on a host gateway's McpServer (plan P9 /
+     * E2), e.g. PKG Studio's `mountMcp(app, '/mcp', [..., embed.mcpRegistrar])`.
+     * Calls run with full rights in the configured project. In server mode
+     * (accounts, per-token ACL) it registers nothing: there clients use
+     * `mcpHandler` with their token.
+     */
+    mcpRegistrar: SynaipseRegistrar;
     mode: 'local' | 'server';
     /** The shared, already-started service (vault + vector + scheduler). */
     service: SynaipseServiceType;
@@ -70,6 +79,11 @@ export interface SynaipseEmbedHandle {
     apiHandle: SynaipseEmbed['apiHandle'];
     mcpHandler: RequestListener;
     mcpBasePath: string;
+    /**
+     * As {@link SynaipseEmbed.mcpRegistrar}. The gateway builds a server per
+     * session; sessions opened before startup finished get no Synaipse tools.
+     */
+    mcpRegistrar: SynaipseRegistrar;
     close(): Promise<void>;
 }
 
@@ -107,7 +121,7 @@ export const createSynaipseEmbed = async (
 ): Promise<SynaipseEmbed> => {
     const {loadConfigFromEnv} = await import('@synaipse/core');
     const {SynaipseService, NoopAssetStore} = await import('@synaipse/service');
-    const {CachedUserStore, buildMcpHttpHandler} = await import('@synaipse/mcp-server');
+    const {CachedUserStore, buildMcpHttpHandler, createSynaipseRegistrar} = await import('@synaipse/mcp-server');
     const {NoopHistory} = await import('@synaipse/vault');
     const {routes} = await import('./routes.js');
     const {EventBroadcaster} = await import('./events.js');
@@ -216,6 +230,18 @@ export const createSynaipseEmbed = async (
         userStore
     });
 
+    const mode = config.mode === 'server' ? 'server' : 'local';
+    const gatewayTools = mode === 'local' ? createSynaipseRegistrar(service) : null;
+    let warned = false;
+    const mcpRegistrar: SynaipseRegistrar = (server) => {
+        if (gatewayTools === null) {
+            if (!warned) console.warn('[synaipse] server mode: no tools on the host MCP gateway, use the Synaipse MCP endpoint with a token');
+            warned = true;
+            return;
+        }
+        gatewayTools(server);
+    };
+
     let closed: Promise<void> | null = null;
     const close = (): Promise<void> => {
         closed ??= (async () => {
@@ -232,7 +258,7 @@ export const createSynaipseEmbed = async (
         return closed;
     };
 
-    return {apiHandle, mcpHandler, mcpBasePath, mode: config.mode === 'server' ? 'server' : 'local', service, close};
+    return {apiHandle, mcpHandler, mcpBasePath, mcpRegistrar, mode, service, close};
 };
 
 /**
@@ -295,6 +321,13 @@ export const startSynaipseEmbed = (options: CreateSynaipseEmbedOptions = {}): Sy
                 return;
             }
             embed.mcpHandler(req, res);
+        },
+        mcpRegistrar: (server) => {
+            if (embed === null || state.status !== 'ready') {
+                console.warn(`[synaipse] MCP gateway session while synaipse is ${state.status}: no synaipse tools in it`);
+                return;
+            }
+            embed.mcpRegistrar(server);
         },
         close: async () => {
             const wasReady = state.status === 'ready';

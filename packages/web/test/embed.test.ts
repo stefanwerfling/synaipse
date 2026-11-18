@@ -5,6 +5,9 @@ import {mkdtemp, rm, writeFile, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {loadConfigFromEnv} from '@synaipse/core';
+import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {startSynaipseEmbed, type SynaipseEmbedHandle} from '../server/embed.js';
 
 /**
@@ -61,6 +64,28 @@ const listen = async (h: SynaipseEmbedHandle, preParse = false): Promise<string>
 };
 
 describe('startSynaipseEmbed', () => {
+    it('mcpRegistrar puts the tools on a host gateway once started (plan P9 / E2)', async () => {
+        handle = startSynaipseEmbed({env: explicitEnv()});
+        const session = async (): Promise<Client> => {
+            const gateway = new McpServer({name: 'host', version: '0'});
+            handle!.mcpRegistrar(gateway);
+            const [c, s] = InMemoryTransport.createLinkedPair();
+            const client = new Client({name: 't', version: '0'});
+            await Promise.all([gateway.connect(s), client.connect(c)]);
+            return client;
+        };
+
+        const early = await session();
+        expect(await early.listTools().then((r) => r.tools.length, () => 0)).toBe(0);
+        await early.close();
+
+        await handle.ready;
+        const client = await session();
+        const result = await client.callTool({name: 'synaipse_read_note', arguments: {id: 'Start.md'}});
+        expect((result.content as Array<{text: string}>)[0]!.text).toContain('hello');
+        await client.close();
+    });
+
     it('answers 503 + Retry-After while starting, then serves the explicitly configured vault', async () => {
         handle = startSynaipseEmbed({env: explicitEnv()});
         const base = await listen(handle);

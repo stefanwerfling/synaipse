@@ -111,6 +111,27 @@ await synaipse.close();      // on shutdown / hot reload
 
 `createSynaipseEmbed(options)` still exists. It waits for the start and returns the started embed; the standalone server uses it.
 
+## MCP on the host gateway
+
+A host with its own MCP endpoint can carry the Synaipse tools there, next to
+its own and other modules' tools. PKG Studio's gateway builds one `McpServer`
+per session and runs every registrar on it:
+
+```ts
+mountMcp(app, '/mcp', [registerCoreTools, synaipse.mcpRegistrar]);
+```
+
+| Topic | Contract |
+|---|---|
+| What | Every tool of the enabled toolsets (`SYNAIPSE_MCP_TOOLSETS`, default `core`), with title, description, annotations and the input schema. Confirmation before deleting (elicitation), progress and cancellation work as on the Synaipse endpoint; writes carry a `resource_link`. |
+| Rights | Full rights, in the project of the host config (`SYNAIPSE_PROJECT`). The gateway sees no token, so there is no per-token ACL. |
+| Server mode | With accounts and tokens the registrar adds nothing (one warning in the log). Clients use the Synaipse endpoint with their token. |
+| Startup | Sessions opened before Synaipse finished starting get no Synaipse tools; the next session has them. |
+| Not on the gateway | Resources, prompts, completions and the server instructions. They use protocol handlers that would replace the gateway's own. Clients that want them use the Synaipse endpoint (`/synaipse/mcp`). |
+| Schemas | `McpServer` takes zod schemas, so the JSON Schemas are converted with `z.fromJSONSchema` and listed back as JSON Schema; arguments are validated against them. A schema that does not convert registers loose (warning in the log). |
+
+Outside the web package the same comes from `createSynaipseRegistrar(service, {project, toolsets})` in `@synaipse/mcp-server`.
+
 ## Migrating PKG Studio
 
 These changes are in the host and are not done yet:

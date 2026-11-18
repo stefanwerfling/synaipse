@@ -5,6 +5,7 @@
  */
 export {buildMcpHttpHandler, startServer, type McpHttpHandler, type StartServerOptions, type TransportMode} from './Server.js';
 export {CachedUserStore} from './CachedUserStore.js';
+export {createSynaipseRegistrar, type SynaipseRegistrar, type SynaipseRegistrarOptions} from './Registrar.js';
 export {
     parseBearer,
     resolveTokenScope,
