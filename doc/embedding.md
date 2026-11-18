@@ -9,7 +9,8 @@ page or process state.
 ## Frontend: `mount()`
 
 ```ts
-import {mount} from '@synaipse/web/mount';   // source entry, built by the host's Vite
+import {mount} from '@synaipse/web/mount';   // library build from dist/lib
+import '@synaipse/web/mount.css';            // the one stylesheet
 
 const handle = await mount(container, {
     apiBase: '/synaipse',   // prefixed to every fetch, EventSource and <img src>
@@ -42,6 +43,20 @@ What the host can rely on:
 - **Teardown.** `unmount()` closes both SSE streams and a running chat stream. It clears every interval and animation frame and removes global listeners. A fresh `mount()` into the same container afterwards works.
 
 Known limit: the API base and the theme are page-wide. Two Synaipse instances on one page share them, which is fine as long as they talk to one backend.
+
+### Build artifact
+
+`@synaipse/web/mount` is a library build (`npm run build:lib`, part of
+`npm run build`): ESM in `packages/web/dist/lib`, with all dependencies
+bundled, so the host needs none of them and front- and backend come from the
+same `dist/`. The entry is small; lazy panels and heavy libraries (3D graph,
+infographic, floor plans) are separate chunks the host's bundler loads on
+demand. The CSS is not imported by the JS: import `@synaipse/web/mount.css`
+once. Types come from `dist/src/mount.d.ts`.
+
+For development against the sources, `@synaipse/web/mount/source` is the
+TypeScript entry (it imports its CSS itself). It needs the host's Vite to
+transform it and to resolve Synaipse's dependencies.
 
 ## Design tokens
 
@@ -141,4 +156,8 @@ These changes are in the host and are not done yet:
 3. `main.css`: the bleed guards for Synaipse (`.synaipse-root .topbar` background, `html body`) are no longer needed for Synaipse itself. `.synaipse-root > .root` keeps working because the class still exists.
 4. The global `fetch`/`EventSource` rewrite is no longer needed for Synaipse. It can stay for modules that have not moved yet.
 
-Still open (plan §13.2): registering the MCP tools with the host's gateway (`registerTools`) instead of a separate `/synaipse/mcp` endpoint, and an auth bridge (a `principal` callback from the host).
+5. Frontend: import `@synaipse/web/mount` and `@synaipse/web/mount.css` instead of the alias to `packages/web/src/mount.ts`; the Synaipse entry in `MODULE_ENTRY`/`optimizeDeps` is then no longer needed.
+6. MCP: add `synaipse.mcpRegistrar` to the registrars of `mountMcp` (see "MCP on the host gateway").
+7. Theme: set the `--sh-*` tokens on `:root` and switch them in `onThemeChange` (see "Design tokens").
+
+Still open: an auth bridge (a `principal` callback from the host) for server mode.

@@ -10,18 +10,24 @@
       "import": "./dist/server/embed.js"
     },
     "./mount": {
+      "types": "./dist/src/mount.d.ts",
+      "import": "./dist/lib/mount.js"
+    },
+    "./mount.css": "./dist/lib/synaipse.css",
+    "./mount/source": {
       "types": "./src/mount.ts",
       "default": "./src/mount.ts"
     }
   },
   "scripts": {
-    "build": "tsc --build && vite build",
+    "build": "tsc --build && vite build && npm run build:lib",
     "clean": "tsc --build --clean && rimraf dist",
     "dev": "concurrently -k -n api,vite -c blue,magenta \"npm:dev:api\" \"npm:dev:vite\"",
     "dev:api": "node --enable-source-maps --watch dist/server/index.js",
     "dev:vite": "vite",
     "preview": "vite preview",
-    "start": "node --enable-source-maps dist/server/index.js"
+    "start": "node --enable-source-maps dist/server/index.js",
+    "build:lib": "vite build -c vite.lib.config.ts"
   },
   "dependencies": {
     "@antv/infographic": "^0.2.19",

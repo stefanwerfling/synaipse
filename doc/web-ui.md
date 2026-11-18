@@ -54,7 +54,7 @@ When the MCP server writes a note it publishes an event to `/api/events` (see [`
 npm --workspace @synaipse/web run build
 ```
 
-The output ends up in `packages/web/dist/`. Serve it from any static host; the Node API still needs to run for writes and events.
+The app ends up in `packages/web/dist/web/`. Serve it from any static host; the Node API still needs to run for writes and events. The same build writes the embed library to `packages/web/dist/lib/` (`mount.js` plus `synaipse.css`, see [embedding.md](embedding.md)).
 
 ## Related
 
