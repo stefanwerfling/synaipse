@@ -5,7 +5,9 @@
 // running.
 //
 //   npm run install-skill                 # interactive menu
-//   npm run install-skill -- claude-code  # write Claude Code config
+//   npm run install-skill -- claude-code  # ./.mcp.json for this project (/mcp/<project>)
+//   npm run install-skill -- claude-code --user   # ~/.claude.json, no project in the URL
+//   npm run install-skill -- claude-code --project=kavula
 //   npm run install-skill -- cursor       # workspace .cursor/mcp.json
 //   npm run install-skill -- cursor --global
 //   npm run install-skill -- all
@@ -35,25 +37,44 @@ const transport = flag('transport', 'http');
 const port = Number.parseInt(flag('port', '3001'), 10);
 const serverName = flag('server-name', 'synaipse');
 const useGlobal = flag('global') === true;
+const userScope = flag('user') === true;
+
+// Same rule as the MCP server and the plugin's SessionStart hook: the
+// folder name, characters outside [A-Za-z0-9_.-] replaced by "-".
+const projectOf = (dir) => path.basename(dir).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '');
+const projectFlag = flag('project');
+if (projectFlag !== undefined && (projectFlag === true || !/^[A-Za-z0-9_.-]+$/.test(projectFlag))) {
+    console.error('--project needs a name of letters, digits, ".", "_" or "-"');
+    process.exit(2);
+}
 
 const positional = args.filter((a) => !a.startsWith('-'));
 const action = positional[0] ?? 'menu';
 
-const mcpEntry = () => {
+/**
+ * `project`: the MCP URL gets the project segment (/mcp/<project>), so
+ * remember, log_session and relative write paths land in that project.
+ * Only for configs that belong to one project (workspace files) or when
+ * --project is given; a user-wide config without it stays project-less.
+ */
+const mcpEntry = (project) => {
     if (transport === 'stdio') {
         return {
             type: 'stdio',
             command: 'node',
             args: ['--enable-source-maps', mcpServerEntry],
-            env: {SYNAIPSE_MCP_TRANSPORT: 'stdio'}
+            env: {SYNAIPSE_MCP_TRANSPORT: 'stdio', ...(project !== undefined ? {SYNAIPSE_PROJECT: project} : {})}
         };
     }
 
     return {
         type: 'http',
-        url: `http://localhost:${port}/mcp`
+        url: `http://localhost:${port}/mcp${project !== undefined ? `/${encodeURIComponent(project)}` : ''}`
     };
 };
+
+/** The project for a workspace-scoped config: --project, else the current folder. */
+const workspaceProject = () => projectFlag ?? (projectOf(process.cwd()) || undefined);
 
 const detect = (binary) => {
     try {
@@ -106,14 +127,17 @@ const writeConfig = (file, next) => {
 
 const TARGETS = {
     'claude-code': {
-        label: 'Claude Code',
+        label: userScope ? 'Claude Code (user)' : 'Claude Code (project .mcp.json)',
         detect: () => detect('claude'),
-        path: () => path.join(os.homedir(), '.claude.json'),
+        path: () => userScope ? path.join(os.homedir(), '.claude.json') : path.join(process.cwd(), '.mcp.json'),
+        project: () => userScope ? projectFlag : workspaceProject(),
         install(entry) {
             const file = this.path();
             const existing = readJsonSafe(file);
             const next = mergeMcpServers(existing, serverName, entry);
             writeConfig(file, next);
+            console.log('  note: the synaipse-memory plugin registers this server too (with the project from the');
+            console.log('        repo folder). Use one of the two, otherwise every tool is listed twice.');
         }
     },
     cursor: {
@@ -122,6 +146,7 @@ const TARGETS = {
         path: () => useGlobal
             ? path.join(os.homedir(), '.cursor', 'mcp.json')
             : path.join(process.cwd(), '.cursor', 'mcp.json'),
+        project: () => useGlobal ? projectFlag : workspaceProject(),
         install(entry) {
             const file = this.path();
             const existing = readJsonSafe(file);
@@ -220,7 +245,13 @@ const showMenu = () => {
     console.log('  npm run install-skill -- <target> --transport=stdio');
     console.log('  npm run install-skill -- <target> --dry-run');
     console.log('');
-    console.log('Targets: claude-code, cursor (--global), cline, zed, gemini, codex, all');
+    console.log('  npm run install-skill -- <target> --project=<name>');
+    console.log('');
+    console.log('Targets: claude-code (--user), cursor (--global), cline, zed, gemini, codex, all');
+    console.log('claude-code and cursor write the config of the current folder with /mcp/<folder name>;');
+    console.log('--user / --global write the user-wide config (project only with --project).');
+    console.log('For Claude Code the synaipse-memory plugin is the alternative: it registers the');
+    console.log('server itself and takes the project from the repo folder.');
 };
 
 const install = (key) => {
@@ -230,8 +261,9 @@ const install = (key) => {
         process.exit(2);
     }
 
-    console.log(`> ${target.label}`);
-    target.install(mcpEntry());
+    const project = target.project?.() ?? projectFlag;
+    console.log(`> ${target.label}${project !== undefined ? ` — project ${project}` : ''}`);
+    target.install(mcpEntry(project));
 };
 
 if (action === 'menu') {

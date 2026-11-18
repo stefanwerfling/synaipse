@@ -2,6 +2,7 @@ import {describe, it, expect} from 'vitest';
 import {
     projectFromUrlPath,
     projectFromHeader,
+    projectFromDirHeader,
     resolveProjectFromRequest,
     authorFromHeader,
     extraTagsFromHeader,
@@ -166,5 +167,21 @@ describe('resolveContextFromRequest', () => {
             basePath: '/mcp'
         });
         expect(ctx).toEqual({});
+    });
+});
+describe('projectFromDirHeader', () => {
+    it('uses the folder name of the client project dir, made project-safe', () => {
+        expect(projectFromDirHeader({'x-synaipse-project-dir': '/home/a/code/synaipse'})).toBe('synaipse');
+        expect(projectFromDirHeader({'x-synaipse-project-dir': '/home/a/code/my app/'})).toBe('my-app');
+        expect(projectFromDirHeader({'x-synaipse-project-dir': 'C:\\work\\kavula'})).toBe('kavula');
+        expect(projectFromDirHeader({'x-synaipse-project-dir': '/'})).toBeUndefined();
+        expect(projectFromDirHeader({})).toBeUndefined();
+    });
+
+    it('ranks after the URL segment and the explicit project header', () => {
+        const headers = {'x-synaipse-project-dir': '/code/fromdir'};
+        expect(resolveProjectFromRequest({url: '/mcp/fromurl', headers, basePath: '/mcp'})).toBe('fromurl');
+        expect(resolveProjectFromRequest({url: '/mcp/', headers: {...headers, 'x-synaipse-project': 'explicit'}, basePath: '/mcp'})).toBe('explicit');
+        expect(resolveProjectFromRequest({url: '/mcp/', headers, basePath: '/mcp'})).toBe('fromdir');
     });
 });

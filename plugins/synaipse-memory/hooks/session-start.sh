@@ -22,7 +22,9 @@ TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
 [[ -z "$CWD" ]] && CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
-PROJECT_NAME="${SYNAIPSE_PROJECT:-$(basename "$CWD")}"
+# Same rule as the MCP server for X-Synaipse-Project-Dir (plugin .mcp.json):
+# the folder name, characters outside [A-Za-z0-9_.-] replaced by "-".
+PROJECT_NAME="${SYNAIPSE_PROJECT:-$(basename "$CWD" | sed -E 's/[^A-Za-z0-9_.-]+/-/g; s/^-+//; s/-+$//')}"
 # On resume the meta file already exists — keep the project recorded there.
 if [[ -f "$SYNAIPSE_META_PATH" ]]; then
   META_PROJECT="$(jq -r '.project // empty' "$SYNAIPSE_META_PATH" 2>/dev/null || true)"

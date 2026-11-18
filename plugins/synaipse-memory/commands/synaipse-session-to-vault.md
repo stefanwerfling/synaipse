@@ -8,7 +8,7 @@ You are about to curate a captured session log and promote it into the Synaipse 
 
 1. **Discover logs.** Run `ls -1t "$CLAUDE_PROJECT_DIR/.synaipse-sessions/"*.meta.json 2>/dev/null` via Bash to find session metadata files. `Read` each one. Skip any whose `status` is `promoted` or `discarded`. If the user passed an argument (session id or filename), use that one. Otherwise prefer the most recently created `draft` session, but list the top 3 for the user to choose if there is ambiguity.
 
-2. **Inspect the session.** For the chosen session, `Read` both `<id>.meta.json` and `<id>.jsonl`. Form your own summary: what the user was trying to do, what got decided, what got fixed, which files were edited, which Synaipse notes were referenced via MCP.
+2. **Inspect the session.** For the chosen session, `Read` both `<id>.meta.json` and `<id>.jsonl`. Form your own summary: what the user was trying to do, what got decided, what got fixed, which files were edited, which Synaipse notes were referenced via MCP (the `kind:"synaipse"` lines list them under `notes`; `write: true` marks what was already saved).
 
 3. **Propose.** Reply to the user with one compact proposal block:
    - **Mode** — `log_session` (lightweight, appends to today's `Memory/sessions/YYYY-MM-DD.md`) or `write_note` (standalone note — pick this when the session contains a decision, bug analysis, or reusable pattern worth its own file).

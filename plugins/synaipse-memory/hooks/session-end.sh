@@ -25,7 +25,9 @@ STATS="$(jq -sc '
           | .input.file_path // .input.notebook_path // empty)
       | map(select(. != ""))
       | unique
-    )
+    ),
+    synaipse_notes_used: (map(select(.kind=="synaipse") | .notes[]?) | unique),
+    synaipse_writes: (map(select(.kind=="synaipse" and .write==true)) | length)
   }
 ' < "$SYNAIPSE_JSONL_PATH" 2>/dev/null || echo '{}')"
 

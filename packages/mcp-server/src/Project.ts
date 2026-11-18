@@ -55,6 +55,21 @@ export const projectFromHeader = (headers: IncomingHttpHeaders): string | undefi
     return sanitise(raw);
 };
 
+/**
+ * Project from the client's working directory (header
+ * `X-Synaipse-Project-Dir`, which the Claude Code plugin fills with
+ * `${CLAUDE_PROJECT_DIR}`): the folder name, characters outside the
+ * project charset replaced by "-" — the same name the plugin's
+ * SessionStart hook uses for the primer.
+ */
+export const projectFromDirHeader = (headers: IncomingHttpHeaders): string | undefined => {
+    const raw = headerString(headers, 'x-synaipse-project-dir');
+    if (raw === undefined) return undefined;
+
+    const base = raw.trim().replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+    return sanitise(base.replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, ''));
+};
+
 export interface ResolveProjectInput {
     url?: string | undefined;
     headers?: IncomingHttpHeaders;
@@ -69,7 +84,7 @@ export const resolveProjectFromRequest = (input: ResolveProjectInput): string | 
     }
 
     if (input.headers !== undefined) {
-        return projectFromHeader(input.headers);
+        return projectFromHeader(input.headers) ?? projectFromDirHeader(input.headers);
     }
 
     return undefined;

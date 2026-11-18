@@ -11,9 +11,9 @@ written to the vault automatically** — the plugin is opt-in by design.
 |-------------------|------------------------------------------------------------------|
 | `SessionStart`    | Creates / resumes `<session_id>.jsonl` and `<session_id>.meta.json`; refreshes `.claude/synaipse-primer.md` from the Synaipse web API and injects it as context |
 | `UserPromptSubmit`| `{kind:"user", text}` line                                       |
-| `Stop`            | `{kind:"stop", transcript_path}` line                            |
-| `PostToolUse`     | `Edit`/`Write`/`Bash`/`NotebookEdit` → full args + 200-char result preview. Other tools → counter line only (`{kind:"tool_counter", name, result_size}`). |
-| `SessionEnd`      | Aggregates stats into the sidecar `meta.json` (`tool_call_count`, `edited_files`, `ended_at`) and appends `{kind:"session_end"}` |
+| `Stop`            | `{kind:"stop", transcript_path}` line; once per session a nudge to save insights (see below) |
+| `PostToolUse`     | `Edit`/`Write`/`Bash`/`NotebookEdit` → full args + 200-char result preview. Synaipse MCP calls → `{kind:"synaipse", op, write, notes[], query?}` with the note ids read or written. Other tools → counter line only (`{kind:"tool_counter", name, result_size}`). |
+| `SessionEnd`      | Aggregates stats into the sidecar `meta.json` (`tool_call_count`, `edited_files`, `synaipse_notes_used`, `synaipse_writes`, `ended_at`) and appends `{kind:"session_end"}` |
 
 A `.gitignore` is dropped into `.synaipse-sessions/` on first write so the raw
 logs — which can contain secrets in tool args — never get committed.
@@ -49,6 +49,35 @@ your `.gitignore` — it's a derived view of the vault, not source of truth.
 Override the port with `SYNAIPSE_WEB_API_PORT=<n>` in the environment Claude
 Code inherits (e.g. via your shell profile or a wrapper script).
 
+## MCP server
+
+The plugin registers the Synaipse MCP server itself (`.mcp.json`), so no
+`claude mcp add` is needed:
+
+- URL `http://localhost:${SYNAIPSE_WEB_API_PORT:-3001}/mcp/${SYNAIPSE_PROJECT:-}`
+- header `X-Synaipse-Project-Dir: ${CLAUDE_PROJECT_DIR}`: without
+  `SYNAIPSE_PROJECT` the server takes the project from the repo folder name
+  (characters outside `A-Za-z0-9_.-` become `-`), the same name the
+  SessionStart hook uses for the primer.
+- header `Authorization: Bearer ${SYNAIPSE_MCP_TOKEN:-}` for servers with auth.
+
+If you registered the server before (`npm run install-skill -- claude-code`, or
+`claude mcp add`), remove that entry — otherwise every tool is listed twice.
+
+## Skill
+
+`skills/synaipse-memory/SKILL.md` carries the working protocol (when to search,
+which write tool, `expectedHash`, `supersedes`, inbox housekeeping). Claude
+loads it when the task touches project memory.
+
+## Save nudge
+
+Once per session the `Stop` hook may ask Claude to save what it learned — only
+when the session edited code (at least `SYNAIPSE_STOP_NUDGE_MIN_EDITS` edits,
+default 3) and no Synaipse write happened. Claude then saves something with
+`synaipse_remember` / `synaipse_log_session` or simply finishes.
+`SYNAIPSE_STOP_NUDGE=0` turns it off.
+
 ## Slash commands
 
 | Command                          | Purpose |
@@ -67,9 +96,9 @@ Promotion uses one of two Synaipse MCP tools:
 
 - `bash` (≥ 4)
 - `jq` — parses the JSON hook payload; if missing, hooks `exit 0` silently
-- The Synaipse MCP server registered in Claude Code (`.mcp.json` at the project
-  root or in user config). Without it, capture / list / discard still work, but
-  the `write` step in `session-to-vault` cannot reach the vault.
+- The Synaipse web server running (it serves `/mcp`). Without it, capture /
+  list / discard still work, but the `write` step in `session-to-vault` cannot
+  reach the vault.
 
 ## Install (local development)
 

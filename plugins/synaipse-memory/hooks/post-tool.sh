@@ -20,7 +20,29 @@ TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TOOL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 [[ -z "${TOOL:-}" ]] && exit 0
 
-if is_detail_tool "$TOOL"; then
+if is_synaipse_tool "$TOOL"; then
+  # Which notes the call read or wrote, so /synaipse-session-to-vault can
+  # cite them and the Stop hook knows whether anything was saved. Ids come
+  # from the arguments and from the JSON result (first text block).
+  LINE="$(printf '%s' "$PAYLOAD" | jq -c --arg ts "$TS" --argjson writes "$SYNAIPSE_WRITE_OPS" '
+    def result:
+      (.tool_response
+        | if type == "array" then (map(select(.type? == "text") | .text) | first // "")
+          elif type == "object" and has("content") then ((.content | map(select(.type? == "text") | .text) | first) // "")
+          elif type == "string" then .
+          else "" end)
+      | (fromjson? // {});
+    (.tool_name | sub("^mcp__.*__synaipse_"; "")) as $op
+    | (result) as $r
+    | {ts:$ts, kind:"synaipse", op:$op, write:($writes | index($op) != null),
+       notes:(([.tool_input.id, .tool_input.path, .tool_input.fromId, .tool_input.noteId,
+                $r.id?, $r.noteId?, $r.note?.id?]
+               + ([$r.hits?[]?.noteId] | .[0:5])
+               + ([$r.notes?[]?.id] | .[0:5]))
+              | map(select(type == "string" and . != "")) | unique)}
+      + (if (.tool_input.query? | type) == "string" then {query:.tool_input.query} else {} end)
+  ' 2>/dev/null || true)"
+elif is_detail_tool "$TOOL"; then
   LINE="$(printf '%s' "$PAYLOAD" | jq -c --arg ts "$TS" '
     {ts:$ts, kind:"tool", name:.tool_name,
      input:.tool_input,

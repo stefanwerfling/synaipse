@@ -1,7 +1,7 @@
 {
   "name": "synaipse-memory",
-  "version": "0.1.0",
-  "description": "Capture Claude Code sessions into per-project JSONL logs; curate via slash command and write to the Synaipse vault through MCP.",
+  "version": "0.2.0",
+  "description": "Synaipse long-term memory for Claude Code: registers the MCP server with the repo as project, injects the primer, brings the working-protocol skill, captures sessions and nudges to save insights.",
   "author": { "name": "Stefan Werfling" },
   "homepage": "https://github.com/stefanwerfling/synaipse",
   "license": "MIT",

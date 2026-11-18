@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "synaipse": {
+      "type": "http",
+      "url": "http://localhost:${SYNAIPSE_WEB_API_PORT:-3001}/mcp/${SYNAIPSE_PROJECT:-}",
+      "headers": {
+        "X-Synaipse-Project-Dir": "${CLAUDE_PROJECT_DIR}",
+        "Authorization": "Bearer ${SYNAIPSE_MCP_TOKEN:-}"
+      }
+    }
+  }
+}
