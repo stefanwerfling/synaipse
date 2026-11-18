@@ -9,8 +9,8 @@ page or process state.
 ## Frontend: `mount()`
 
 ```ts
-import {mount} from '@synaipse/web/mount';   // library build from dist/lib
-import '@synaipse/web/mount.css';            // the one stylesheet
+import {mount} from '@synaipse/web-client/mount';   // library build from dist/lib
+import '@synaipse/web-client/mount.css';            // the one stylesheet
 
 const handle = await mount(container, {
     apiBase: '/synaipse',   // prefixed to every fetch, EventSource and <img src>
@@ -46,15 +46,15 @@ Known limit: the API base and the theme are page-wide. Two Synaipse instances on
 
 ### Build artifact
 
-`@synaipse/web/mount` is a library build (`npm run build:lib`, part of
-`npm run build`): ESM in `packages/web/dist/lib`, with all dependencies
+`@synaipse/web-client/mount` is a library build (`npm run build:lib`, part of
+`npm run build`): ESM in `packages/web-client/dist/lib`, with all dependencies
 bundled, so the host needs none of them and front- and backend come from the
 same `dist/`. The entry is small; lazy panels and heavy libraries (3D graph,
 infographic, floor plans) are separate chunks the host's bundler loads on
-demand. The CSS is not imported by the JS: import `@synaipse/web/mount.css`
+demand. The CSS is not imported by the JS: import `@synaipse/web-client/mount.css`
 once. Types come from `dist/src/mount.d.ts`.
 
-For development against the sources, `@synaipse/web/mount/source` is the
+For development against the sources, `@synaipse/web-client/mount/source` is the
 TypeScript entry (it imports its CSS itself). It needs the host's Vite to
 transform it and to resolve Synaipse's dependencies.
 
@@ -92,7 +92,7 @@ motion stay Synaipse's own.
 ## Backend: `startSynaipseEmbed()`
 
 ```ts
-import {startSynaipseEmbed, type SynaipseEmbedHandle} from '@synaipse/web/embed';
+import {startSynaipseEmbed, type SynaipseEmbedHandle} from '@synaipse/web-api/embed';
 
 const synaipse: SynaipseEmbedHandle = startSynaipseEmbed({
     env: {                                   // or: config: <full Config object>
@@ -122,7 +122,7 @@ await synaipse.close();      // on shutdown / hot reload
 | Readiness | Handlers exist immediately. While starting they answer `503` with `Retry-After: 1`. After a failed start they answer `500` with the reason, and `ready` rejects. |
 | Body parsing | The host may mount `express.json()` before Synaipse. A body the host has already parsed is used as-is, so the order no longer matters. |
 | Teardown | `close()` stops the scheduler and aborts running jobs. It ends SSE clients and closes MCP sessions. It stops the service (watcher, state DB) and closes the storage adapters. It is idempotent, and a `close()` during startup tears down as soon as the start completes. |
-| Types | `SynaipseEmbed`, `SynaipseEmbedHandle`, `SynaipseHealth` and `CreateSynaipseEmbedOptions` come from `@synaipse/web/embed`. Don't copy them. |
+| Types | `SynaipseEmbed`, `SynaipseEmbedHandle`, `SynaipseHealth` and `CreateSynaipseEmbedOptions` come from `@synaipse/web-api/embed`. Don't copy them. |
 
 `createSynaipseEmbed(options)` still exists. It waits for the start and returns the started embed; the standalone server uses it.
 
@@ -160,25 +160,28 @@ repo root; the schema is `doc/pkgstudio.module.schema.json`.
 | `projectScoped` | `false` | mount once at `/synaipse`; Synaipse keeps its own project |
 | `entries.frontend` | `module` + `css` (library build), `export: mount`, `source` for development, `package` | `import()` the module, import the CSS once, call the export |
 | `entries.backend` | `module`, `export: startSynaipseEmbed`, `package` | start the backend, route `/synaipse/api` and `mcpPath` to the handle |
-| `build` | `npm --workspace @synaipse/web run build` | run when `entries.*.module` is missing or older than the sources |
+| `build` | `npm run build && npm --workspace @synaipse/web-client run build` | run when `entries.*.module` is missing or older than the sources |
 | `mcpPath` | `/mcp` | Synaipse's own MCP endpoint under `/synaipse` |
 | `capabilities` | `mount-handle`, `api-base`, `theme-switch`, `shell-tokens`, `backend-handle`, `health`, `mcp-endpoint`, `mcp-registrar` | what the host may call; see the schema for each |
 | `config` | `envFile: .env`, `project: SYNAIPSE_PROJECT` | load the env file, set the project variable, pass both as `env` |
 
-A test (`packages/web/test/manifest.test.ts`) checks the manifest against
+A test (`packages/web-api/test/manifest.test.ts`) checks the manifest against
 the schema, against the package exports and against the real export names,
 so it can't drift from the code.
 
 ## Migrating PKG Studio
 
-These changes are in the host and are not done yet:
+These changes are in the host and are not done yet. Since the package split
+(plan P9 S5) the paths PKG Studio has today no longer exist, so **step 0 is
+required** before PKG Studio starts with the current Synaipse:
+
+0. Paths: `pkgstudio.json` `embedEntry` → `packages/web-api/dist/server/embed.js`, `envFile` stays. `MODULE_ENTRY` (`vite.config.ts`) and `ModuleLoaders.ts` → `packages/web-client/src/mount.ts`. `mountSynaipseBackend` can stay as it is otherwise.
 
 1. `ModuleLoaders.ts`: keep the `MountHandle` that `mount()` returns, call `onShow`/`onHide` on tab switches, and call `unmount()` on teardown.
-2. `vite.config.ts`: replace `createSynaipseEmbed` with `startSynaipseEmbed` and drop the 503 wrapper. Pass the settings as `env` instead of `dotenv` plus `process.env.SYNAIPSE_PROJECT`, and import the types from `@synaipse/web/embed`.
+2. `vite.config.ts`: replace `createSynaipseEmbed` with `startSynaipseEmbed` and drop the 503 wrapper. Pass the settings as `env` instead of `dotenv` plus `process.env.SYNAIPSE_PROJECT`, and import the types from `@synaipse/web-api/embed`.
 3. `main.css`: the bleed guards for Synaipse (`.synaipse-root .topbar` background, `html body`) are no longer needed for Synaipse itself. `.synaipse-root > .root` keeps working because the class still exists.
 4. The global `fetch`/`EventSource` rewrite is no longer needed for Synaipse. It can stay for modules that have not moved yet.
-
-5. Frontend: import `@synaipse/web/mount` and `@synaipse/web/mount.css` instead of the alias to `packages/web/src/mount.ts`; the Synaipse entry in `MODULE_ENTRY`/`optimizeDeps` is then no longer needed. Better: read both from `pkgstudio.module.json` (see "Module manifest") for every module that has one.
+5. Frontend: import `@synaipse/web-client/mount` and `@synaipse/web-client/mount.css` instead of the alias to `packages/web/src/mount.ts`; the Synaipse entry in `MODULE_ENTRY`/`optimizeDeps` is then no longer needed. Better: read both from `pkgstudio.module.json` (see "Module manifest") for every module that has one.
 6. MCP: add `synaipse.mcpRegistrar` to the registrars of `mountMcp` (see "MCP on the host gateway").
 7. Theme: set the `--sh-*` tokens on `:root` and switch them in `onThemeChange` (see "Design tokens").
 

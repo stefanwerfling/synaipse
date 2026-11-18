@@ -8,7 +8,7 @@ export default tseslint.config(
             '**/node_modules/**',
             '**/*.tsbuildinfo',
             'packages/*/scripts/**',
-            'packages/web/dist/web/**',
+            'packages/web-client/dist/**',
             'packages/clipper-extension/**'
         ]
     },

@@ -9,7 +9,7 @@
 // Usage:
 //   node scripts/bench-scale.mjs --vault=/tmp/vault-5k [--port=3801]
 //
-// Assumes the web package is already built (packages/web/dist/server).
+// Assumes the web package is already built (packages/web-api/dist/server).
 // Doesn't touch the user's real vault or .env — cwd is set to a temp dir
 // so dotenv can't pick up the repo-root .env, and every relevant SYNAIPSE_*
 // var is passed explicitly.
@@ -98,7 +98,7 @@ const main = async () => {
     const port = REQUESTED_PORT ?? (await findFreePort());
     const cwd = await mkdtemp(path.join(tmpdir(), 'synaipse-bench-'));
 
-    const entry = path.join(repoRoot, 'packages/web/dist/server/index.js');
+    const entry = path.join(repoRoot, 'packages/web-api/dist/server/index.js');
     console.log(`vault:     ${VAULT}`);
     console.log(`port:      ${port}`);
     console.log(`cwd:       ${cwd}`);

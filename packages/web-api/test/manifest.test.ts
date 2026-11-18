@@ -14,7 +14,13 @@ const readJson = (rel: string): Record<string, unknown> => JSON.parse(readFileSy
 
 const manifest = readJson('pkgstudio.module.json');
 const schema = readJson('doc/pkgstudio.module.schema.json');
-const webPkg = readJson('packages/web/package.json') as {version: string; exports: Record<string, string | {import?: string; default?: string}>};
+type Pkg = {name: string; version: string; exports: Record<string, string | {import?: string; default?: string}>};
+const packages: Record<string, {dir: string; pkg: Pkg}> = Object.fromEntries(
+    ['packages/web-client', 'packages/web-api'].map((dir) => {
+        const pkg = readJson(`${dir}/package.json`) as Pkg;
+        return [pkg.name, {dir, pkg}];
+    })
+);
 
 type Schema = {
     type?: string;
@@ -61,15 +67,15 @@ const validate = (value: unknown, s: Schema, at = '$'): string[] => {
     return errors;
 };
 
-const target = (key: string): string | undefined => {
-    const entry = webPkg.exports[key];
+/** "@synaipse/web-client/mount" + suffix → repo-relative path of that export's target. */
+const resolveExport = (specifier: string, suffix = ''): string | undefined => {
+    const name = specifier.split('/').slice(0, 2).join('/');
+    const entry = packages[name];
     if (entry === undefined) return undefined;
-    return typeof entry === 'string' ? entry : entry.import ?? entry.default;
+    const value = entry.pkg.exports[`.${specifier.slice(name.length)}${suffix}`];
+    const target = value === undefined ? undefined : typeof value === 'string' ? value : value.import ?? value.default;
+    return target === undefined ? undefined : path.posix.join(entry.dir, target);
 };
-
-/** Package-relative export target → repo-relative path. */
-const inRepo = (pkgPath: string | undefined): string | undefined =>
-    pkgPath === undefined ? undefined : path.posix.join('packages/web', pkgPath);
 
 const entries = manifest.entries as {
     frontend: {module: string; css: string; export: string; source: string; package: string};
@@ -88,12 +94,11 @@ describe('pkgstudio.module.json', () => {
     });
 
     it('points at the same files as the package exports', () => {
-        const sub = (pkg: string): string => `.${pkg.slice('@synaipse/web'.length)}`;
-        expect(inRepo(target(sub(entries.frontend.package)))).toBe(entries.frontend.module);
-        expect(inRepo(target(`${sub(entries.frontend.package)}.css`))).toBe(entries.frontend.css);
-        expect(inRepo(target(`${sub(entries.frontend.package)}/source`))).toBe(entries.frontend.source);
-        expect(inRepo(target(sub(entries.backend.package)))).toBe(entries.backend.module);
-        expect(manifest.version).toBe(webPkg.version);
+        expect(resolveExport(entries.frontend.package)).toBe(entries.frontend.module);
+        expect(resolveExport(entries.frontend.package, '.css')).toBe(entries.frontend.css);
+        expect(resolveExport(entries.frontend.package, '/source')).toBe(entries.frontend.source);
+        expect(resolveExport(entries.backend.package)).toBe(entries.backend.module);
+        for (const {pkg} of Object.values(packages)) expect(manifest.version).toBe(pkg.version);
     });
 
     it('names exports that exist', async () => {
@@ -112,9 +117,9 @@ describe('pkgstudio.module.json', () => {
         if (caps.includes('mount-handle')) {
             for (const m of ['unmount', 'onShow', 'onHide', 'navigate', 'setTheme', 'getTheme']) expect(mountSource).toContain(`${m}(`);
         }
-        const styles = readFileSync(path.join(repo, 'packages/web/src/Styles.css'), 'utf8');
+        const styles = readFileSync(path.join(repo, 'packages/web-client/src/Styles.css'), 'utf8');
         if (caps.includes('shell-tokens')) expect(styles).toContain('var(--sh-');
-        const embed = readFileSync(path.join(repo, 'packages/web/server/embed.ts'), 'utf8');
+        const embed = readFileSync(path.join(repo, 'packages/web-api/server/embed.ts'), 'utf8');
         if (caps.includes('mcp-registrar')) expect(embed).toContain('mcpRegistrar: SynaipseRegistrar;');
         if (caps.includes('health')) expect(embed).toContain('health(): SynaipseHealth;');
     });

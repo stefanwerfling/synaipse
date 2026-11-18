@@ -70,7 +70,8 @@ Index: [doc/README.md](doc/README.md).
 | `@synaipse/server-storage` | MariaDB-backed adapters for `SYNAIPSE_MODE=server` |
 | `@synaipse/service`        | Vault + vector orchestration, fulltext, hybrid merge |
 | `@synaipse/mcp-server`     | MCP server (stdio + http) exposing tools to Claude Code |
-| `@synaipse/web`            | Vanilla TS web UI (no React) for browsing, search, edit, graph |
+| `@synaipse/web-api`        | Node HTTP API: REST, SSE, MCP over HTTP, static frontend, embed for hosts |
+| `@synaipse/web-client`     | Vanilla TS web UI (no React) for browsing, search, edit, graph; also the embeddable `mount()` library |
 | `@synaipse/crawler`        | External-source crawlers writing under `Crawler/` (first: GitHub stars) |
 
 ## Use from Claude Code

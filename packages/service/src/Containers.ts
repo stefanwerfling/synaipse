@@ -1,7 +1,7 @@
 /**
  * Markdown container blocks — `::: <type> [attrs]\n…\n:::` — are a visual
  * sugar for the web UI (rendered as cards by the marked-Extension in
- * `packages/web/src/MarkdownPreview.ts`). For LLMs the wrapper lines are
+ * `packages/web-client/src/MarkdownPreview.ts`). For LLMs the wrapper lines are
  * noise: they bloat token counts, confuse the model about structure, and
  * leak frontmatter-style attribute syntax that the LLM might echo back.
  *

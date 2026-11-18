@@ -362,7 +362,7 @@ export type VaultChangeListener = (event: VaultEvent & {noteId: NoteId}) => void
 /**
  * Dependency-injection seam for the Service. Local-Mode boots without
  * touching this — all defaults wrap the filesystem vault. Server-Mode
- * boot (in @synaipse/web or @synaipse/mcp-server) passes a bundle from
+ * boot (in @synaipse/web-api or @synaipse/mcp-server) passes a bundle from
  * @synaipse/server-storage's createServerAdapters() plus a NoopHistory
  * from @synaipse/vault, and skips the chokidar watcher because there
  * is no filesystem vault to tail.

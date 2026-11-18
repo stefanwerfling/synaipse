@@ -25,7 +25,8 @@ COPY packages/vector/package.json          packages/vector/
 COPY packages/service/package.json         packages/service/
 COPY packages/server-storage/package.json  packages/server-storage/
 COPY packages/mcp-server/package.json      packages/mcp-server/
-COPY packages/web/package.json             packages/web/
+COPY packages/web-api/package.json         packages/web-api/
+COPY packages/web-client/package.json      packages/web-client/
 COPY packages/crawler/package.json         packages/crawler/
 
 # Full install for the builder — rollup's platform-specific native binary
@@ -38,13 +39,13 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY packages packages
 
 RUN npm run build && \
-    cd packages/web && npx vite build
+    npm --workspace @synaipse/web-client run build
 
 # --- Stage 2: runtime -------------------------------------------------------
 FROM node:22-slim AS runtime
 
 ENV NODE_ENV=production
-ENV SYNAIPSE_STATIC_DIR=/app/packages/web/dist/web
+ENV SYNAIPSE_STATIC_DIR=/app/packages/web-client/dist/web
 
 WORKDIR /app
 
@@ -57,7 +58,8 @@ COPY packages/vector/package.json          packages/vector/
 COPY packages/service/package.json         packages/service/
 COPY packages/server-storage/package.json  packages/server-storage/
 COPY packages/mcp-server/package.json      packages/mcp-server/
-COPY packages/web/package.json             packages/web/
+COPY packages/web-api/package.json         packages/web-api/
+COPY packages/web-client/package.json      packages/web-client/
 COPY packages/crawler/package.json         packages/crawler/
 
 RUN npm ci --omit=dev --omit=optional
@@ -70,11 +72,14 @@ COPY --from=builder /app/packages/service/dist          packages/service/dist
 COPY --from=builder /app/packages/server-storage/dist   packages/server-storage/dist
 COPY --from=builder /app/packages/server-storage/migrations  packages/server-storage/migrations
 COPY --from=builder /app/packages/mcp-server/dist       packages/mcp-server/dist
-COPY --from=builder /app/packages/web/dist              packages/web/dist
+COPY --from=builder /app/packages/web-api/dist          packages/web-api/dist
+# Only the built static app: the browser libraries are bundled into it and
+# are devDependencies of web-client, so --omit=dev leaves them out.
+COPY --from=builder /app/packages/web-client/dist/web   packages/web-client/dist/web
 COPY --from=builder /app/packages/crawler/dist          packages/crawler/dist
 
 EXPOSE 3001
 
 # Default = web (API + static + MCP under /mcp). Override `command:` in
 # compose for the user CLI or any other workspace script.
-CMD ["node", "--enable-source-maps", "packages/web/dist/server/index.js"]
+CMD ["node", "--enable-source-maps", "packages/web-api/dist/server/index.js"]

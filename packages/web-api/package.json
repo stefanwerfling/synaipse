@@ -1,0 +1,37 @@
+{
+  "name": "@synaipse/web-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synaipse web API (Node): REST, SSE, MCP over HTTP, static frontend, embed for hosts",
+  "type": "module",
+  "exports": {
+    "./embed": {
+      "types": "./dist/server/embed.d.ts",
+      "import": "./dist/server/embed.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean && rimraf dist",
+    "dev": "concurrently -k -n api,vite -c blue,magenta \"npm:dev:api\" \"npm:dev:vite\"",
+    "dev:api": "node --enable-source-maps --watch dist/server/index.js",
+    "dev:vite": "npm --workspace @synaipse/web-client run dev",
+    "start": "node --enable-source-maps dist/server/index.js"
+  },
+  "dependencies": {
+    "@synaipse/core": "*",
+    "@synaipse/crawler": "*",
+    "@synaipse/mcp-server": "*",
+    "@synaipse/server-storage": "*",
+    "@synaipse/service": "*",
+    "@synaipse/vault": "*",
+    "@synaipse/vector": "*",
+    "dotenv": "^16.4.7",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@types/turndown": "^5.0.6",
+    "concurrently": "^9.1.0",
+    "rimraf": "^6.0.1"
+  }
+}

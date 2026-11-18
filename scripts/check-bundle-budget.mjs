@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bundle budget for the web UI (plan P4 / D4). Run after `vite build`:
 //
-//   npm run build -w packages/web && node scripts/check-bundle-budget.mjs
+//   npm run build -w packages/web-client && node scripts/check-bundle-budget.mjs
 //
 // "Initial JS" is what a first page load fetches before any interaction:
 // the entry script(s) and every chunk they modulepreload, as listed in
@@ -23,7 +23,7 @@ const BUDGET = {
     lazyChunkRaw: 1600 * KB
 };
 
-const dist = path.resolve(process.argv[2] ?? 'packages/web/dist/web');
+const dist = path.resolve(process.argv[2] ?? 'packages/web-client/dist/web');
 const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
 
 const initial = new Set();

@@ -2,7 +2,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {Graph, Note} from '@synaipse/core';
 import type {SynaipseService} from '@synaipse/service';
 import {GraphDeltaPublisher, type GraphDelta} from '../server/graph-deltas.js';
-import {applyGraphDelta, applyNotesDelta, isEmptyGraphDelta, parseVersion} from '../src/GraphDelta.js';
+import {applyGraphDelta, applyNotesDelta, isEmptyGraphDelta, parseVersion} from '../../web-client/src/GraphDelta.js'; // round trip: server publisher → client applier
 
 interface FakeNote {
     id: string;

@@ -9,19 +9,19 @@
   "projectScoped": false,
   "entries": {
     "frontend": {
-      "module": "packages/web/dist/lib/mount.js",
-      "css": "packages/web/dist/lib/synaipse.css",
+      "module": "packages/web-client/dist/lib/mount.js",
+      "css": "packages/web-client/dist/lib/synaipse.css",
       "export": "mount",
-      "source": "packages/web/src/mount.ts",
-      "package": "@synaipse/web/mount"
+      "source": "packages/web-client/src/mount.ts",
+      "package": "@synaipse/web-client/mount"
     },
     "backend": {
-      "module": "packages/web/dist/server/embed.js",
+      "module": "packages/web-api/dist/server/embed.js",
       "export": "startSynaipseEmbed",
-      "package": "@synaipse/web/embed"
+      "package": "@synaipse/web-api/embed"
     }
   },
-  "build": "npm --workspace @synaipse/web run build",
+  "build": "npm run build && npm --workspace @synaipse/web-client run build",
   "mcpPath": "/mcp",
   "capabilities": [
     "mount-handle",

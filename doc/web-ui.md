@@ -1,6 +1,6 @@
 # Web UI
 
-The web UI ships in `@synaipse/web` — vanilla TypeScript, Vite bundler, no React.
+The web UI ships in `@synaipse/web-client` — vanilla TypeScript, Vite bundler, no React. The Node API it talks to is `@synaipse/web-api`; `npm run web` starts both.
 
 ```bash
 npm run web
@@ -51,10 +51,11 @@ When the MCP server writes a note it publishes an event to `/api/events` (see [`
 ## Production build
 
 ```bash
-npm --workspace @synaipse/web run build
+npm run build                                   # TypeScript, all packages
+npm --workspace @synaipse/web-client run build   # the app and the embed library
 ```
 
-The app ends up in `packages/web/dist/web/`. Serve it from any static host; the Node API still needs to run for writes and events. The same build writes the embed library to `packages/web/dist/lib/` (`mount.js` plus `synaipse.css`, see [embedding.md](embedding.md)).
+The app ends up in `packages/web-client/dist/web/`. Serve it from any static host; the Node API still needs to run for writes and events. The same build writes the embed library to `packages/web-client/dist/lib/` (`mount.js` plus `synaipse.css`, see [embedding.md](embedding.md)).
 
 ## Related
 

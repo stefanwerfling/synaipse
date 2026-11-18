@@ -44,7 +44,7 @@ export const buildLinkKeyMap = (notes: Iterable<LinkIndexNote>): Map<string, Not
  *   - among several notes with the same title (or alias) the one that was
  *     indexed first wins.
  *
- * That mirrors `Vault.rebuildBacklinks` and `packages/web/src/Wikilinks.ts`
+ * That mirrors `Vault.rebuildBacklinks` and `packages/web-client/src/Wikilinks.ts`
  * so every storage mode and the UI agree on what `[[X]]` points at — but
  * without a full-vault rebuild per write: upsert/remove are O(links of the
  * note), backlinksOf is O(keys of the note + its backlinks).

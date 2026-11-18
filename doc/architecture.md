@@ -8,7 +8,8 @@ A bird's-eye view of how the packages fit together.
 Claude Code  ──stdio──▶  @synaipse/mcp-server  ──▶  @synaipse/service  ──▶  @synaipse/vault   ──▶  Markdown files
                                                                        └─▶  @synaipse/vector  ──▶  Qdrant
                                                                                                    (Voyage | Ollama)
-Web browser  ──http──▶   @synaipse/web (API)  ──▶  @synaipse/service
+Web browser  ──http──▶   @synaipse/web-api  ──▶  @synaipse/service
+(@synaipse/web-client)
                           ▲
                           └─── SSE ◀── EventPublisher (MCP)
 ```
@@ -22,7 +23,8 @@ Web browser  ──http──▶   @synaipse/web (API)  ──▶  @synaipse/ser
 | `@synaipse/vector`      | Qdrant client; embedder abstraction with Voyage and Ollama implementations. Chunking. |
 | `@synaipse/service`     | Orchestration. `writeNote`, `search` (fulltext + semantic + hybrid merge), `related`, `todos`, `appendSessionLog`, `linkNote`. |
 | `@synaipse/mcp-server`  | Stdio MCP server. Tool registry in `Tools.ts`. Publishes events to the web API. |
-| `@synaipse/web`         | Vanilla TS UI + Node HTTP API. SSE event stream. |
+| `@synaipse/web-api`     | Node HTTP API, SSE event stream, MCP over HTTP, serves the built UI. `embed` for hosts. |
+| `@synaipse/web-client`  | Vanilla TS UI (browser only). Standalone app and the `mount()` library for hosts. Its libraries are bundled, so they are devDependencies and stay out of the server image. |
 
 ## Data flow — write
 

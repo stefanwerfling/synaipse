@@ -250,7 +250,7 @@ export interface AccountStore {
  * a server restart doesn't lose the user's cron config. `jobType` +
  * `jobParams` are stored as opaque strings so this interface stays
  * decoupled from the web/server JobType union; the runner
- * (packages/web/server/scheduler.ts) casts them at fire-time.
+ * (packages/web-api/server/scheduler.ts) casts them at fire-time.
  *
  * The cron expression uses a deliberately tiny grammar for v1:
  *   - "every Nh"        — fire every N hours, first N hours after createdAt
@@ -293,7 +293,7 @@ export type SchedulePatch = {
 
 /**
  * Storage port for scheduled jobs. Implementations:
- * - LocalScheduleStore (packages/web/server/local-schedule-store.ts)
+ * - LocalScheduleStore (packages/web-api/server/local-schedule-store.ts)
  *   — JSON sidecar under `${vaultPath}/.synaipse-schedules.json`
  * - MariaDBScheduleStore (@synaipse/server-storage, planned Slice 3b)
  *   — backed by a `schedules` table analogous to `users`

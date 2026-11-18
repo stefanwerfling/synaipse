@@ -283,7 +283,7 @@ WEB_API_PORT=3001
 | `HUGGINGFACE_MODEL`     | `@synaipse/vector`               |
 | `QDRANT_*`              | `@synaipse/vector`               |
 | `MCP_SERVER_*`          | `@synaipse/mcp-server`           |
-| `WEB_PORT`, `WEB_API_PORT` | `@synaipse/web`               |
+| `WEB_PORT`, `WEB_API_PORT` | `@synaipse/web-client` (Vite dev server), `@synaipse/web-api` |
 
 ## Switching providers
 

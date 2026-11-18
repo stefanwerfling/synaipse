@@ -74,7 +74,7 @@ services:
       # the users table is authoritative — populate it via the user CLI:
       #   docker compose run --rm synaipse-user create --label=admin --read --write
       SYNAIPSE_MCP_TOKEN: ${SYNAIPSE_MCP_TOKEN:-}
-    command: ["node", "--enable-source-maps", "packages/web/dist/server/index.js"]
+    command: ["node", "--enable-source-maps", "packages/web-api/dist/server/index.js"]
 
   # One-shot helper for `npm run user` inside the compose network. Invoke
   # with `docker compose run --rm synaipse-user create --label=foo --read --write`.

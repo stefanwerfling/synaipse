@@ -57,7 +57,7 @@ const rowToSchedule = (row: ScheduleRow): Schedule => {
 
 /**
  * MariaDB-backed ScheduleStore for SYNAIPSE_MODE=server. Mirrors the
- * semantics of LocalScheduleStore (packages/web/server/local-schedule-store.ts)
+ * semantics of LocalScheduleStore (packages/web-api/server/local-schedule-store.ts)
  * so the Scheduler runner + /api/schedules routes stay identical.
  *
  * `id` is UUIDv4 assigned client-side at create() time — same as the
