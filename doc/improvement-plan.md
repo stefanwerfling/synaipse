@@ -248,7 +248,7 @@ Slices (in dieser Reihenfolge; jede endet mit `npm run eval` gegen die Baseline)
 |---|---|---|
 | S1 B7 Eval-Harness | Fixture-Vault, Fragen-Kategorien, MCP-Agent, Baseline, CI | erledigt |
 | S2 B4 Ranking | `supersedes`, `confidence`, `valid_until` wirken in `search` und `prime` | erledigt |
-| S3 B4 Schreiben | `possibleDuplicates[]` bei `write_note`/`remember`, `mode: create\|overwrite\|upsert`, `expectedHash` | offen |
+| S3 B4 Schreiben | `possibleDuplicates[]` bei `write_note`/`remember`, `mode: create\|overwrite\|upsert`, `expectedHash` | erledigt |
 | S4 B4 Zeit + Inbox | `synaipse_changes`, `synaipse_note_history`, Kandidaten für `consolidate_inbox`; dazu B3 `search`-Filter und Treffer-Anker | offen |
 | S5 B5 Resources/Prompts/Completions | dazu B1 `outputSchema`/`structuredContent`, `resource_link` | offen |
 | S6 B5 Elicitation | `delete_note`, Consent-Flow statt Long-Poll, Progress, HTTP-Session-TTL | offen |
@@ -262,6 +262,8 @@ Baseline (altes Ranking, isoliert): hit@1 0,75, Recall@5 0,953, MRR 0,84, **vera
 Befund nebenbei: Im ersten Entwurf liefen alle Fragen in einer Sitzung. Jedes `read_note` zählt als Zugriff und macht die Notiz zum Graph-Seed der Hybrid-Suche; dadurch verschlechterte sich das Ranking der folgenden Fragen (hit@1 0,625 statt 0,75). Für echte Sitzungen heißt das: Das Graph-Signal aus kürzlich gelesenen Notizen kann themenfremde Treffer nach oben ziehen. Eigener Punkt für später (Seeds nach Thema filtern oder Gewicht senken), gemessen mit einer Sitzungs-Variante der Eval.
 
 S2 (`309bc6c`, `d3643d5`): neues Modul `KnowledgeState.ts`. `supersedes` (Feld oder typisierter Link, per Pfad, Titel oder Alias; Ketten bis zum letzten Nachfolger, Zyklen zählen nicht) senkt das Gewicht auf 0,25, abgelaufenes `valid_until` auf 0,3, `confidence` c auf 0,5 + 0,5·c. Treffer werden markiert (`supersededBy`, `expired`, `confidence`); der Nachfolger eines abgelösten Treffers bekommt mindestens dessen ursprünglichen Score, aber nur innerhalb des Such-Scopes. `prime` lässt abgelöste und abgelaufene Notizen weg (außer gepinnte), `read_note` nennt den Nachfolger, die Instructions sagen dem Agenten, `supersedes` zu setzen. Eval: veraltete Notiz vor der Antwort 45 % → 0 %, hit@1 0,75 → 0,84, MRR 0,84 → 0,91, Recall@5 0,95 → 0,98, Prime 1019 → 824 Tokens, Instructions +39 Tokens.
+
+S3 (`952da7e`): `write_note` nimmt `mode: create|overwrite|upsert` (Default `upsert`, unbekannte Werte werden abgelehnt) und `expectedHash`; `update_note` und `edit_note` nehmen `expectedHash`, `edit_note` sichert zusätzlich immer gegen eine Änderung zwischen eigenem Lesen und Schreiben. Ein verletzter Guard ist ein Tool-Fehler mit aktuellem Hash (`WriteConflictError`), geschrieben wird nichts. Prüfung und Schreiben laufen unter einer Sperre pro Pfad; von zwei Schreibern mit demselben Hash kommt nur einer durch. Neue Notizen und `remember`-Einträge melden `possibleDuplicates` (höchstens 3, `Duplicates.ts`): Kandidaten aus der Hybrid-Suche, bewertet nach Wortüberlappung (Jaccard bzw. 0,8 × Enthaltensein für kurze Einträge, nahezu gleiche Titel) oder Kosinus ≥ 0,88 bei Embeddings. Schwelle 0,42, kalibriert mit zehn Entwürfen in der Eval: Duplikate in anderen Worten ab ≈ 0,5, neues Wissen mit gemeinsamem Vokabular bis ≈ 0,35. Die Eval misst das jetzt mit (Recall der Duplikate, Anteil Fehlalarme): Recall 1, Fehlalarme 0. Tool-Liste +3,6 % Tokens durch die neuen Parameter.
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 
