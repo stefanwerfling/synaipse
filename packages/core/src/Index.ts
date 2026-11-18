@@ -11,6 +11,7 @@ export * from './Roadmap.js';
 export * from './Benchmark.js';
 export * from './Markdown.js';
 export * from './LinkIndex.js';
+export * from './Log.js';
 
 // TokenHash and PasswordHash are deliberately NOT in the barrel: they
 // import node:crypto, and pulling them into the browser bundle (web

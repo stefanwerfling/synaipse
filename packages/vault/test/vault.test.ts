@@ -1,8 +1,8 @@
-import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import {mkdtemp, rm, writeFile, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {VaultError} from '@synaipse/core';
+import {configureLogging, VaultError} from '@synaipse/core';
 import {Vault} from '../src/Vault.js';
 
 let vaultDir: string;
@@ -79,16 +79,18 @@ describe('Vault ingest with invalid frontmatter', () => {
         await mkdir(path.dirname(filePath), {recursive: true});
         await writeFile(filePath, '---\ntype: meeting\n---\nbody', 'utf8');
 
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const lines: string[] = [];
+        configureLogging({sink: (line) => lines.push(line)});
 
-        const vault = new Vault(vaultDir);
-        await vault.load();
+        try {
+            const vault = new Vault(vaultDir);
+            await vault.load();
 
-        expect(vault.tryGet('legacy.md')).toBeDefined();
-        expect(warn).toHaveBeenCalled();
-        expect(warn.mock.calls.flat().join(' ')).toMatch(/type/);
-
-        warn.mockRestore();
+            expect(vault.tryGet('legacy.md')).toBeDefined();
+            expect(lines.join('\n')).toMatch(/WARN invalid frontmatter noteId=legacy\.md .*type/);
+        } finally {
+            configureLogging({sink: (line) => process.stderr.write(`${line}\n`)});
+        }
     });
 });
 

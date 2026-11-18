@@ -12,6 +12,8 @@ cp .env.example .env
 |---|---|---|
 | `SYNAIPSE_VAULT_PATH`  | `./vault`                                       | Folder Synaipse reads/writes Markdown from. |
 | `SYNAIPSE_STATE_DB`    | `<SYNAIPSE_VAULT_PATH>/.synaipse/state.db`     | SQLite state of the vault (`node:sqlite`, WAL): per-note hash, embedding state and access journal. Only changed rows are written. Local mode only — server mode keeps this in MariaDB. |
+| `SYNAIPSE_LOG_LEVEL`   | `info`                                         | `debug` \| `info` \| `warn` \| `error` \| `silent`. `debug` adds per-batch embedding progress. Logs always go to stderr (stdout is the MCP stdio channel). |
+| `SYNAIPSE_LOG_FORMAT`  | `text`                                         | `text` (`[synaipse:<component>] WARN msg key=value`) or `json` (one object per line with `time`, `level`, `component`, `msg`, fields; errors with stack) for log shippers. |
 | `SYNAIPSE_INDEX_CACHE` | `<SYNAIPSE_VAULT_PATH>/.synaipse-index.json`    | **Legacy.** The former JSON index cache. Read once on the first start with an empty state DB, imported without re-embedding, then renamed to `*.migrated-<ts>`. |
 
 The vault path is interpreted relative to the directory that the process is started from. For absolute portability use an absolute path.

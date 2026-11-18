@@ -1,8 +1,11 @@
 import {existsSync} from 'node:fs';
 import {rename} from 'node:fs/promises';
 import type {StatementSync} from 'node:sqlite';
+import {createLogger} from '@synaipse/core';
 import {HashCache, type CacheEntry, type TouchSeed} from './Cache.js';
 import {StateDb} from './StateDb.js';
+
+const log = createLogger('vault');
 
 /** `embeddedHash` of an entry whose content was never embedded. */
 const NOT_EMBEDDED = '';
@@ -129,8 +132,11 @@ export class EntryStore implements EntryCache {
             for (const id of json.ids()) this.writeRow(id, json.get(id)!);
         });
         const target = `${legacy}.migrated-${Date.now()}`;
-        await rename(legacy, target).catch(() => undefined);
-        process.stderr.write(`[synaipse] index cache migrated to ${this.file} (${json.size()} entries); old file kept as ${target}\n`);
+        await rename(legacy, target).catch((error: unknown) => {
+            // Harmless: the non-empty table blocks a second import anyway.
+            log.warn('could not rename migrated index cache', {file: legacy, error});
+        });
+        log.info('index cache migrated into state DB; old file kept', {db: this.file, entries: json.size(), kept: target});
     }
 
     public async reloadIfChanged(): Promise<boolean> {
@@ -266,7 +272,7 @@ export class EntryStore implements EntryCache {
         this.flushTimer = setTimeout(() => {
             this.flushTimer = null;
             this.flush().catch((error: unknown) => {
-                process.stderr.write(`[synaipse] WARN state flush failed, retried on next change: ${String(error)}\n`);
+                log.warn('state flush failed, retried on next change', {db: this.file, error});
             });
         }, this.debounceMs);
     }

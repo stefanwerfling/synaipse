@@ -7,6 +7,7 @@ import {noteTools} from './Tools/Notes.js';
 import {roadmapTools} from './Tools/Roadmap.js';
 import {searchTools} from './Tools/Search.js';
 import type {ToolHandler} from './Tools/Shared.js';
+import {createLogger} from '@synaipse/core';
 
 export {EMPTY_CTX} from './Tools/Shared.js';
 export {DEPRECATED_TOOLS} from './Tools/Acl.js';
@@ -33,7 +34,7 @@ export const resolveToolsets = (raw: string | undefined = process.env.SYNAIPSE_M
     const known = names.filter((n): n is Toolset => (TOOLSETS as readonly string[]).includes(n));
     const unknown = names.filter((n) => !(TOOLSETS as readonly string[]).includes(n));
     if (unknown.length > 0) {
-        process.stderr.write(`[synaipse-mcp] WARN unknown toolset(s) in SYNAIPSE_MCP_TOOLSETS: ${unknown.join(', ')} (known: ${TOOLSETS.join(', ')}, all)\n`);
+        createLogger('mcp').warn('unknown toolset(s) in SYNAIPSE_MCP_TOOLSETS', {unknown, known: [...TOOLSETS, 'all']});
     }
     return [...new Set<Toolset>(['core', ...known])];
 };

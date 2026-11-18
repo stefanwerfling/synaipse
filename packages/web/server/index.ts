@@ -5,6 +5,9 @@ import http from 'node:http';
 import {URL} from 'node:url';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
+import {createLogger} from '@synaipse/core';
+
+const log = createLogger('web');
 
 const STATIC_MIME: Readonly<Record<string, string>> = {
     '.html': 'text/html; charset=utf-8',
@@ -180,14 +183,14 @@ const formatError = (error: unknown): string => {
 };
 
 process.on('uncaughtException', (error: unknown) => {
-    process.stderr.write(`[synaipse-web-api] uncaughtException: ${formatError(error)}\n`);
+    log.error('uncaughtException', {error: formatError(error)});
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-    process.stderr.write(`[synaipse-web-api] unhandledRejection: ${formatError(reason)}\n`);
+    log.error('unhandledRejection', {error: formatError(reason)});
 });
 
 main().catch((error: unknown) => {
-    process.stderr.write(`[synaipse-web-api] fatal: ${formatError(error)}\n`);
+    log.error('fatal', {error: formatError(error)});
     process.exit(1);
 });

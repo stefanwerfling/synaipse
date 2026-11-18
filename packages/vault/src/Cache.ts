@@ -1,7 +1,9 @@
 import {existsSync} from 'node:fs';
 import {mkdir, readFile, rename, rm, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {LEGACY_EMBED_MODEL} from '@synaipse/core';
+import {createLogger, LEGACY_EMBED_MODEL} from '@synaipse/core';
+
+const log = createLogger('vault');
 
 /** `embeddedHash` value of an entry whose content was never embedded. */
 const NOT_EMBEDDED = '';
@@ -52,7 +54,7 @@ export class HashCache {
         try {
             raw = await readFile(this.file, 'utf8');
         } catch (error) {
-            process.stderr.write(`[synaipse] WARN cannot read index cache ${this.file}: ${String(error)}\n`);
+            log.warn('cannot read index cache', {file: this.file, error});
             this.data = new Map();
             return;
         }
@@ -78,10 +80,7 @@ export class HashCache {
             // broken file for inspection and say loudly what happens next.
             const backup = `${this.file}.corrupt-${Date.now()}`;
             await rename(this.file, backup).catch(() => undefined);
-            process.stderr.write(
-                `[synaipse] WARN index cache ${this.file} is corrupt (${error instanceof Error ? error.message : String(error)}); ` +
-                `moved to ${backup}. All notes will be re-embedded.\n`
-            );
+            log.warn('index cache is corrupt; moved aside, all notes will be re-embedded', {file: this.file, backup, error});
             this.data = new Map();
         }
     }

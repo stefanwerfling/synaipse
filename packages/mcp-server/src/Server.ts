@@ -5,6 +5,7 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {createLogger} from '@synaipse/core';
 import type {Config, UserStore} from '@synaipse/core';
 import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
@@ -14,6 +15,8 @@ import {buildInstructions} from './Instructions.js';
 import {resolveContextFromRequest} from './Project.js';
 import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
+
+const log = createLogger('mcp');
 
 const ADMIN_FLUSH_AUTH_CACHE_PATH = '/admin/flush-auth-cache';
 
@@ -189,11 +192,8 @@ export const buildMcpHttpHandler = (
     const sessions = new Map<string, McpSessionEntry>();
 
     if (!authConfigured) {
-        process.stderr.write(
-            '[synaipse-mcp] WARN: no SYNAIPSE_MCP_TOKEN, server.tokens, or user store configured — '
-            + 'HTTP endpoint is unauthenticated. Safe only for localhost; '
-            + 'set auth before exposing the port to LAN / remote.\n'
-        );
+        log.warn('no SYNAIPSE_MCP_TOKEN, server.tokens, or user store configured — HTTP endpoint is unauthenticated. '
+            + 'Safe only for localhost; set auth before exposing the port to LAN / remote.');
     }
 
     return (req, res) => {
@@ -245,9 +245,7 @@ export const buildMcpHttpHandler = (
 
                 const flushed = userStore.size();
                 userStore.flush();
-                process.stderr.write(
-                    `[synaipse-mcp] auth-cache flushed (${flushed} entries) by token "${scope.label}"\n`
-                );
+                log.info('auth-cache flushed', {entries: flushed, token: scope.label});
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({flushed}));
@@ -261,7 +259,7 @@ export const buildMcpHttpHandler = (
                 try {
                     await transport.handleRequest(req, res);
                 } catch (error: unknown) {
-                    process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+                    log.error('http request failed', {method: req.method, url: req.url, error});
                     if (!res.headersSent) {
                         res.statusCode = 500;
                         res.end('internal error');
@@ -326,7 +324,7 @@ export const buildMcpHttpHandler = (
                 await server.connect(transport as unknown as Transport);
                 await runHandle(transport);
             } catch (error: unknown) {
-                process.stderr.write(`[synaipse-mcp] http error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+                log.error('http request failed', {method: req.method, url: req.url, error});
                 if (!res.headersSent) {
                     res.statusCode = 500;
                     res.end('internal error');
@@ -377,12 +375,10 @@ export const startServer = async (config: Config, options: StartServerOptions): 
     if (config.mode === 'server') {
         const cacheTtl = resolveAuthCacheTtlMs();
         const cacheNote = cacheTtl > 0 ? `auth-cache TTL=${cacheTtl}ms` : 'auth-cache OFF';
-        process.stderr.write(`[synaipse-mcp] server-mode: MariaDB-backed adapters wired in (${cacheNote})\n`);
+        log.info('server-mode: MariaDB-backed adapters wired in', {authCache: cacheNote});
         if (config.server.tokens !== undefined && config.server.tokens.length > 0) {
-            process.stderr.write(
-                '[synaipse-mcp] WARN: config.server.tokens is set but mode=server — '
-                + 'yaml tokens are ignored. Use `npm run user create` or `npm run user import-yaml` to populate the users table.\n'
-            );
+            log.warn('config.server.tokens is set but mode=server — yaml tokens are ignored. '
+                + 'Use `npm run user create` or `npm run user import-yaml` to populate the users table.');
         }
     }
 
@@ -433,7 +429,5 @@ export const startServer = async (config: Config, options: StartServerOptions): 
         ? `http://localhost:${options.httpPort}${options.httpPath}`
         : 'stdio';
 
-    process.stderr.write(
-        `[synaipse-mcp] ready (transport: ${transportLabel}, vault: ${config.vaultPath}, events: ${options.eventsUrl ?? 'disabled'})\n`
-    );
+    log.info('ready', {transport: transportLabel, vault: config.vaultPath, events: options.eventsUrl ?? 'disabled'});
 };

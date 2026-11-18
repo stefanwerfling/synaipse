@@ -2,6 +2,7 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {config as dotenvConfig} from 'dotenv';
+import {createLogger} from '@synaipse/core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -46,6 +47,6 @@ startServer(config, {
     httpPort: resolveHttpPort(),
     httpPath: resolveHttpPath()
 }).catch((error: unknown) => {
-    process.stderr.write(`[synaipse-mcp] fatal: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    createLogger('mcp').error('fatal', {error: error instanceof Error ? error.stack ?? error.message : String(error)});
     process.exit(1);
 });

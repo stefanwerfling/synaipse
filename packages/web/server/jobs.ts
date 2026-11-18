@@ -8,6 +8,7 @@ import {
     type CrawlerReport,
     type GiteaIssueState
 } from '@synaipse/crawler';
+import {createLogger} from '@synaipse/core';
 
 /**
  * In-process job manager. Wraps the service's bulk methods (relink, compile,
@@ -204,7 +205,7 @@ export class JobManager {
             try {
                 fn(event);
             } catch (cause) {
-                process.stderr.write(`[jobs] subscriber error: ${String(cause)}\n`);
+                createLogger('jobs').error('subscriber failed', {error: cause});
             }
         }
     }

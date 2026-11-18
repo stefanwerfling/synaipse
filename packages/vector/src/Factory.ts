@@ -1,4 +1,4 @@
-import {ConfigError} from '@synaipse/core';
+import {ConfigError, createLogger} from '@synaipse/core';
 import type {Config} from '@synaipse/core';
 import type {Embedder} from './Embedder.js';
 import {OllamaEmbedder} from './Ollama.js';
@@ -6,6 +6,8 @@ import {VoyageEmbedder} from './Embeddings.js';
 import {HuggingFaceEmbedder} from './HuggingFace.js';
 import type {Reranker} from './Reranker.js';
 import {HuggingFaceReranker} from './Reranker.js';
+
+const log = createLogger('vector');
 
 const VOYAGE_DIMS: Record<string, number> = {
     'voyage-3-large': 1024,
@@ -56,7 +58,7 @@ export const createEmbedder = (config: Config): Embedder | null => {
             dimension: VOYAGE_DIMS[config.voyage.model] ?? 1024,
             retry: {
                 onRetry: ({attempt, reason, waitMs}) => {
-                    process.stderr.write(`[synaipse] voyage retry #${attempt} reason=${reason} wait=${waitMs}ms\n`);
+                    log.warn('voyage retry', {attempt, reason, waitMs});
                 }
             }
         });

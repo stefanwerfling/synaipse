@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, Config, Frontmatter, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, Graph, VaultEvent} from '@synaipse/core';
-import {buildLinkKeyMap, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
+import {buildLinkKeyMap, createLogger, LEGACY_EMBED_MODEL, ProjectScopeError, parseRoadmap} from '@synaipse/core';
 import matter from 'gray-matter';
 import {FilesystemNoteAdapter, Vault, VaultHistory, VaultWatcher, currentWriteBatch, runWriteBatch, type History, type WriteBatch} from '@synaipse/vault';
 import {deleteCanvasFromVault, listCanvasesInVault, readCanvasFromVault, writeCanvasToVault, type CanvasSummary} from './Canvas.js';
@@ -144,6 +144,8 @@ export interface ArchiveReport {
     failed: Array<{id: NoteId; error: string}>;
     dryRun: boolean;
 }
+
+const log = createLogger('service');
 
 const MS_PER_DAY = 86_400_000;
 
@@ -434,7 +436,7 @@ export class SynaipseService {
             retry: {
                 onRetry: ({attempt, error, waitMs}) => {
                     const reason = error instanceof Error ? error.message : String(error);
-                    process.stderr.write(`[synaipse] qdrant retry #${attempt} reason="${reason}" wait=${waitMs}ms\n`);
+                    log.warn('qdrant retry', {attempt, reason, waitMs});
                 }
             }
         });
@@ -443,10 +445,10 @@ export class SynaipseService {
             embedder,
             store,
             onBatch: ({batch, batches, chunks, chars}) => {
-                process.stderr.write(`[synaipse] embed batch ${batch}/${batches} (${chunks} chunks, ${chars} chars)\n`);
+                log.debug('embed batch', {batch, batches, chunks, chars});
             },
             onOversize: (chunk) => {
-                process.stderr.write(`[synaipse] WARN oversize chunk ${chunk.id} (${chunk.text.length} chars) — tune CHUNK_DEFAULTS\n`);
+                log.warn('oversize chunk — tune CHUNK_DEFAULTS', {chunk: chunk.id, chars: chunk.text.length});
             }
         });
     }
@@ -488,10 +490,9 @@ export class SynaipseService {
             } catch (error) {
                 this.pendingEmbeds.add(note.id);
                 this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
-                process.stderr.write(
-                    `[synaipse] WARN embedding ${note.id} failed (${error instanceof Error ? error.message : String(error)}); ` +
-                    `note is saved, vector index will catch up on the next write or start (${this.pendingEmbeds.size} pending)\n`
-                );
+                log.warn('embedding failed; note is saved, vector index catches up on next write or start', {
+                    noteId: note.id, error, pending: this.pendingEmbeds.size
+                });
             }
         }
 
@@ -564,10 +565,9 @@ export class SynaipseService {
                 } catch (error) {
                     for (const note of notes.slice(i)) this.pendingEmbeds.add(note.id);
                     this.lastStats = {...this.lastStats, pending: this.pendingEmbeds.size};
-                    process.stderr.write(
-                        `[synaipse] WARN batch embedding failed (${error instanceof Error ? error.message : String(error)}); ` +
-                        `${notes.length - i} notes saved but not embedded, retried on next write or start\n`
-                    );
+                    log.warn('batch embedding failed; notes saved but not embedded, retried on next write or start', {
+                        notes: notes.length - i, error
+                    });
                     break;
                 }
                 for (const note of group) {
@@ -594,17 +594,17 @@ export class SynaipseService {
         await this.migrateLegacyChatNotesOut();
 
         this.fulltextIndex.build(this.notes.list());
-        process.stderr.write(`[synaipse] fulltext index: ${this.fulltextIndex.size()} notes · ${this.fulltextIndex.termCount()} terms\n`);
+        log.info('fulltext index built', {notes: this.fulltextIndex.size(), terms: this.fulltextIndex.termCount()});
 
         if (this.index === null) {
-            process.stderr.write(`[synaipse] embeddings disabled (provider=none) — fulltext only, ${this.notes.list().length} notes loaded\n`);
+            log.info('embeddings disabled (provider=none) — fulltext only', {notes: this.notes.list().length});
             this.attachWatcher();
             this.warmGraphCaches();
             return;
         }
 
         if (this.embedExcludePrefixes.length > 0) {
-            process.stderr.write(`[synaipse] embed exclude prefixes: ${this.embedExcludePrefixes.join(', ')}\n`);
+            log.info('embed exclude prefixes', {prefixes: this.embedExcludePrefixes});
         }
 
         const stats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
@@ -635,7 +635,7 @@ export class SynaipseService {
         }
 
         if (excluded > 0) {
-            process.stderr.write(`[synaipse] embed: skipped ${excluded} notes by exclude-prefix\n`);
+            log.info('embed: notes skipped by exclude-prefix', {excluded});
         }
 
         const orphans: NoteId[] = this.notes.entryIds().filter((id) => !liveIds.has(id));
@@ -651,10 +651,9 @@ export class SynaipseService {
                 await this.index.indexNotes(group);
             } catch (error) {
                 for (const note of toReindex.slice(i)) this.pendingEmbeds.add(note.id);
-                process.stderr.write(
-                    `[synaipse] WARN embedding failed (${error instanceof Error ? error.message : String(error)}); ` +
-                    `${toReindex.length - i} notes left un-embedded, retried on next start. Search falls back to fulltext for them.\n`
-                );
+                log.warn('embedding failed; remaining notes stay un-embedded (fulltext only) and are retried on next start', {
+                    notes: toReindex.length - i, error
+                });
                 break;
             }
 
@@ -682,9 +681,7 @@ export class SynaipseService {
         await this.notes.flushEntries();
         this.lastStats = stats;
 
-        process.stderr.write(
-            `[synaipse] indexed: ${stats.reindexed} reindexed, ${stats.unchanged} unchanged, ${stats.removed} removed (total ${stats.total})\n`
-        );
+        log.info('indexed', {reindexed: stats.reindexed, unchanged: stats.unchanged, removed: stats.removed, pending: stats.pending, total: stats.total});
 
         this.attachWatcher();
         this.warmGraphCaches();
@@ -696,9 +693,7 @@ export class SynaipseService {
         const graph = this.graph();
         this.graphLayout();
         const ms = Date.now() - started;
-        process.stderr.write(
-            `[synaipse] graph cache warmed: ${graph.nodes.length} nodes, ${graph.edges.length} edges in ${ms}ms\n`
-        );
+        log.info('graph cache warmed', {nodes: graph.nodes.length, edges: graph.edges.length, ms});
     }
 
     public async stop(): Promise<void> {
@@ -818,9 +813,7 @@ export class SynaipseService {
             // Rerank is optional — if the model errors we return the
             // pre-rerank fusion order rather than blowing up the whole
             // search. Log once so it doesn't go silent.
-            process.stderr.write(`[synaipse] reranker failed, falling back to fusion order: ${
-                error instanceof Error ? error.message : String(error)
-            }\n`);
+            log.warn('reranker failed, falling back to fusion order', {error});
             return fused.slice(0, limit);
         }
 
@@ -1257,7 +1250,7 @@ export class SynaipseService {
         try {
             await this.auditLog.append(entry);
         } catch (cause) {
-            console.warn('[synaipse] audit log append failed:', cause);
+            log.warn('audit log append failed', {error: cause});
         }
     }
 
@@ -1294,7 +1287,7 @@ export class SynaipseService {
         try {
             await this.auditLog.append(entry);
         } catch (cause) {
-            console.warn('[synaipse] audit log append failed:', cause);
+            log.warn('audit log append failed', {error: cause});
         }
     }
 
@@ -2195,13 +2188,13 @@ export class SynaipseService {
 
                 moved += 1;
             } catch (cause) {
-                process.stderr.write(`[synaipse] chat migration failed for ${noteId}: ${String(cause)}\n`);
+                log.error('chat migration failed', {noteId, error: cause});
                 failed += 1;
             }
         }
 
         if (moved > 0) {
-            process.stderr.write(`[synaipse] migrated ${moved} legacy chat note${moved === 1 ? '' : 's'} out of the vault into the chat store\n`);
+            log.info('migrated legacy chat notes out of the vault into the chat store', {moved});
         }
 
         return {moved, failed};
@@ -3263,7 +3256,7 @@ export class SynaipseService {
 
         this.watcher.on('event', (event) => {
             this.handleEvent(event.kind, event.path).catch((error: unknown) => {
-                process.stderr.write(`[synaipse] watcher error: ${String(error)}\n`);
+                log.error('watcher event failed', {path: event.path, kind: event.kind, error});
             });
         });
 
@@ -3313,7 +3306,7 @@ export class SynaipseService {
             try {
                 listener(event);
             } catch (error) {
-                process.stderr.write(`[synaipse] vault-change listener error: ${String(error)}\n`);
+                log.error('vault-change listener failed', {error});
             }
         }
     }

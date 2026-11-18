@@ -4,12 +4,14 @@ import matter from 'gray-matter';
 import {access} from 'node:fs/promises';
 import {constants as fsConstants} from 'node:fs';
 import {Repo, type PersonInput} from 'ngit';
-import {LinkIndex, NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
+import {createLogger, LinkIndex, NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
 import type {Note, NoteId, NoteWriteInput, Frontmatter} from '@synaipse/core';
 import {parseNote} from './Parser.js';
 import {walkMarkdown} from './Walker.js';
 import {currentWriteBatch} from './WriteBatch.js';
 import type {WriteBatchChanges} from '@synaipse/core';
+
+const log = createLogger('vault');
 
 export interface VaultHistoryConfig {
     autoCommit: boolean;
@@ -195,7 +197,7 @@ export class Vault {
                 await repo.deleteFile(id, {message, ...(author ? {author} : {})});
             }
         } catch (cause) {
-            process.stderr.write(`[synaipse] ${kind} commit failed for ${id}: ${String(cause)}\n`);
+            log.error('history commit failed', {kind, noteId: id, error: cause});
         }
     }
 
@@ -236,7 +238,7 @@ export class Vault {
         try {
             await repo.commitFiles({adds, deletes: committedDeletes, message, ...(author ? {author} : {})});
         } catch (cause) {
-            process.stderr.write(`[synaipse] batch commit failed (${adds.length + committedDeletes.length} paths): ${String(cause)}\n`);
+            log.error('batch history commit failed', {paths: adds.length + committedDeletes.length, error: cause});
         }
     }
 
@@ -280,7 +282,7 @@ export class Vault {
         const validation = validateFrontmatter(note.frontmatter);
 
         if (!validation.ok) {
-            console.warn(`[synaipse] invalid frontmatter in ${note.id}: ${validation.errors.join('; ')}`);
+            log.warn('invalid frontmatter', {noteId: note.id, errors: validation.errors});
         }
 
         this.unindexTags(this.notes.get(note.id));
