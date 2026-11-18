@@ -11,7 +11,7 @@ import {createLogger} from '@synaipse/core';
 
 export {EMPTY_CTX} from './Tools/Shared.js';
 export {DEPRECATED_TOOLS} from './Tools/Acl.js';
-export type {ToolContext, ToolEventInfo, ToolHandler, ToolOutcome, ToolResponse} from './Tools/Shared.js';
+export type {ToolCall, ToolContext, ToolEventInfo, ToolHandler, ToolOutcome, ToolResponse} from './Tools/Shared.js';
 
 /**
  * Tool groups. Only enabled toolsets are registered at all (not listed,

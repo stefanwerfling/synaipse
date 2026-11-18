@@ -6,6 +6,12 @@ import type {EventKind} from '../EventPublisher.js';
 
 const CONSENT_TIMEOUT_MS = 60_000;
 
+/** Resolves 'aborted' once the signal fires (never otherwise). */
+const abortOf = (signal: AbortSignal): Promise<'aborted'> => new Promise((resolve) => {
+    if (signal.aborted) resolve('aborted');
+    else signal.addEventListener('abort', () => resolve('aborted'), {once: true});
+});
+
 /**
  * Enforce just-in-time consent for note reads triggered by MCP. When
  * the note's `frontmatter.mcp_consent === "pending"`, the tool handler
@@ -16,7 +22,7 @@ const CONSENT_TIMEOUT_MS = 60_000;
  * MUST NOT go through this path; they use {@link filterByConsent}
  * instead, which silently drops pending/denied entries.
  */
-const enforceReadConsent = async (service: SynaipseService, id: string): Promise<Note> => {
+const enforceReadConsent = async (service: SynaipseService, id: string, call?: ToolCall): Promise<Note> => {
     const initial = service.readNote(id);
     const status = initial.frontmatter.mcp_consent;
 
@@ -28,9 +34,20 @@ const enforceReadConsent = async (service: SynaipseService, id: string): Promise
         throw new Error(`Note "${id}" is denied for MCP access by user consent.`);
     }
 
-    // status === 'pending' → long-poll the UI
+    // status === 'pending' → wait for the decision in the Synaipse UI. The
+    // UI stays the only authority (a client could auto-confirm an
+    // elicitation); the client sees progress while waiting and the wait
+    // ends when the call is cancelled.
     const requester = getAuditTokenLabel() ?? 'unknown';
-    const result = await service.getConsentStore().request(id, requester, CONSENT_TIMEOUT_MS);
+    await call?.progress?.(`Waiting for consent in the Synaipse UI to read ${id}`);
+    const decision = service.getConsentStore().request(id, requester, CONSENT_TIMEOUT_MS);
+    const result = call?.signal === undefined
+        ? await decision
+        : await Promise.race([decision, abortOf(call.signal)]);
+
+    if (result === 'aborted') {
+        throw new Error(`Consent wait for "${id}" was cancelled; the request stays pending in the UI.`);
+    }
 
     if (result === 'timeout') {
         throw new Error(`Note "${id}" needs user consent before MCP can read it. Prompt is pending in the UI; retry the tool call in a moment.`);
@@ -120,8 +137,22 @@ export interface ToolOutcome {
     event?: ToolEventInfo;
 }
 
+/**
+ * What one tool call can do towards the client (plan P8 / B5); set by
+ * the server per call, absent in direct calls and resource reads.
+ */
+export interface ToolCall {
+    /** Ask the user a yes/no question in the client (form elicitation); undefined when the client cannot. */
+    confirm?: (message: string) => Promise<'accept' | 'decline' | 'cancel'>;
+    /** Progress notification; undefined when the caller sent no progressToken. */
+    progress?: (message: string) => Promise<void>;
+    /** Fires when the client cancels the call. */
+    signal?: AbortSignal;
+}
+
 export interface ToolContext {
     project?: string | null;
+    call?: ToolCall;
     gitAuthor?: {name: string; email: string};
     extraTags?: readonly string[];
 }

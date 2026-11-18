@@ -77,9 +77,9 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = resolveNoteId(service, asString(args.id, 'id'));
-            const note = await enforceReadConsent(service, id);
+            const note = await enforceReadConsent(service, id, ctx?.call);
 
             let body = note.content;
             if (typeof args.section === 'string' && args.section.trim().length > 0) {
@@ -201,7 +201,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
     {
         definition: {
             name: 'synaipse_delete_note',
-            description: 'Delete a note and drop it from the index (recoverable from version history when enabled).',
+            description: 'Delete a note and drop it from the index (recoverable from version history when enabled). Clients that support it ask the user to confirm first; then the result may be {deleted: false, reason}.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -212,6 +212,21 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
         },
         handle: async (args, ctx) => {
             const id = asString(args.id, 'id');
+            const confirm = ctx?.call?.confirm;
+
+            if (confirm !== undefined) {
+                const note = service.tryReadNote(id);
+                if (note === undefined) throw new Error(`Note not found: ${id}`);
+                const restorable = (await service.noteHistory(id, 1)).length > 0;
+                const answer = await confirm(
+                    `Delete the note "${note.title}" (${id})? `
+                    + (restorable ? 'It can be restored from the version history.' : 'It is not in the version history and cannot be restored.')
+                );
+                if (answer !== 'accept') {
+                    return {response: ok({deleted: false, reason: answer === 'decline' ? 'declined by the user' : 'cancelled by the user'})};
+                }
+            }
+
             await service.deleteNote(id, ctx);
             return {response: ok({deleted: true}), event: {kind: 'delete', touched: [id]}};
         }
@@ -292,9 +307,9 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = resolveNoteId(service, asString(args.id, 'id'));
-            await enforceReadConsent(service, id);
+            await enforceReadConsent(service, id, ctx?.call);
             const history = await service.noteHistory(id, asLimit(args.limit, 20));
 
             if (typeof args.diff === 'string' && args.diff.length > 0) {
@@ -494,7 +509,7 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
 
             // Same consent gate as read_note: edit_note returns the note,
             // so a pending/denied note must not leak through here.
-            const existing = await enforceReadConsent(service, id);
+            const existing = await enforceReadConsent(service, id, ctx?.call);
             if (typeof args.expectedHash === 'string' && args.expectedHash !== existing.hash) {
                 throw new Error(`${id} changed since you read it (expected hash ${args.expectedHash}, now ${existing.hash}). Read it again and reapply your edits.`);
             }

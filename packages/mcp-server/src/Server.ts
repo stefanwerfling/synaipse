@@ -4,22 +4,28 @@ import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js';
-import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {CallToolRequestSchema, ElicitResultSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {createLogger} from '@synaipse/core';
 import type {Config, UserStore} from '@synaipse/core';
 import {auditContextStorage, NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
 import {NoopHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
-import {buildTools, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
+import {buildTools, type ToolCall, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
 import {buildInstructions} from './Instructions.js';
 import {resolveContextFromRequest} from './Project.js';
 import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
 import {registerExtras, withNoteLink} from './Resources.js';
+import {resolveSessionLimits, SessionTable} from './Sessions.js';
 
 const log = createLogger('mcp');
 
 const ADMIN_FLUSH_AUTH_CACHE_PATH = '/admin/flush-auth-cache';
+
+/** While a tool runs and the client asked for progress, a notification this often (keeps request timeouts from firing). */
+const PROGRESS_HEARTBEAT_MS = 5_000;
+/** A confirmation the user leaves open this long counts as cancelled. */
+const ELICIT_TIMEOUT_MS = 10 * 60_000;
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
 
@@ -149,9 +155,50 @@ export const buildMcpServer = (
         }
     };
 
-    server.setRequestHandler(CallToolRequestSchema, async (request): Promise<ToolResponse> => {
-        const response = await runTool(request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
-        return service === undefined ? response : withNoteLink(request.params.name, response);
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<ToolResponse> => {
+        const name = request.params.name;
+        const progressToken = request.params._meta?.progressToken;
+        let step = 0;
+
+        // Progress values must increase; one counter for the heartbeat and the tool's own messages.
+        const progress = progressToken === undefined
+            ? undefined
+            : (message: string): Promise<void> => extra.sendNotification({
+                method: 'notifications/progress',
+                params: {progressToken, progress: ++step, message}
+            }).catch(() => undefined);
+
+        // Form elicitation: an empty capability object means form (older clients).
+        const elicitation = server.getClientCapabilities()?.elicitation;
+        const confirm = elicitation === undefined || (elicitation.form === undefined && elicitation.url !== undefined)
+            ? undefined
+            : async (message: string): Promise<'accept' | 'decline' | 'cancel'> => {
+                try {
+                    const result = await server.request(
+                        {method: 'elicitation/create', params: {message, requestedSchema: {type: 'object', properties: {}}}},
+                        ElicitResultSchema,
+                        {relatedRequestId: extra.requestId, signal: extra.signal, timeout: ELICIT_TIMEOUT_MS}
+                    );
+                    return result.action;
+                } catch (error) {
+                    // No answer (timeout, client error) never counts as yes.
+                    log.warn('elicitation failed, treated as cancel', {tool: name, error: error instanceof Error ? error.message : String(error)});
+                    return 'cancel';
+                }
+            };
+
+        const call: ToolCall = {signal: extra.signal, ...(progress !== undefined ? {progress} : {}), ...(confirm !== undefined ? {confirm} : {})};
+        const started = Date.now();
+        const heartbeat = progress === undefined
+            ? undefined
+            : setInterval(() => void progress(`${name} running for ${Math.round((Date.now() - started) / 1000)} s`), PROGRESS_HEARTBEAT_MS);
+
+        try {
+            const response = await runTool(name, (request.params.arguments ?? {}) as Record<string, unknown>, {...ctx, call});
+            return service === undefined ? response : withNoteLink(name, response);
+        } finally {
+            if (heartbeat !== undefined) clearInterval(heartbeat);
+        }
     });
 
     if (service !== undefined) {
@@ -180,6 +227,7 @@ export const buildMcpServer = (
  *     whitelist, path-prefix restriction).
  */
 interface McpSessionEntry {
+    id: string;
     transport: StreamableHTTPServerTransport;
     server: Server;
     tokenLabel: string;
@@ -211,7 +259,13 @@ export const buildMcpHttpHandler = (
     // an unknown session (404). We must therefore keep one transport +
     // Server per session across HTTP requests — a fresh transport per
     // request would always report "Server not initialized".
-    const sessions = new Map<string, McpSessionEntry>();
+    const limits = resolveSessionLimits();
+    const sessions = new SessionTable<McpSessionEntry>(limits, (id, entry) => {
+        log.info('mcp session expired', {session: id, token: entry.tokenLabel});
+        void entry.server.close();
+    });
+    const sweeper = setInterval(() => sessions.sweep(), Math.min(60_000, limits.ttlMs));
+    sweeper.unref();
 
     if (!authConfigured) {
         log.warn('no SYNAIPSE_MCP_TOKEN, server.tokens, or user store configured — HTTP endpoint is unauthenticated. '
@@ -298,7 +352,7 @@ export const buildMcpHttpHandler = (
                     res.end('session bound to a different token');
                     return;
                 }
-                await runHandle(existing.transport);
+                await sessions.use(existing.id, () => runHandle(existing.transport));
                 return;
             }
 
@@ -325,7 +379,7 @@ export const buildMcpHttpHandler = (
             const transport = new StreamableHTTPServerTransport({
                 sessionIdGenerator: () => randomUUID(),
                 onsessioninitialized: (id: string) => {
-                    sessions.set(id, {transport, server, tokenLabel});
+                    sessions.set(id, {id, transport, server, tokenLabel});
                 }
             });
 
@@ -358,7 +412,8 @@ export const buildMcpHttpHandler = (
     return Object.assign(handler, {
         /** Close every open MCP session (embed close / shutdown). */
         closeAll: async (): Promise<void> => {
-            const open = [...sessions.values()];
+            clearInterval(sweeper);
+            const open = sessions.values();
             sessions.clear();
             await Promise.allSettled(open.map((entry) => entry.server.close()));
         }

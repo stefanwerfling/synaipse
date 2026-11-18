@@ -89,7 +89,7 @@ export const graphTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = resolveNoteId(service, asString(args.id, 'id'));
             const direction = asDirection(args.direction);
             const result: Record<string, unknown> = {id};
@@ -102,7 +102,7 @@ export const graphTools = (service: SynaipseService): ToolHandler[] => [
                 touched = [...touched, ...filtered.items.slice(0, 5)];
             }
             if (direction !== 'in') {
-                const note = await enforceReadConsent(service, id);
+                const note = await enforceReadConsent(service, id, ctx?.call);
                 const unresolved = service.unresolvedWikilinks(note);
                 const typed = extractTypedLinks(note.frontmatter);
                 result.out = note.wikilinks;
@@ -150,9 +150,9 @@ export const graphTools = (service: SynaipseService): ToolHandler[] => [
                 required: ['id']
             }
         },
-        handle: async (args) => {
+        handle: async (args, ctx) => {
             const id = asString(args.id, 'id');
-            const note = await enforceReadConsent(service, id);
+            const note = await enforceReadConsent(service, id, ctx?.call);
             const typed = extractTypedLinks(note.frontmatter);
             return {
                 response: ok({wikilinks: note.wikilinks, typed}),
