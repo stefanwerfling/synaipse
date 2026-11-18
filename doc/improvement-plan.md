@@ -146,6 +146,38 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 
 ---
 
+### Status P5 (2026-11-18): umgesetzt (jsNGraph 0.2.0 + S1 lokaler Graph)
+
+Im jsNGraph-Repo (`9022c86`, `cc8b858`, Release `815e977`; `main` gepusht, der Tag `v0.2.0` liegt nur lokal, Synaipse pinnt deshalb den Commit-SHA):
+
+- J1 Camera in NGraph (`panZoom` opt-in, `fit`/`focusNode`/`zoomTo`/Viewport, animierte Flüge).
+- J2 Style-Layer (`dot`, `color`/`size`/`group`, Edge-`kind`/`directed`/`dashed`/`label`, `EdgeKindPresets.knowledge`, `styleNode`/`styleEdge`).
+- J3 Quadtree für Hit-Test und Lasso, Viewport-Culling.
+- J7 highlight/filter/neighborhood/Selection/Lasso und Events.
+- J9 On-demand-`RenderLoop` und Pause bei hidden bzw. 0×0. Dafür bekam `ForceLayout` ein Alpha-Cooling (Vorgriff auf J5), sonst wäre der Loop nie leer gelaufen.
+- J10 `Theme.fromCssVars`.
+- J13 Version 0.2.0 mit Tag.
+- Neues Beispiel `examples/knowledge.html`. 66 Tests grün, alle Beispiele im Browser geprüft.
+
+S1 in Synaipse:
+
+- Backend: `GET /api/graph/local?id&depth&limit` (`service/LocalGraph.ts`). Wikilinks in beide Richtungen plus typisierte Frontmatter-Links, begrenzt auf 1 bis 3 Hops und 60 Knoten, die besser vernetzten zuerst.
+- UI: `LocalGraphPanel` im Viewer, als erster Block über „Linked from“.
+  - Radial-Layout, Ring = Hop. Ring 2 wird nach dem Elternwinkel rotiert, damit sich weniger Kanten kreuzen.
+  - Knoten nach Ordner eingefärbt; typisierte Kanten gerichtet und beschriftet.
+  - Klick öffnet die Notiz, Hover hebt die Nachbarn hervor.
+  - Umschalter 1/2 Hops, Fit-Button; Zustand (aufgeklappt, Tiefe) bleibt gespeichert.
+  - Theme kommt per `Theme.fromCssVars` aus den Synaipse-Tokens.
+  - jsNGraph wird lazy geladen: Der Haupt-Chunk schrumpft von 557 auf 503 KB, jsNGraph liegt als eigener 106-KB-Chunk vor.
+- Git-Dependencies brauchen unter npm 12 `npm install --allow-git=root`.
+
+Offen bzw. Folgearbeit:
+
+- Label-Kollision in dichten Graphen (J4/P6).
+- Mindest-Trefferfläche kleiner Punkte (6 px) ist knapp.
+- Subpath-Exports in jsNGraph, damit der Lazy-Chunk nicht den Rect-Kit und ModelView mitschleppt.
+- Tag `v0.2.0` pushen.
+
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.

@@ -15,6 +15,14 @@ const noContent = async (response: Response): Promise<void> => {
     }
 };
 
+/** Ego network of one note (GET /api/graph/local), see service LocalGraph.ts. */
+export interface LocalGraphData {
+    center: string;
+    nodes: Array<{id: string; title: string; hop: number; degree: number}>;
+    edges: Array<{from: string; to: string; kind: 'wikilink' | 'supersedes' | 'duplicates' | 'relates_to' | 'replies_to'}>;
+    truncated: boolean;
+}
+
 export interface WriteNoteInput {
     path: string;
     content: string;
@@ -158,6 +166,13 @@ export const api = {
     },
     getGraph: async (): Promise<Graph> => {
         return json(await fetch(apiUrl('/api/graph')));
+    },
+    getLocalGraph: async (id: string, depth = 1, limit = 60): Promise<LocalGraphData> => {
+        const url = new URL(apiUrl('/api/graph/local'), window.location.origin);
+        url.searchParams.set('id', id);
+        url.searchParams.set('depth', String(depth));
+        url.searchParams.set('limit', String(limit));
+        return json(await fetch(url));
     },
     getGraphLayout: async (options: {force?: boolean} = {}): Promise<GraphLayout> => {
         const now = Date.now();

@@ -3887,6 +3887,111 @@ body.synaipse-sidebar-resizing {
     letter-spacing: 0.06em;
 }
 
+/* Local graph (plan P5 / S1): ego network of the open note, drawn by jsNGraph. */
+.synaipse-root .local-graph-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.synaipse-root .local-graph.is-collapsed .local-graph-head {
+    border-bottom: none;
+}
+
+.synaipse-root .local-graph-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 4px var(--space-2);
+    background: transparent;
+    border: none;
+    border-radius: var(--r-2);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+}
+
+.synaipse-root .local-graph-toggle:hover {
+    color: var(--text-0);
+}
+
+.synaipse-root .local-graph-toggle:focus-visible,
+.synaipse-root .local-graph-depth-btn:focus-visible,
+.synaipse-root .local-graph-fit:focus-visible {
+    outline: none;
+    box-shadow: var(--accent-glow);
+}
+
+.synaipse-root .local-graph-chevron {
+    display: inline-block;
+    transition: transform var(--t-fast);
+}
+
+.synaipse-root .local-graph.is-collapsed .local-graph-chevron {
+    transform: rotate(-90deg);
+}
+
+.synaipse-root .local-graph-status {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.synaipse-root .local-graph-depth {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    overflow: hidden;
+}
+
+.synaipse-root .local-graph-depth-btn,
+.synaipse-root .local-graph-fit {
+    padding: 2px var(--space-2);
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.synaipse-root .local-graph-depth-btn + .local-graph-depth-btn {
+    border-left: 1px solid var(--border);
+}
+
+.synaipse-root .local-graph-depth-btn.is-active {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.synaipse-root .local-graph-fit {
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+}
+
+.synaipse-root .local-graph-depth-btn:hover,
+.synaipse-root .local-graph-fit:hover {
+    color: var(--text-0);
+}
+
+.synaipse-root .local-graph-stage {
+    position: relative;
+    height: 300px;
+}
+
+.synaipse-root .local-graph-body[hidden] {
+    display: none;
+}
+
 .synaipse-root .viewer-links-count {
     background: var(--bg-3);
     color: var(--text-1);

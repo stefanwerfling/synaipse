@@ -37,6 +37,7 @@
     "cytoscape": "^3.30.4",
     "dotenv": "^16.4.7",
     "highlight.js": "^11.11.1",
+    "jsngraph": "github:stefanwerfling/jsNGraph#815e9773d2a246fe6faa6e2d310e3606981a3e11",
     "jszip": "^3.10.1",
     "marked": "^15.0.4",
     "marked-highlight": "^2.2.4",

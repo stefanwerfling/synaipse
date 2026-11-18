@@ -6,6 +6,7 @@ import {clear, el, portalHost} from './Dom.js';
 import {listDraftIds} from './Drafts.js';
 import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
+import {LocalGraphPanel} from './LocalGraphPanel.js';
 import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {exportNoteToPdf} from './PdfExport.js';
@@ -221,6 +222,7 @@ export class NotesPanel {
     private sidebar!: HTMLElement;
     private viewer!: HTMLElement;
     private tocPanel!: TocPanel;
+    private localGraph!: LocalGraphPanel;
     private tocObserver: IntersectionObserver | null = null;
     private tocVisible = new Set<string>();
     private tocOrder = new Map<string, number>();
@@ -314,6 +316,8 @@ export class NotesPanel {
         this.resolver = buildWikilinkResolver(notes);
         this.snippetCache.clear();
         this.renderNoteList();
+        // The note set changed (SSE / write): links around the open note may have too.
+        this.localGraph?.refresh();
     }
 
     private searchTitles(query: string): readonly WikilinkMatch[] {
@@ -342,6 +346,7 @@ export class NotesPanel {
         this.disposeViewer();
         this.disposeEditor();
         this.disposeTocObserver();
+        this.localGraph.destroy();
         this.closeOverflowMenu();
         this.unsubscribeGroupMode();
         this.unsubscribeCollapsed();
@@ -399,6 +404,8 @@ export class NotesPanel {
         this.tocPanel = new TocPanel({
             onNavigate: (id) => this.scrollToHeading(id)
         });
+
+        this.localGraph = new LocalGraphPanel((id) => void this.handleSelect(id));
 
         this.viewer = el('main', {class: 'viewer'});
         this.renderEmpty();
@@ -1642,11 +1649,19 @@ export class NotesPanel {
 
         const backlinks = this.active.backlinks;
         const outgoing = this.active.wikilinks;
+        const typed = extractTypedLinks(this.active.frontmatter);
 
-        if (backlinks.length === 0 && outgoing.length === 0) return;
+        if (backlinks.length === 0 && outgoing.length === 0 && typed.length === 0) {
+            this.localGraph.element.remove();
+            this.localGraph.setNote(null);
+            return;
+        }
 
         const noteById = new Map(this.notes.map((n) => [n.id, n]));
         const section = el('section', {class: 'viewer-links'});
+
+        section.appendChild(this.localGraph.element);
+        this.localGraph.setNote(this.active.id);
 
         if (backlinks.length > 0) {
             section.appendChild(this.renderBacklinks(backlinks, noteById));
