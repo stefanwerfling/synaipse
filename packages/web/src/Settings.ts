@@ -5,6 +5,8 @@ import {AdminPanel} from './AdminPanel.js';
 
 export interface SettingsOptions {
     account: {id: number; email: string; isAdmin: boolean};
+    /** After sign-out; the boot code shows the login screen again (no page reload). */
+    onSignedOut?: () => void;
 }
 
 type TabKey = 'tokens' | 'admin';
@@ -65,7 +67,9 @@ export class Settings {
                 click: () => {
                     void (async () => {
                         await logout();
-                        location.reload();
+                        this.close();
+                        if (this.opts.onSignedOut !== undefined) this.opts.onSignedOut();
+                        else location.reload();
                     })();
                 }
             }

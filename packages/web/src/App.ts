@@ -23,6 +23,7 @@ import {Search} from './Search.js';
 import {Settings} from './Settings.js';
 import {TagBar, TagEntry} from './TagBar.js';
 import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
+import {Disposables} from './Disposables.js';
 
 const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
 const STORAGE_HIDE_ISOLATED = 'synaipse.graph.hideIsolated';
@@ -45,7 +46,8 @@ const HEAT_TICK_MS = 15_000;
 const HUGE_GRAPH_FORCE_ATLAS = 20_000;
 const HUGE_GRAPH_WARN_INTERACTIVE = 5_000;
 
-type Tab = 'notes' | 'graph' | 'canvas' | 'roadmap' | 'benchmarks' | 'chat' | 'jobs' | 'activity' | 'audit' | 'consent';
+const TABS = ['notes', 'graph', 'canvas', 'roadmap', 'benchmarks', 'chat', 'jobs', 'activity', 'audit', 'consent'] as const;
+type Tab = typeof TABS[number];
 
 export class App {
     public readonly element: HTMLElement;
@@ -100,11 +102,15 @@ export class App {
     private showCluster: PersistentValue<boolean>;
     private showCommunities: PersistentValue<boolean>;
     private viewMode: PersistentValue<'2d' | '3d' | 'atlas'>;
-    private heatTickTimer: number | null = null;
     private heatRaf: number | null = null;
     private reloadTimer: number | null = null;
+    /** Everything the app starts; released by destroy() (plan P3 / D1). */
+    private readonly life = new Disposables();
 
-    public constructor(private readonly account: {id: number; email: string; isAdmin: boolean} | null = null) {
+    public constructor(
+        private readonly account: {id: number; email: string; isAdmin: boolean} | null = null,
+        private readonly appOpts: {onSignedOut?: () => void} = {}
+    ) {
         this.selectedTags = new PersistentValue<ReadonlySet<string>>(
             STORAGE_SELECTED_TAGS,
             EMPTY_TAG_SET,
@@ -341,8 +347,63 @@ export class App {
         host.appendChild(this.palette.element);
         this.events.start();
         this.consentPanel.start();
-        this.heatTickTimer = window.setInterval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
+        this.life.interval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
         await Promise.all([this.loadNotes(), this.installSearch()]);
+    }
+
+    /**
+     * Tear the app down completely: SSE streams, timers, animation frames,
+     * global listeners, panels and DOM. After this the host may mount a
+     * fresh App into the same container (plan P3 / E1).
+     */
+    public destroy(): void {
+        this.life.dispose();
+        if (this.reloadTimer !== null) window.clearTimeout(this.reloadTimer);
+        if (this.heatRaf !== null) cancelAnimationFrame(this.heatRaf);
+        this.reloadTimer = null;
+        this.heatRaf = null;
+
+        this.events.stop();
+        this.consentPanel.stop();
+        this.activityLog.destroy();
+        this.search?.destroy();
+        this.graphView?.destroy();
+        this.graphView = null;
+        this.palette.destroy();
+        this.importDialog.close();
+        this.settings?.close();
+        this.chatPanel.destroy();
+        this.notesPanel.destroy();
+        this.canvasPanel.destroy();
+        this.jobsPanel.destroy();
+        for (const value of [this.selectedTags, this.hideIsolated, this.showHulls, this.showHeat, this.heatState,
+            this.showRoomGrid, this.showCluster, this.showCommunities, this.viewMode]) {
+            value.destroy();
+        }
+        this.element.remove();
+    }
+
+    /** Host tab became visible / hidden (forwarded to the active panel). */
+    public onShow(): void {
+        if (this.tab === 'chat') this.chatPanel.onShow();
+    }
+
+    public onHide(): void {
+        if (this.tab === 'chat') this.chatPanel.onHide();
+        if (this.tab === 'canvas') this.canvasPanel.onHide();
+    }
+
+    /** Route from the host: a tab name, or anything else is opened as a note. */
+    public navigate(route: string): void {
+        const target = route.replace(/^#?\/?/, '');
+        if ((TABS as readonly string[]).includes(target)) {
+            void this.switchTab(target as Tab);
+            return;
+        }
+        if (target.length > 0) {
+            this.notesPanel.openNote(target);
+            void this.switchTab('notes');
+        }
     }
 
     private lastEventNode: {id: string; ts: number} | null = null;
@@ -558,13 +619,16 @@ export class App {
             on: {click: () => toggleTheme()}
         }) as HTMLButtonElement;
         this.updateThemeToggle(getTheme());
-        onThemeChange((theme) => this.updateThemeToggle(theme));
+        this.life.add(onThemeChange((theme) => this.updateThemeToggle(theme)));
 
         const trailing: HTMLElement[] = [importBtn, this.themeToggleBtn, this.activityBtn];
 
         if (this.account !== null) {
             const account = this.account;
-            this.settings = new Settings({account});
+            this.settings = new Settings({
+                account,
+                ...(this.appOpts.onSignedOut !== undefined ? {onSignedOut: this.appOpts.onSignedOut} : {})
+            });
             const accountBtn = el('button', {
                 class: 'topbar-account',
                 attrs: {type: 'button', title: `Signed in as ${account.email} — open account settings`},

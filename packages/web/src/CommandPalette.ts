@@ -35,12 +35,18 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
     private cursor = 0;
     private open = false;
     private backdrop!: HTMLElement;
+    private readonly listeners = new AbortController();
 
     public constructor(private readonly cb: PaletteCallbacks) {
         this.element = el('div', {class: 'palette-wrap', attrs: {hidden: 'true'}});
         this.build();
 
-        document.addEventListener('keydown', (event) => this.onGlobalKey(event));
+        document.addEventListener('keydown', (event) => this.onGlobalKey(event), {signal: this.listeners.signal});
+    }
+
+    public destroy(): void {
+        this.listeners.abort();
+        this.element.remove();
     }
 
     public setNotes(notes: readonly T[]): void {

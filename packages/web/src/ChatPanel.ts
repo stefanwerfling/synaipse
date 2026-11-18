@@ -734,6 +734,11 @@ export class ChatPanel {
         }
     }
 
+    /** Unmount: cancel a running chat/research stream. */
+    public destroy(): void {
+        this.stop();
+    }
+
     private setStreaming(active: boolean): void {
         this.streaming = active;
         this.stopBtn.hidden = !active;

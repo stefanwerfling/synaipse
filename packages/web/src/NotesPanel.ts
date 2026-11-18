@@ -254,6 +254,7 @@ export class NotesPanel {
     private chatEnabled = false;
     private selectionBtn: HTMLButtonElement | null = null;
     private summarizeAbort: AbortController | null = null;
+    private readonly selectionListeners = new AbortController();
     private selectionListenersAttached = false;
 
     // virtualised list state
@@ -337,6 +338,7 @@ export class NotesPanel {
     }
 
     public destroy(): void {
+        this.selectionListeners.abort();
         this.disposeViewer();
         this.disposeEditor();
         this.disposeTocObserver();
@@ -1462,14 +1464,15 @@ export class NotesPanel {
             window.setTimeout(() => this.showSelectionButton(host), 0);
         };
 
-        document.addEventListener('mouseup', onUp);
-        document.addEventListener('keyup', onUp);
+        const signal = this.selectionListeners.signal;
+        document.addEventListener('mouseup', onUp, {signal});
+        document.addEventListener('keyup', onUp, {signal});
         document.addEventListener('selectionchange', () => {
             const sel = window.getSelection();
             if (sel === null || sel.toString().trim().length === 0) {
                 this.hideSelectionButton();
             }
-        });
+        }, {signal});
     }
 
     private showSelectionButton(host: HTMLElement): void {
