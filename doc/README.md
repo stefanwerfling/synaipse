@@ -13,6 +13,7 @@ Setup, reference and integration guides for [Synaipse](../README.md).
 - [Vault format](vault-format.md) — frontmatter, wikilinks, tags, file layout
 - [MCP tools](mcp-tools.md) — reference for every MCP tool
 - [Web UI](web-ui.md) — the browser UI and its HTTP API
+- [Embedding](embedding.md) — `mount()` and `startSynaipseEmbed()`: the contract for hosts like PKG Studio
 
 ## Deep dives
 

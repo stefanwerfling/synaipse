@@ -123,6 +123,27 @@ Suite 1127 grün (25 übersprungen), Lint ohne Fehler.
 
 **Verhaltensänderungen:** Der erste Start legt `.synaipse/state.db` an und benennt `.synaipse-index.json` um (die Rücksicherung ist einfaches Zurückbenennen, solange `state.db` gelöscht wird). Walker und Watcher ignorieren `.synaipse/` und `.ngit/`. Embed-Fortschritt pro Batch erscheint nur noch mit `SYNAIPSE_LOG_LEVEL=debug`.
 
+
+### Status P3 (2026-11-18): Embed-Vertrag umgesetzt, committet (`868f12d`..`d35131d`)
+
+Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding.md) beschrieben. Geprüft im Browser gegen eine Wegwerf-Vault: Standalone-UI in beiden Themes und Lazy-Tabs. Dazu eine simulierte Host-Seite mit gleichnamigen Klassen: kein Style-Leck, Ctrl+K bei verstecktem Tab ignoriert. `unmount` schließt beide SSE-Streams, alle Intervalle, DOM und Portal; ein erneuter Mount funktioniert.
+
+| Punkt | Stand |
+|---|---|
+| E1 `apiUrl()` | erledigt: alle 64 `/api`-Literale. `mount({apiBase})` setzt die Basis, der Host braucht keinen globalen Rewrite mehr |
+| E1 `mount → MountHandle` | erledigt: `unmount`, `setTheme`, `navigate`, `onShow`/`onHide`. Login und Logout mounten neu statt `location.reload()`. `Main.ts` nutzt denselben `mount()` |
+| E1 Theme am Container, Shortcuts nur sichtbar | erledigt. hljs beide Themes gescoped und einmal installiert |
+| E1 `localStorage`-Präfix pro Instanz | offen: Schlüssel sind schon `synaipse.*`, eine Instanz pro Seite reicht vorerst |
+| D1 `Disposables`, `View`, Tab-Registry, Lazy-Panels | erledigt (`Disposables.ts`, `Tabs.ts`). Haupt-Chunk 643 → 495 kB. **Offen:** reaktiver Kern (`Signal`) → P7 |
+| D3 Scoping | erledigt: jede Regel unter `.synaipse-root` (Test als Wächter statt stylelint), Portal-Layer für Overlays, ein alter Kommentar-Bug (`.bm-kpis` verworfen) behoben. **Offen:** Datei-Split in `@layer`s, 63 Hex-Farben auf Tokens, Breakpoints → P7 |
+| E2 explizite Config, `ready`/`health`, vollständiges `close`, Body robust, Typ-Export | erledigt (`startSynaipseEmbed`, `server/body.ts`, Exports `@synaipse/web/embed` und `/mount`) |
+| E2 `registerTools` beim Host-Gateway, Auth-Brücke | offen, hängt an §13.2 |
+| PKG-Studio-Seite | offen: Umstellung im Host-Repo, Schritte in embedding.md („Migrating PKG Studio“) |
+
+**Nebenbefund:** Zeigte `SYNAIPSE_INDEX_CACHE` auf eine andere Vault, hat die Migration aus P1 deren Datei umbenannt. Behoben in `4e0d8b7`: Umbenannt wird nur noch innerhalb der eigenen Vault.
+
+**Verhaltensänderungen:** Die Klasse `.root` bleibt (Host-CSS hängt daran); die eigenen Regeln nutzen `.synaipse-app` mit `height: 100%` statt `100vh`. Overlays liegen in `body > .synaipse-portal` statt direkt in `<body>`.
+
 ---
 
 ## 3. Säule A: Performance und Skalierung (Backend)
