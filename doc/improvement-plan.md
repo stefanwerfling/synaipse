@@ -154,7 +154,11 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 | A5 ETag/304 + vorkomprimierte Buffer für `/api/graph`, `/api/graph/layout` | erledigt (`e469062`, `cached-json.ts`): einmal stringify + gzip pro Objekt-Version, `Cache-Control: no-cache` |
 | A5 Limits clampen | erledigt: `intParam` für search, history, activity, prime, local graph |
 | A3 `suggestLinks` als Hintergrund-Job, HF-Embedder/Reranker im Worker-Pool | offen |
-| A4 Chunk-Diff-Embedding, Qdrant `query`-API, Query-Embedding-Cache, paralleles `Vault.load`, Watcher-Ignores, Speicher | offen |
+| A4 Chunk-Diff-Embedding | erledigt (`eea74ad`): Hash aus (Embedder-Fingerprint, Text) im Payload. Nur geänderte Chunks werden embedded, verschobene übernehmen ihren gespeicherten Vektor. Gegen Qdrant 1.18 geprüft: Anhängen an ein Log embedded 1 von 3 Chunks. Bestehende Punkte ohne Hash werden beim nächsten Schreiben einmal neu embedded |
+| A4 Qdrant `query`-API mit `group_by: noteId` | erledigt (`eea74ad`): ein Treffer pro Notiz, Fallback auf `search` + Dedupe. **Offen:** serverseitige Projekt-/Pfad-Filter |
+| A4 Query-Embedding-Cache | erledigt als In-Memory-LRU (256). **Offen:** Persistenz in SQLite |
+| A4 paralleles `Vault.load`, Watcher-Ignores | erledigt (`c62c4bd`): 32 parallele Reads, gemeinsame Ignore-Regel für Walker und Watcher. Nicht gemessen |
+| A4 Speicher (Body lazy laden) | offen |
 | A5 Router-Table, Cursor-Pagination, Graph-Deltas per SSE, JobManager | offen |
 | D4/D5 Bundle-Budget, Chat-Streaming, Listen-Virtualisierung | offen |
 
