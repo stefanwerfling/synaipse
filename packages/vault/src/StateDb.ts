@@ -38,7 +38,15 @@ const MIGRATIONS: readonly string[] = [
         finished_at REAL,
         record      TEXT NOT NULL
     );
-    CREATE INDEX jobs_started_at ON jobs (started_at)`
+    CREATE INDEX jobs_started_at ON jobs (started_at)`,
+    // 3: persistent query-embedding cache (plan P4 / A4). Keyed by a hash
+    // of embedder fingerprint + query text; the text itself is not kept.
+    `CREATE TABLE query_vectors (
+        key     TEXT PRIMARY KEY,
+        vector  BLOB NOT NULL,
+        used_at REAL NOT NULL
+    );
+    CREATE INDEX query_vectors_used_at ON query_vectors (used_at)`
 ];
 
 export class StateDb {

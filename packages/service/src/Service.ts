@@ -57,7 +57,7 @@ import {
 import type {ChatAdapter} from '@synaipse/core';
 import {ChatRepo} from './ChatRepo.js';
 import {FilesystemChatAdapter} from './FilesystemChatAdapter.js';
-import {EntryStore} from '@synaipse/vault';
+import {EntryStore, QueryVectorCache} from '@synaipse/vault';
 export type {ChatEvent, ChatSource, ChatOptions, ChatMessage, ChatPrivacyStats, SummarizeEvent} from './Chat.js';
 export type {RedactionHit, RedactionResult} from './Privacy.js';
 export type {ChatSession, ChatSummary, ChatTurn, ChatSourceRef} from './ChatStore.js';
@@ -344,6 +344,8 @@ export class SynaipseService {
     private readonly history: History;
     private readonly assetStore: AssetStore;
     private readonly index: VectorIndex | null;
+    /** Query embeddings in state.db (local mode only); closed in stop(). */
+    private queryVectors: QueryVectorCache | null = null;
     /** Embedder fingerprint (see embedderFingerprint); null when embeddings are off. */
     private readonly embedModel: string | null;
     /** Notes whose last embed attempt failed; retried on their next write and on start. */
@@ -466,10 +468,22 @@ export class SynaipseService {
             }
         });
 
+        // Second-level query cache in state.db (plan P4 / A4). Local mode
+        // only: with a notes override (server mode) there is no vault-local
+        // state file to share.
+        if (overrides.notes === undefined) {
+            try {
+                this.queryVectors = new QueryVectorCache(config.statePath ?? path.join(config.vaultPath, '.synaipse', 'state.db'));
+            } catch (error) {
+                log.warn('persistent query cache unavailable; in-memory only', {error});
+            }
+        }
+
         this.index = new VectorIndex({
             embedder,
             store,
             fingerprint: this.embedModel,
+            ...(this.queryVectors !== null ? {persistentQueryCache: this.queryVectors} : {}),
             onBatch: ({batch, batches, chunks, chars}) => {
                 log.debug('embed batch', {batch, batches, chunks, chars});
             },
@@ -753,6 +767,8 @@ export class SynaipseService {
         await this.watcher.stop();
         await this.notes.flushEntries();
         this.notes.closeLocal?.();
+        this.queryVectors?.close();
+        this.queryVectors = null;
     }
 
     public getLastIndexingStats(): IndexingStats {

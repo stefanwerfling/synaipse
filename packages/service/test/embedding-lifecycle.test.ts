@@ -227,3 +227,28 @@ describe('embedding lifecycle', () => {
         expect(after).toBe(1);
     });
 });
+
+describe('persistent query cache', () => {
+    it('a repeated query after a restart does not call the embedder again', async () => {
+        await writeNote(vaultDir, 'a.md', '# A\n\nalpha');
+
+        const first = await boot();
+        await first.search('what is alpha', 'semantic', 5);
+        const afterFirst = embedder.embeddedTexts;
+        await first.stop();
+
+        const second = await boot();
+        await second.search('what is alpha', 'semantic', 5);
+        expect(embedder.embeddedTexts).toBe(afterFirst);
+
+        await second.search('something new', 'semantic', 5);
+        expect(embedder.embeddedTexts).toBe(afterFirst + 1);
+        await second.stop();
+
+        // A different embedder model never reuses vectors of the old one.
+        const third = await boot('voyage-other');
+        const beforeQuery = embedder.embeddedTexts;
+        await third.search('what is alpha', 'semantic', 5);
+        expect(embedder.embeddedTexts).toBe(beforeQuery + 1);
+    });
+});

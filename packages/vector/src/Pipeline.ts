@@ -20,7 +20,26 @@ export interface VectorIndexOptions {
     fingerprint?: string;
     /** Size of the in-memory query-embedding LRU (0 disables). */
     queryCacheSize?: number;
+    /**
+     * Second level behind the in-memory LRU that survives restarts
+     * (plan P4 / A4), e.g. the vault's `state.db`.
+     */
+    persistentQueryCache?: PersistentQueryCache;
 }
+
+/**
+ * Storage port for query embeddings. Keys are opaque hashes of embedder
+ * fingerprint + query text (see {@link queryCacheKey}), so an
+ * implementation never sees the query and a model switch never hits
+ * vectors of the old model. Must not throw.
+ */
+export interface PersistentQueryCache {
+    get(key: string): number[] | undefined;
+    set(key: string, vector: readonly number[]): void;
+}
+
+export const queryCacheKey = (fingerprint: string, query: string): string =>
+    createHash('sha1').update('query\0').update(fingerprint).update('\0').update(query).digest('hex');
 
 export interface BatchInfo {
     batch: number;
@@ -122,6 +141,7 @@ export class VectorIndex {
     private readonly onOversize: ((chunk: Chunk) => void) | undefined;
     private readonly fingerprint: string;
     private readonly queryCache: QueryEmbeddingCache;
+    private readonly persistentQueryCache: PersistentQueryCache | undefined;
 
     public constructor(opts: VectorIndexOptions) {
         this.embedder = opts.embedder;
@@ -133,6 +153,7 @@ export class VectorIndex {
         this.onOversize = opts.onOversize;
         this.fingerprint = opts.fingerprint ?? `dim:${opts.embedder.dimension}`;
         this.queryCache = new QueryEmbeddingCache(opts.queryCacheSize ?? 256);
+        this.persistentQueryCache = opts.persistentQueryCache;
     }
 
     public async indexNote(note: Note): Promise<void> {
@@ -321,8 +342,17 @@ export class VectorIndex {
             return cached;
         }
 
+        const key = this.persistentQueryCache !== undefined ? queryCacheKey(this.fingerprint, query) : '';
+        const stored = this.persistentQueryCache?.get(key);
+
+        if (stored !== undefined) {
+            this.queryCache.set(query, stored);
+            return stored;
+        }
+
         const vector = await this.embedder.embedOne(query, 'query');
         this.queryCache.set(query, vector);
+        this.persistentQueryCache?.set(key, vector);
         return vector;
     }
 }

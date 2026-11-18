@@ -7,6 +7,8 @@ export {HashCache} from './Cache.js';
 export {EntryStore} from './EntryStore.js';
 export type {EntryCache, EntryStoreOptions} from './EntryStore.js';
 export {StateDb} from './StateDb.js';
+export {QueryVectorCache} from './QueryVectorCache.js';
+export type {QueryVectorCacheOptions} from './QueryVectorCache.js';
 export type {CacheEntry, TouchSeed} from './Cache.js';
 export {parseNote, extractWikilinks, extractTags} from './Parser.js';
 export {walkMarkdown, walkCanvas} from './Walker.js';
