@@ -207,7 +207,7 @@ export class JobsPanel {
     }
 
     private runningJobFor(scheduleId: string): JobRecord | undefined {
-        return this.jobs.find((j) => j.scheduleId === scheduleId && j.status === 'running');
+        return this.jobs.find((j) => j.scheduleId === scheduleId && (j.status === 'running' || j.status === 'queued'));
     }
 
     // ── list ────────────────────────────────────────────────────────────
@@ -355,6 +355,11 @@ export class JobsPanel {
         refs.bar.style.width = `${pct}%`;
         refs.bar.classList.toggle('failed', job.status === 'failed');
         refs.bar.classList.toggle('done', job.status === 'done');
+        if (job.status === 'queued') {
+            refs.progressLabel.textContent = 'queued';
+            refs.currentLabel.textContent = `waits for the running ${job.type} job`;
+            return;
+        }
         refs.progressLabel.textContent = job.progress.failed > 0
             ? `${job.progress.done}/${job.progress.total} · ${job.progress.failed} failed`
             : `${job.progress.done}/${job.progress.total}`;
@@ -371,6 +376,7 @@ export class JobsPanel {
             if (event.kind === 'snapshot') {
                 Object.assign(local, event.job);
             } else if (event.kind === 'progress') {
+                local.status = 'running';
                 local.progress = {
                     done: event.done, total: event.total, failed: event.failed,
                     ...(event.current !== undefined ? {current: event.current} : {})

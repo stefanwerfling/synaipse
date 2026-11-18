@@ -519,7 +519,7 @@ export type JobType =
     | 'crawl-github-stars'
     | 'crawl-code';
 
-export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
 
 export type GiteaIssueState = 'open' | 'closed' | 'all';
 

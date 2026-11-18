@@ -9,15 +9,23 @@ import {
     type GiteaIssueState
 } from '@synaipse/crawler';
 import {createLogger} from '@synaipse/core';
+import {MemoryJobStore, type JobStore} from './job-store.js';
 
 /**
  * In-process job manager. Wraps the service's bulk methods (relink, compile,
  * …) into long-running jobs the frontend can launch, watch and stop. Single
  * service instance → single vault watcher → no cache race vs the CLI tools.
  *
- * State is in-memory; restarting the server loses active+history. That's fine
- * for MVP — jobs are short, restart-rare, and the writes themselves are
- * already persisted via vault commits.
+ * Plan P4 / A5:
+ * - At most one running job per type; more of the same type wait as
+ *   `queued` and start in order. Two crawls of one kind would otherwise
+ *   compete for the same notes.
+ * - Records live in a {@link JobStore} (SQLite `state.db` in the web
+ *   server), so history survives a restart. A job that was running or
+ *   queued when the process died is marked failed on the next start; it
+ *   is not re-run on its own.
+ * - Every job runs inside `service.batch()`: one history commit and
+ *   grouped embedding per run instead of one per note.
  */
 
 export type JobType =
@@ -28,7 +36,7 @@ export type JobType =
     | 'crawl-github-stars'
     | 'crawl-code';
 
-export type JobStatus = 'running' | 'done' | 'failed' | 'stopped';
+export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
 
 export interface RelinkJobParams {
     prefix: string;
@@ -132,32 +140,87 @@ type Listener = (event: JobEvent) => void;
 
 const MAX_LOG_LINES = 50;
 const MAX_HISTORY = 30;
+/** Progress and log lines are written to the store at most this often. */
+const PERSIST_INTERVAL_MS = 1000;
+
+const log = createLogger('jobs');
 
 export class JobManager {
     private readonly jobs = new Map<string, JobRecord>();
     private readonly aborts = new Map<string, AbortController>();
     private readonly subscribers = new Map<string, Set<Listener>>();
+    /** Waiting job ids per type, in start order. */
+    private readonly queues = new Map<JobType, string[]>();
+    private readonly dirty = new Set<string>();
+    private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
     public constructor(
         private readonly service: SynaipseService,
         /** Source of DEVTO_API_KEY / GITHUB_TOKEN fallbacks (embed: explicit, not process.env). */
-        private readonly env: NodeJS.ProcessEnv = process.env
-    ) {}
+        private readonly env: NodeJS.ProcessEnv = process.env,
+        private readonly store: JobStore = new MemoryJobStore()
+    ) {
+        this.restore();
+    }
 
-    /** Abort every running job (embed close). */
+    /**
+     * Load the history. Jobs still `running`/`queued` in the store belong
+     * to a process that is gone: they are closed as failed, not resumed,
+     * because a crawl or relink half-done should be re-started on purpose.
+     */
+    private restore(): void {
+        let records: JobRecord[];
+        try {
+            records = this.store.loadRecent(MAX_HISTORY);
+        } catch (error) {
+            log.warn('job history unreadable; starting empty', {error});
+            return;
+        }
+
+        for (const job of records.reverse()) {
+            if (job.status === 'running' || job.status === 'queued') {
+                job.error = job.status === 'running'
+                    ? 'interrupted: the server stopped while this job was running'
+                    : 'not started: the server stopped while this job was queued';
+                job.status = 'failed';
+                job.finishedAt ??= Date.now();
+                this.persistNow(job);
+            }
+            this.jobs.set(job.id, job);
+        }
+    }
+
+    /** Abort running jobs, drop queued ones, write everything out (embed close). */
     public stopAll(): void {
+        for (const ids of this.queues.values()) {
+            for (const id of ids) {
+                const job = this.jobs.get(id);
+                if (job !== undefined) this.closeAs(job, 'stopped');
+            }
+        }
+        this.queues.clear();
+
         for (const [id, abort] of this.aborts) {
             if (this.jobs.get(id)?.status === 'running') abort.abort();
         }
+
+        this.flushPersist();
+    }
+
+    /** Release the store (after stopAll and once running jobs settled). */
+    public close(): void {
+        this.flushPersist();
+        this.store.close();
     }
 
     public startJob(type: JobType, params: JobParams, opts?: {scheduleId?: string}): JobRecord {
         const id = randomUUID();
+        const busy = this.isTypeBusy(type);
         const job: JobRecord = {
             id,
             type,
             params,
-            status: 'running',
+            status: busy ? 'queued' : 'running',
             progress: {done: 0, total: 0, failed: 0},
             startedAt: Date.now(),
             ...(opts?.scheduleId !== undefined ? {scheduleId: opts.scheduleId} : {}),
@@ -167,14 +230,66 @@ export class JobManager {
         this.jobs.set(id, job);
         this.evictHistory();
 
-        const abort = new AbortController();
-        this.aborts.set(id, abort);
+        if (busy) {
+            const queue = this.queues.get(type) ?? [];
+            queue.push(id);
+            this.queues.set(type, queue);
+            job.logs.push(`queued: another ${type} job is running`);
+            this.persistNow(job);
+            return job;
+        }
 
-        void this.execute(job, abort.signal).catch((cause: unknown) => {
-            this.fail(id, cause instanceof Error ? cause.message : String(cause));
-        });
-
+        this.persistNow(job);
+        this.run(job);
         return job;
+    }
+
+    private isTypeBusy(type: JobType): boolean {
+        for (const job of this.jobs.values()) {
+            if (job.type === type && job.status === 'running') return true;
+        }
+        return false;
+    }
+
+    private run(job: JobRecord): void {
+        const abort = new AbortController();
+        this.aborts.set(job.id, abort);
+
+        // The next job of this type starts only after the batch settled
+        // (commit + embeddings done). Starting it from inside execute()
+        // would inherit this batch's async context and write into a batch
+        // that is already finishing.
+        void this.service.batch(() => this.execute(job, abort.signal))
+            .catch((cause: unknown) => {
+                this.fail(job.id, cause instanceof Error ? cause.message : String(cause));
+            })
+            .finally(() => {
+                // A job that never reported an end (bug in a runner) must not block its type.
+                if (job.status === 'running') this.fail(job.id, 'job ended without a result');
+                this.startNext(job.type);
+            });
+    }
+
+    /** Start the next queued job of `type`, if any. */
+    private startNext(type: JobType): void {
+        if (this.isTypeBusy(type)) return;
+
+        const queue = this.queues.get(type);
+        const nextId = queue?.shift();
+        if (queue !== undefined && queue.length === 0) this.queues.delete(type);
+        if (nextId === undefined) return;
+
+        const job = this.jobs.get(nextId);
+        if (job === undefined || job.status !== 'queued') {
+            this.startNext(type);
+            return;
+        }
+
+        job.status = 'running';
+        job.startedAt = Date.now();
+        this.persistNow(job);
+        this.updateProgress(job.id);
+        this.run(job);
     }
 
     public listJobs(): JobRecord[] {
@@ -186,11 +301,22 @@ export class JobManager {
     }
 
     public stopJob(id: string): boolean {
-        const abort = this.aborts.get(id);
-        if (abort === undefined) return false;
-
         const job = this.jobs.get(id);
-        if (job === undefined || job.status !== 'running') return false;
+        if (job === undefined) return false;
+
+        if (job.status === 'queued') {
+            const queue = this.queues.get(job.type);
+            if (queue !== undefined) {
+                const at = queue.indexOf(id);
+                if (at !== -1) queue.splice(at, 1);
+                if (queue.length === 0) this.queues.delete(job.type);
+            }
+            this.closeAs(job, 'stopped');
+            return true;
+        }
+
+        const abort = this.aborts.get(id);
+        if (abort === undefined || job.status !== 'running') return false;
 
         abort.abort();
         return true;
@@ -216,7 +342,7 @@ export class JobManager {
             try {
                 fn(event);
             } catch (cause) {
-                createLogger('jobs').error('subscriber failed', {error: cause});
+                log.error('subscriber failed', {error: cause});
             }
         }
     }
@@ -228,6 +354,7 @@ export class JobManager {
         job.logs.push(message);
         if (job.logs.length > MAX_LOG_LINES) job.logs.shift();
 
+        this.markDirty(jobId);
         this.emit(jobId, {kind: 'log', message});
     }
 
@@ -235,6 +362,7 @@ export class JobManager {
         const job = this.jobs.get(jobId);
         if (job === undefined) return;
 
+        this.markDirty(jobId);
         this.emit(jobId, {
             kind: 'progress',
             done: job.progress.done,
@@ -248,41 +376,79 @@ export class JobManager {
         const job = this.jobs.get(jobId);
         if (job === undefined) return;
 
+        if (job.status !== 'running') return;
+
         job.status = 'done';
         job.finishedAt = Date.now();
         job.summary = summary;
 
         this.emit(jobId, {kind: 'done', summary});
-        this.cleanupAfter(jobId);
+        this.cleanupAfter(job);
     }
 
     private fail(jobId: string, error: string): void {
         const job = this.jobs.get(jobId);
         if (job === undefined) return;
 
+        if (job.status !== 'running') return;
+
         job.status = 'failed';
         job.finishedAt = Date.now();
         job.error = error;
 
         this.emit(jobId, {kind: 'failed', error});
-        this.cleanupAfter(jobId);
+        this.cleanupAfter(job);
     }
 
     private stop(jobId: string): void {
         const job = this.jobs.get(jobId);
-        if (job === undefined) return;
+        if (job === undefined || job.status !== 'running') return;
 
-        job.status = 'stopped';
-        job.finishedAt = Date.now();
-
-        this.emit(jobId, {kind: 'stopped'});
-        this.cleanupAfter(jobId);
+        this.closeAs(job, 'stopped');
     }
 
-    private cleanupAfter(jobId: string): void {
-        this.aborts.delete(jobId);
+    /** End a running or queued job without a result (stop, shutdown). */
+    private closeAs(job: JobRecord, status: 'stopped'): void {
+        job.status = status;
+        job.finishedAt = Date.now();
+
+        this.emit(job.id, {kind: 'stopped'});
+        this.cleanupAfter(job);
+    }
+
+    private cleanupAfter(job: JobRecord): void {
+        this.aborts.delete(job.id);
+        this.persistNow(job);
         // Keep subscribers around briefly so an SSE response can flush the
         // terminal event before closing — they'll be removed on disconnect.
+    }
+
+    private markDirty(jobId: string): void {
+        this.dirty.add(jobId);
+        if (this.persistTimer !== null) return;
+
+        this.persistTimer = setTimeout(() => this.flushPersist(), PERSIST_INTERVAL_MS);
+        this.persistTimer.unref?.();
+    }
+
+    private persistNow(job: JobRecord): void {
+        this.dirty.delete(job.id);
+        try {
+            this.store.save(job);
+        } catch (error) {
+            log.warn('job not persisted', {id: job.id, error});
+        }
+    }
+
+    private flushPersist(): void {
+        if (this.persistTimer !== null) clearTimeout(this.persistTimer);
+        this.persistTimer = null;
+
+        for (const id of [...this.dirty]) {
+            const job = this.jobs.get(id);
+            if (job !== undefined) this.persistNow(job);
+        }
+        this.dirty.clear();
     }
 
     private evictHistory(): void {
@@ -290,11 +456,18 @@ export class JobManager {
         if (all.length <= MAX_HISTORY) return;
 
         all.sort((a, b) => a.startedAt - b.startedAt);
-        const toRemove = all.slice(0, all.length - MAX_HISTORY).filter((j) => j.status !== 'running');
+        const toRemove = all.slice(0, all.length - MAX_HISTORY)
+            .filter((j) => j.status !== 'running' && j.status !== 'queued');
 
         for (const j of toRemove) {
             this.jobs.delete(j.id);
             this.subscribers.delete(j.id);
+        }
+
+        try {
+            this.store.prune(MAX_HISTORY);
+        } catch (error) {
+            log.warn('job history not pruned', {error});
         }
     }
 

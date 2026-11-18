@@ -27,7 +27,18 @@ const MIGRATIONS: readonly string[] = [
         last_accessed    REAL,
         referenced_count INTEGER,
         last_referenced  REAL
-    )`
+    )`,
+    // 2: background jobs of the web server (plan P4 / A5). The full record
+    // is JSON (secrets stripped); the columns exist for ordering/pruning.
+    `CREATE TABLE jobs (
+        id          TEXT PRIMARY KEY,
+        type        TEXT NOT NULL,
+        status      TEXT NOT NULL,
+        started_at  REAL NOT NULL,
+        finished_at REAL,
+        record      TEXT NOT NULL
+    );
+    CREATE INDEX jobs_started_at ON jobs (started_at)`
 ];
 
 export class StateDb {
