@@ -21,6 +21,10 @@ Setup, reference and integration guides for [Synaipse](../README.md).
 - [Local chat](chat.md) — offline RAG over the vault via a local Ollama model
 - [Synaipse als Langzeitgedächtnis](synaipse-claude-memory.md) — original concept note (DE)
 
+## Planning
+
+- [Improvement plan](improvement-plan.md) — performance, LLM, UX, UI, PKG Studio building block, jsNGraph (DE)
+
 ## Operations
 
 - [Troubleshooting](troubleshooting.md) — when something goes wrong

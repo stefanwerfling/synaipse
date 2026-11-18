@@ -1,0 +1,449 @@
+# Synaipse — Verbesserungs- und Modernisierungsplan
+
+> Stand: 2026-11-18 · Basis: Code-Audit über alle Packages (`core`, `vault`, `vector`, `service`,
+> `server-storage`, `crawler`, `mcp-server`, `web`), das Plugin `plugins/synaipse-memory`,
+> die Einbindung in **PKG Studio** (`../pkg/pkgstudio`) und die Lib **jsNGraph** (`../jsNGraph`).
+> Alle Pfade sind relativ zum Repo-Root. Zeilenangaben zeigen den Stand des Audits.
+
+---
+
+## 0. Ziel und Leitplanken
+
+**Ziel:** Synaipse vom gewachsenen Feature-Prototyp zu einem professionellen Produkt machen:
+schnell auch bei 50k+ Notes, für LLMs sparsam und präzise nutzbar, für Menschen konsistent und
+barrierearm, und als **sauberer, austauschbarer Baustein von PKG Studio** gebaut.
+
+**Leitplanken (bleiben bestehen):**
+
+- Der Markdown-Vault ist die Quelle der Wahrheit. Kuratieren statt Auto-Dump; die Entscheidungen aus
+  dem Backlog unter „Bewusst verworfen“ gelten weiter.
+- Web-UI bleibt **Vanilla TS** (kein React/TSX, kein schweres Framework).
+- Dateien und Ordner unter `src/` werden in PascalCase benannt.
+- `service` bleibt die einzige Stelle, die Vault und Vector kombiniert. MCP und HTTP bleiben austauschbare Transporte.
+- Grafik und Visualisierung kommen bevorzugt aus der **eigenen Lib jsNGraph**. Fehlt dort etwas,
+  wird es *in jsNGraph* gebaut, nicht als weitere Fremd-Dependency in Synaipse.
+
+---
+
+## 1. Ist-Zustand in Zahlen
+
+| Bereich | Befund |
+|---|---|
+| Codebasis | ca. 50k LOC TS. `web` ca. 30k, `service` ca. 7.8k (davon `Service.ts` **3195 Zeilen**) |
+| God-Files | `Styles.css` 7805 · `CanvasRenderer.ts` 2050 · `NotesPanel.ts` 1795 · `Graph3D.ts` 1702 · `routes.ts` 1446 · `BenchmarksPanel.ts` 1070 · `App.ts` 960 |
+| Bundle | Initialer Entry **639 KB** (hljs, marked, turndown, jszip, CardEditor eager). Lazy: Graph3D 1.48 MB, @antv 808 KB, cytoscape 455 KB |
+| MCP | **36 Tools** in einer Datei (`Tools.ts`). Tool-Liste kostet ca. **6k Tokens** pro Session. Keine `instructions`, keine Annotations, kein `structuredContent` |
+| MCP SDK | Deklariert `^1.0.4`, installiert 1.29. Low-level `Server` mit handgeschriebenen Schemas |
+| Tests | 85 Testdateien. **Ohne Tests:** `routes.ts`, `jobs.ts`, `Watcher.ts`, `Communities.ts`, `Layout.ts`, Embedder |
+| Doku | `doc/architecture.md` veraltet (nennt Cytoscape als Graph-View, Ollama, „stdio only“). `doc/mcp-tools.md` listet 23 von 36 Tools |
+| PKG Studio | Einbindung funktioniert, aber per Sonderfall (`mod.id === 'synaipse'`). Kein `unmount`, CSS-Leaks, `/api` hartkodiert |
+| jsNGraph | Wird von Synaipse und PKG Studio **nicht** genutzt (nur von nornen per kopiertem IIFE). Kann heute keinen Wissensgraphen > ca. 500 Knoten |
+
+---
+
+## 2. Phase 0: Korrektheit zuerst (Bugs aus dem Audit, verifiziert)
+
+Diese Punkte sind **echte Fehler**, keine Verbesserungen, und kommen vor allem anderen. Jeder Punkt ist ein eigener kleiner Commit mit Regressionstest.
+
+| # | Bug | Ort | Fix |
+|---|---|---|---|
+| B1 | Der Hash-Cache gilt als „embedded“, *bevor* tatsächlich embedded wurde. Fällt der Embedder aus, wird die Note nie nachindiziert | `packages/vault/src/FilesystemNoteAdapter.ts:50` vs. `Service.ts:1547` | Separates `embeddedHash` (plus `embedModel`). Erst nach erfolgreichem Upsert setzen |
+| B2 | Der Server-Mode (MariaDB) reindiziert nie. `entries.hash` ist gleich `note.hash` | `server-storage/src/MariaDBNoteAdapter.ts:147-156`, `Service.ts:494` | Spalten `embedded_hash` und `embed_model` per Migration hinzufügen |
+| B3 | **Backlinks im MariaDB-Mode immer leer.** Die Map ist nach Wikilink-*Titel* gekeyt, wird aber per *Pfad-ID* gelesen. Folge: Decay hält verlinkte Notes für Waisen und könnte sie archivieren | `MariaDBNoteAdapter.ts:450` vs. `:261/:419` | Titel und Alias wie `Vault.rebuildBacklinks` zur ID auflösen. **Einen** gemeinsamen Parser statt duplizierter Regexe. Test `mariadb-note-adapter.test.ts:48` korrigieren |
+| B4 | Re-Embedding ist nicht atomar: erst `delete`, dann embed. Bricht das ab, hat die Note keine Vektoren mehr | `vector/src/Pipeline.ts:94` | Erst upserten, danach überzählige Chunk-IDs löschen. `recordEntry` pro Batch |
+| B5 | Embedding-Modell und Dimension der Collection werden nicht geprüft. Ein Modellwechsel vermischt Vektorräume | `vector/src/Qdrant.ts:184-205` | Modell und Dimension in Collection-Metadaten ablegen, bei Mismatch laut abbrechen oder eine neue Collection anlegen |
+| B6 | ACL: `synaipse_link_note` hat `pathArg: 'source'`, das Feld heißt aber `fromId`. Der Pfad-Scope wird nie geprüft | `mcp-server/src/Tools.ts:229` | `pathArg: 'fromId'` setzen, dazu einen Test, der jeden `pathArg` gegen das Schema prüft |
+| B7 | ACL: Listen- und Such-Tools (`search`, `list_notes`, `recent`, `graph`, `todos`, `prime`, `stale`, `suggest_links`) ignorieren Pfad-Präfix-Scopes | `mcp-server/src/Auth.ts:186` | Scope-Filter zentral auf die Ergebnisse anwenden (Post-Filter im Handler-Wrapper) |
+| B8 | Consent-Bypass: `edit_note` liest mit `service.readNote` statt `enforceReadConsent` | `Tools.ts:994` | Auf `enforceReadConsent` umstellen |
+| B9 | Ein korrupter `HashCache` setzt sich still zurück und löst ein volles Re-Embedding aus | `vault/src/Cache.ts:48` | Warnung ausgeben, Backup der kaputten Datei, atomar schreiben (tmp + rename) |
+| B10 | Externe Deletes invalidieren die Topologie-Caches nicht. `graph()` ignoriert Aliase | `Service.ts:3147-3154`, `:2523` | `invalidateTopologyCaches()` aufrufen. Eine gemeinsame `LinkResolver`-Funktion für Graph, Backlinks und Adjazenz |
+| B11 | `scryptSync` im Request-Pfad (ca. 50 ms Blockade). Mit falschen Tokens lässt sich der Server ausbremsen | `core/src/TokenHash.ts:26`, `PasswordHash.ts:21` | Asynchrones `crypto.scrypt` plus Negative-Cache |
+| B12 | SessionStart-Hook übergibt `project` nicht | `plugins/synaipse-memory/hooks/session-start.sh:41-56` | `&project=$PROJECT_NAME` anhängen |
+
+**Akzeptanz:** Alle Fixes haben Tests. Neu kommt eine Contract-Test-Suite, die **beide** NoteAdapter (Filesystem und MariaDB) gegen dieselben Erwartungen laufen lässt. Damit kann B3 nicht wieder entstehen.
+
+### Status P0 (2026-11-18): umgesetzt, uncommitted
+
+Alle 12 Punkte sind erledigt. Die Suite steht bei 1080 Tests grün (vorher 1044), die MariaDB-Integration bei 25 Tests, gelaufen gegen einen Wegwerf-Container. Den Qdrant-Filter und den Dimensions-Check habe ich zusätzlich gegen eine echte Qdrant-Instanz verifiziert.
+
+Bei der Umsetzung kam ein weiterer Fund dazu: **`update_note` hatte ebenfalls einen falschen `pathArg`** (`path` statt `id`). Ein Test prüft jetzt jeden `pathArg` gegen das Tool-Schema. Fehlt ein Pflicht-Pfadfeld, wird abgelehnt (fail-closed).
+
+**Neue Bausteine:**
+
+| Baustein | Inhalt |
+|---|---|
+| `core/LinkIndex.ts` | Inkrementeller Backlink-Index plus `buildLinkKeyMap`. Eine Auflösungsregel für Graph, Backlinks, `related` und das Such-Graph-Signal |
+| `core/Markdown.ts` | Gemeinsame Wikilink- und Tag-Parser |
+| `vector/VectorStore.ts` | Port. Qdrant ist austauschbar, Tests nutzen einen In-Memory-Store |
+| `NoteEntry.embeddedHash` / `embedModel` | Plus Migration `009_notes_embedded.sql` und `LEGACY_EMBED_MODEL` |
+| `verifyTokenAsync` / `verifyPasswordAsync` | Asynchrones scrypt |
+| `isPathInScope` | Im Audit-Kontext |
+
+**Verhaltensänderungen, die man kennen muss:**
+
+- Ein Write schlägt **nicht mehr fehl**, wenn der Embedder ausfällt. Die Note ist gespeichert, das Problem wird als `pending` gezählt und beim nächsten Write oder Start nachgeholt.
+- Auch der Start bricht bei einem Embedder-Ausfall nicht mehr ab. Er läuft im Fulltext-Modus weiter.
+- **Server-Mode:** Der erste Start nach der Migration embedded **alle** Notes einmal neu. `embedded_hash` ist bewusst NULL, weil ein bisheriger Hash-Match nichts darüber aussagt, ob die Note wirklich im Vektorindex liegt.
+- **Filesystem-Mode:** Bestehende Cache-Einträge werden als „legacy“ übernommen und **nicht** neu embedded.
+- Tokens mit Pfad-Scope sehen in Such-, Listen- und Graph-Ergebnissen nur noch ihre Präfixe. `verify_history` und `snapshot_list` sind für sie gesperrt.
+- Der Index-Cache wird atomar und kompakt geschrieben (ohne Pretty-Print). Ist er korrupt, wird er als `.corrupt-<ts>` gesichert und die Situation laut geloggt.
+
+---
+
+## 3. Säule A: Performance und Skalierung (Backend)
+
+Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.
+
+### A1. Inkrementeller Write-Pfad *(hoch)*
+- `Vault.rebuildBacklinks()` läuft bei *jedem* Write, Delete und externen Change über den ganzen Vault (`Vault.ts:90,125,148,160,246`) und nutzt `includes` auf Arrays (`:309`). Das inkrementelle `indexNote`/`unindexNote` aus dem MariaDB-Adapter wird in eine gemeinsame Klasse **`LinkIndex`** (in `core` oder `vault`) überführt, die beide Adapter nutzen. Datenstrukturen sind `Set`s.
+- Persistente Indizes **Titel/Alias → ID** und **Tag → IDs**, inkrementell gepflegt. Damit verschwinden die O(N)-Rescans in `related()` (`Service.ts:2591`), `appendSessionLog` (`:2111`), `prime()` (`:2921`), `todos()` (`:2874`) sowie `listRoadmaps` und `listBenchmarks`.
+- **Bulk-Write-API** `service.batch(async tx => …)`: Backlinks, Cache-Flush, ngit-Commit, Layout-Invalidierung und SSE-Event laufen *einmal* am Ende. Crawler, Import und `JobManager` nutzen sie. Heute ist ein Crawl O(M·N).
+
+### A2. Persistenz der Sidecars *(hoch)*
+- `HashCache` schreibt bei jedem Write und jedem Such-Treffer (`touch`) das ganze JSON (`Cache.ts:218`). Ersatz: **`node:sqlite`** (in Node 22 eingebaut, keine native Dependency) als `<vault>/.synaipse/state.db` mit den Tabellen `entries`, `access`, `audit`, `jobs` und `query_cache`. Migration aus dem JSON beim ersten Start.
+- `touchAccess` nur bei *gelesenen* Notes, nicht bei jedem Such-Hit (`Service.ts:570`). Das verbessert auch das `stale`-Signal.
+- Das Audit-Log (`AuditLog.ts`) wandert in dieselbe DB: Tail-Reads, Count per Index, Rotation per Retention-Setting.
+
+### A3. Schwere Arbeit raus aus dem Event-Loop *(hoch)*
+- **Louvain und Layout** (`Communities.ts`, `Layout.ts`) laufen in einem `worker_threads`-Worker. Bis das neue Layout fertig ist, wird das alte ausgeliefert (*stale-while-revalidate*), Neuberechnung debounced.
+- **`suggestLinks`** (`Service.ts:2736-2867`: N sequentielle Embed- und Qdrant-Calls plus O(N²) Tag-Paare) wird ein Hintergrund-Job mit Ergebnis-Cache. Vektoren kommen aus Qdrant (`recommend`/`query`) statt neu embedded zu werden. Tag-Paare laufen über den Tag-Index.
+- **HF-Embedder und Reranker** (`@huggingface/transformers`) laufen in einem Worker-Pool statt im Main-Thread.
+
+### A4. Retrieval-Effizienz *(mittel)*
+- Diff-Embedding auf Chunk-Ebene: Jeder Chunk wird gehasht, nur geänderte Chunks werden embedded. Das betrifft vor allem die täglich wachsenden Session-Logs (`Pipeline.ts:94`).
+- Qdrant: Umstieg von der deprecated `search`- auf die **`query`-API** mit `group_by: noteId`, Payload-Selector und serverseitigen Projekt- und Pfad-Filtern. Löst die Duplikate im Semantic-only-Modus (`Qdrant.ts:255-262`).
+- LRU-Cache für Query-Embeddings, Schlüssel (Modell, Text). Wird in SQLite persistiert.
+- `Vault.load` mit begrenzter Parallelität (ca. 32) statt seriellem `readFile` + `stat` (`Vault.ts:86`).
+- Der Watcher ignoriert `.ngit/` und `.synaipse*/` (`Watcher.ts:22`).
+- Speicher: Note-Content nicht dreifach halten (Note, Index-Snippets, DB-Snapshot). Der Body wird lazy aus Datei oder DB geladen, im RAM liegen nur Metadaten und Index.
+
+### A5. HTTP-API *(mittel)*
+- `routes.ts` (1446 Zeilen, if-Kette) wird ein kleiner **Router-Table** mit Schema-Validierung (VTS ist schon im Stack) und zentralem Error-Mapping. Die Routen werden in Dateien pro Domäne aufgeteilt: `NotesRoutes`, `GraphRoutes`, `SearchRoutes`, `RoadmapRoutes` usw.
+- Ein gemeinsames `readJson` mit Byte-Limit und 413-Antwort. Heute gibt es vier Kopien ohne Limit.
+- **Cursor-Pagination** für `/api/notes`, `/api/activity`, `/api/audit`. Limits clampen (`/api/search` NaN, `routes.ts:1409`).
+- **ETag/304** und vorkomprimierte Buffer für `/api/graph` und `/api/graph/layout`. Der `hash` ist schon vorhanden, wird aber heute bei jedem Request neu gzippt.
+- Graph-Deltas per SSE (`{added, removed, changed}`) statt Full-Reload nach jedem Write (`App.ts:399-416`).
+- `JobManager`: Concurrency 1 pro Job-Typ, Zustand in SQLite persistiert, nutzt die Bulk-Write-API.
+
+### A6. Server-Mode skalierbar *(mittel, nach Phase 0)*
+- Access-Journal periodisch per Multi-Row-`INSERT … ON DUPLICATE KEY` flushen. Heute geschieht das nur bei start/stop und einzeln pro Zeile.
+- Versions-Spalte und Change-Notification, damit mehrere Prozesse ihren In-Memory-Snapshot invalidieren können.
+- Den ungenutzten FULLTEXT-Index entweder nutzen (als BM25-Fallback) oder entfernen.
+- History und Snapshot auch im Server-Mode (Write und Delete ignorieren heute `ctx`).
+
+### A7. Benchmark-Gate
+- `scripts/bench-scale.mjs` wird ein CI-Job mit Fixtures für 10k und 50k Notes. Gemessen werden Write p95, Search p95, Kaltstart, Layout-Zeit und RSS. Die Ergebnisse landen im vorhandenen Benchmark-Feature (`synaipse_benchmark_add`). Regressionen über 20 % lassen den Job fehlschlagen.
+
+---
+
+## 4. Säule B: Nutzbarkeit für LLMs (MCP)
+
+Ziel-KPIs: Tool-Liste **< 3k Tokens** (heute ca. 6k). Typische Write-Antwort **< 150 Tokens** (heute die ganze Note). `prime` bleibt **< 2k Tokens**. Null Pflicht-Einträge in `CLAUDE.md`.
+
+### B1. Protokoll modernisieren *(hoch)*
+- SDK auf `^1.29` anheben. Umstieg auf `McpServer.registerTool` mit Schemas (VTS → JSON Schema oder zod). Daraus folgt automatisch:
+  - **`instructions`** im Initialize, mit dem Arbeitsprotokoll: zuerst `prime`, vor dem Schreiben suchen, Ordnerkonvention, wann `remember`, `write_note` oder `log_session`.
+  - **Tool-Annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`) plus `title`. Sie werden aus der vorhandenen ACL-Tabelle generiert (`Tools.ts:223-250`), damit es nur *eine* Quelle gibt.
+  - **`outputSchema` und `structuredContent`** statt pretty-printed JSON im Text. Kompaktes JSON spart dabei schon 20–30 % Whitespace.
+  - `resource_link` statt eingebetteter Note-Inhalte, wo der Client nachladen kann.
+- `Tools.ts` aufteilen in `Tools/Notes.ts`, `Tools/Search.ts`, `Tools/Graph.ts`, `Tools/Roadmap.ts`, `Tools/Benchmark.ts` und `Tools/Admin.ts`.
+- Unbekanntes Tool als `isError`-Ergebnis statt Protokollfehler. Ungültige Enums werden abgelehnt statt still durch `hybrid` ersetzt (`Tools.ts:190`).
+- Fehlertexte mit Hinweis: „Note nicht gefunden – meintest du `Memory/x/foo.md` (Titel-Match)?“. `read_note` akzeptiert Titel *oder* Pfad. Die Template-Konvention ruft heute per Titel auf und scheitert daran.
+
+### B2. Tool-Set konsolidieren *(hoch)*
+Aus 36 Tools werden ca. 22, ohne Funktion zu verlieren:
+
+| Neu | Ersetzt |
+|---|---|
+| `synaipse_list {prefix, tag, sort: mtime\|title, limit, cursor}` | `list_notes`, `recent`, `notes_by_tag` |
+| `synaipse_links {id, direction: in\|out\|both, typed?}` | `backlinks`, `outgoing_links` (`related` bleibt als semantische Ähnlichkeit) |
+| `synaipse_graph {center?, depth?, limit}` | `graph`, künftig **nur noch als Nachbarschaft**, nie der ganze Vault |
+| `synaipse_link_note` | mit derselben Auflösung und Validierung wie `roadmap_link_note` (`NoteRef.ts`), keine toten Links mehr |
+| Admin-Gruppe (`verify_history`, `snapshot_list`, `benchmark_*`) | nur sichtbar per Env-Flag oder Token-Scope. Danach `notifications/tools/list_changed` senden |
+
+Die alten Namen bleiben eine Version lang als Aliase mit Deprecation-Hinweis bestehen.
+
+### B3. Token-Ökonomie *(hoch)*
+- Write-Tools (`write_note`, `update_note`, `edit_note`, `roadmap_*`) antworten nur mit `{id, hash, mtime, changed, warnings[]}` statt mit der vollen Note bzw. dem ganzen Step-Baum.
+- `read_note {id, section?, lines?, maxChars?, fields?: ['frontmatter','body','links']}` erlaubt Teil-Lesen per Überschrift und Zeilenbereich.
+- `search` mit `filters {project, tags, paths, since}` (ist in `SearchQuery` schon vorhanden) und Treffer-Anker `noteId#heading` plus Zeilenspanne.
+- Global `verbosity: brief|full`, Default `brief`.
+- Zeitangaben als ISO-Datum plus relativem Alter („3d“) statt Epoch-Millisekunden.
+- Harte `minimum`/`maximum`-Grenzen für alle `limit`s. Enums aus Code-Konstanten (`ROADMAP_STATUSES` usw.).
+
+### B4. Gedächtnis-Qualität *(hoch)*
+- **Dedupe beim Schreiben:** `write_note` und `remember` führen eine schnelle Ähnlichkeitssuche aus und geben `possibleDuplicates[]` zurück. Zusätzlich `mode: create|overwrite|upsert` und `expectedHash` als optimistischen Lock.
+- **`supersedes` und `confidence` wirken:** Notes, die von einer anderen abgelöst wurden, werden im Ranking abgewertet und in `prime` ausgeblendet. `confidence` fließt als Gewicht ein. Optional `valid_until` für Wissen mit Ablaufdatum.
+- **Konsolidierung:** Prompt bzw. Tool `synaipse_consolidate_inbox {project, date?}` schlägt aus Inbox-Einträgen (`remember`) Promotionen in kuratierte Notes vor. Das LLM schreibt, Synaipse liefert Kandidaten, Cluster und Ziel-Notes. Das passt zur Kuratiert-Linie.
+- **Temporale Abfragen:** `synaipse_changes {since, project}` und `synaipse_note_history {id, diff?}`. Die Service-Funktionen `noteHistory`, `noteDiff` und `getActivity` gibt es schon (`Service.ts:806-873`).
+
+### B5. Resources, Prompts, Completions *(mittel)*
+- **Resources:** `synaipse://project/{p}/primer`, `…/roadmap`, `…/convention` und `synaipse://note/{path}` als Template. Damit kann der Nutzer Notes in Claude Code per `@` erwähnen.
+- **Prompts:** `session-to-vault`, `consolidate-inbox`, `record-adr`, `roadmap-review`. Sie funktionieren dann auch in Cursor und anderen Clients, nicht nur als Claude-Code-Slash-Command.
+- **Completions** für Note-IDs, Tags und Projekte.
+- **Elicitation** für `delete_note` (Bestätigung) und den Consent-Flow statt eines 60-s-Long-Polls (`Tools.ts:55`).
+- **Progress-Notifications** für lange Operationen (semantische Scans, Reindex).
+- HTTP-Sessions mit TTL und Eviction (`Server.ts:167`).
+
+### B6. Plugin und Onboarding *(mittel)*
+- Der SessionStart-Hook liefert den Primer über `hookSpecificOutput.additionalContext`, dann braucht es keinen manuellen `@`-Import in `CLAUDE.md` mehr. Die Datei-Bridge bleibt als Fallback.
+- Das Plugin bringt eine `.mcp.json` (mit Projekt-Segment in der URL) und eine **Skill** „synaipse-memory“ mit dem Arbeitsprotokoll mit.
+- Ein Stop-Hook stößt dezent an, ob Erkenntnisse gespeichert werden sollen. Er feuert nur, wenn in der Session Code geändert *und* nichts gespeichert wurde.
+- `tool-allowlist.sh` protokolliert auch `mcp__synaipse__*`-Calls mit Note-IDs. Das ermöglicht Schritt 2 von `/synaipse-session-to-vault`.
+- `install-skill.mjs` schreibt die MCP-URL mit Projekt.
+
+### B7. Eval-Harness für LLM-Nutzbarkeit *(mittel)*
+- Fester Satz an Recall-Fragen gegen einen Fixture-Vault (Vorbild ist der vorhandene `retrieval.bench.ts`). Gemessen werden MRR und Recall@5 **und** die Tokens pro beantworteter Frage. Damit wird jede Änderung an Schemas und Antwortformat messbar.
+
+---
+
+## 5. Säule C: Nutzbarkeit für Menschen (UX)
+
+### C1. Navigation und Orientierung
+- **URL-Routing** (Hash-basiert, im Embed-Modus abschaltbar oder an den Host delegiert): `#/notes/<path>`, `#/graph?focus=…`, `#/roadmap/<project>`. Damit funktionieren Deep-Links, Back-Button und Teilen.
+- **Command-Palette als Hauptnavigation:** alle Tabs, alle Aktionen (Import, Theme, Neue Note, Reindex, Roadmap-Step anlegen) und Notes per Fuzzy-Suche. Heute bietet sie nur 3 Befehle (`CommandPalette.ts:105`). Der Ctrl+K-Konflikt zwischen Palette, Suche und Editor wird aufgelöst (`CommandPalette.ts:43`, `Search.ts:33`, `EditorToolbar.ts:247`). Neu kommt ein Shortcut-Overlay mit `?`.
+- **Lokaler Graph** (Ego-Netz der offenen Note, 1–2 Hops) als Seitenleiste im Note-Viewer, gebaut mit jsNGraph `RadialLayout`. Er ist der direkteste Mehrwert des Graphen im Alltag.
+- **Projekt-Switcher** als globaler Kontext (Suche, Graph und Roadmap filtern danach). Im Embed-Modus kommt das Projekt vom Host.
+
+### C2. Feedback und Zustände
+- Bausteine `Toast`, `ConfirmDialog`, `EmptyState`, `ErrorState` und `Skeleton`. Sie ersetzen ca. **44 native `alert`/`confirm`/`prompt`**-Aufrufe und die uneinheitlichen Leer-Klassen.
+- Fehler nie still schlucken. `loadNotes` (`App.ts:754`) und das Laden des Graphen (`App.ts:778`) zeigen heute endlos „fetching…“.
+- SSE-Verbindungsstatus in der Topbar mit Backoff-Reconnect.
+
+### C3. Sprache
+- Ein kleines `I18n.ts` mit `t(key)` und Wörterbüchern **de** und **en**, ohne Library. Heute wechseln Panels zwischen Deutsch und Englisch, teils innerhalb eines Panels. Sprache aus der Einstellung oder vom Host. `lang` im Container setzen.
+
+### C4. Barrierefreiheit (Ziel WCAG 2.2 AA)
+- Dialoge mit `role="dialog"`, `aria-modal`, Fokusfalle und Fokus-Rückgabe. Ein gemeinsamer `Modal`-Baustein für Settings, Preview, DSGVO, Floorplan und Import.
+- Tabs als `role="tablist"`/`tab` mit `aria-selected` und Pfeiltasten-Navigation.
+- Sichtbarer `:focus-visible`-Ring überall. Heute gibt es nur 2 Regeln.
+- Icon-Buttons mit `aria-label`. Glyphen (☾ ☀ ●) durch ein kleines SVG-Icon-Set ersetzen.
+- `prefers-reduced-motion` global respektieren (Pulse, Trails, Bloom, Kamerafahrten).
+- Automatisierte Prüfung mit axe-core im Playwright-Smoke (siehe G3).
+
+### C5. Kern-Workflows schärfen
+- **Editor:** Split-View Edit/Preview, Wikilink-Autocomplete auch für Überschriften (`[[Note#…]]`), Backlinks-Panel unter der Note, Konfliktanzeige bei externer Änderung (Hash-Mismatch) statt stillem Überschreiben.
+- **Suche:** Facetten (Projekt, Tag, Zeitraum, Typ), Treffer mit hervorgehobenem Snippet und Sprung zur Überschrift. Die `explain`-Ansicht bleibt ein Power-User-Toggle.
+- **Inbox und Konsolidierung:** UI für die `remember`-Inbox mit „In Note übernehmen“ und „Verwerfen“. Gegenstück zu B4.
+- **Roadmap:** Abhängigkeits-DAG-Ansicht mit jsNGraph `LayeredLayout`/`ModelView`-Granularität, ein- und ausklappbar.
+
+---
+
+## 6. Säule D: UI-Modernisierung und Professionalisierung
+
+### D1. Komponenten-Fundament (Vanilla TS)
+- Interface **`View`** `{element, mount(), onShow(), onHide(), destroy()}` nach dem Vorbild von `GraphRenderer`. Jedes Panel implementiert es.
+- **`Disposables`-Helfer** auf Basis von `AbortController`. Alle `addEventListener`, Timer, SSE-Streams und `PersistentValue`s hängen an einem Signal. Muster wie in `GraphAtlas.ts:217-222`. Ohne das gibt es kein sauberes Unmount im Embed (siehe E1).
+- **Tab-Registry** `{id, labelKey, icon, factory: () => import('./X.js')}` statt 140 Zeilen Button-Code und einer if-Kette (`App.ts:448-688`). Panels werden **lazy** beim ersten Öffnen konstruiert und importiert.
+- Einen kleinen reaktiven Kern (`Signal<T>`/`computed`, ca. 100 LOC) für geteilten Zustand: aktive Note, Projekt, Theme, Verbindung. Er ersetzt die verketteten Callback-Objekte zwischen Panels.
+
+### D2. God-Files zerlegen
+| Datei | Aufteilung |
+|---|---|
+| `NotesPanel.ts` (1795) | `NotesSidebar`, `NoteViewer`, `SelectionAsk`, `NoteToolbar` |
+| `CanvasRenderer.ts` (2050) | `CanvasCamera` (→ jsNGraph), `CanvasCards`, `CanvasEdges`, `CanvasSelection`, `CanvasHistory` |
+| `Graph3D.ts` (1702) | `Graph3DScene`, `Graph3DLean` (Instancing), `Graph3DEffects`, `ClusterForce` |
+| `App.ts` (960) | `Shell`, `TabRegistry`, `Navigation`, `GlobalEvents` |
+| `Service.ts` (3195) | `SearchService`, `GraphService`, `MemoryService` (prime, remember, session, decay), `ChatService`, `HistoryService`, `PrivacyService`, mit `SynaipseService` als dünner Fassade |
+
+### D3. CSS-Architektur
+- `Styles.css` (7805 Zeilen) aufteilen in `Styles/Tokens.css`, `Base.css` und je eine Datei pro View, mit `@layer synaipse.tokens, synaipse.base, synaipse.components, synaipse.views`.
+- **Scoping:** Alles unter `.synaipse-root`. Tokens auf `.synaipse-root[data-theme]` statt `:root`. Kein `*`, `body`, `::selection` oder `::-webkit-scrollbar` global (`Styles.css:115-140`).
+- Die ca. 63 hartkodierten Hex-Farben auf Tokens umstellen. Ein Lint-Check (stylelint `color-no-hex` außerhalb der Tokens-Datei) verhindert Rückfälle.
+- **Design-Tokens teilen:** Synaipse-Tokens werden auf die PKG-Studio-Tokens (`--sh-*`) gemappt, mit Fallback auf die eigenen Werte (siehe E3).
+- Responsive: Topbar mit Overflow-Menü und mindestens zwei Breakpoints, weil Embed-Container schmaler sind.
+
+### D4. Bundle und Ladezeit
+Ziel: **Initial-JS < 250 KB** (heute 639 KB). **First interaction < 1 s** lokal.
+- jszip, turndown, CardEditor und der Canvas-Stack, Benchmarks, Admin, Roadmap und Chat lazy laden.
+- highlight.js: Core plus Sprachen bei Bedarf.
+- **cytoscape (455 KB) entfernen**, ersetzt durch jsNGraph (Säule F).
+- Mittelfristig @antv/infographic (808 KB) für einfache Fälle durch jsNGraph `RectCharts` ersetzen. Die vollen Templates bleiben lazy.
+- `manualChunks` und ein Bundle-Budget-Check in CI (`vite build` plus Größen-Assertion).
+
+### D5. Frontend-Performance
+- Chat-Streaming: Nur die streamende Blase per rAF aktualisieren statt `renderThread()` pro Token (`ChatPanel.ts:895`). Heute wächst der Aufwand quadratisch mit der Gesprächslänge.
+- Lange Listen virtualisieren (Audit, Activity, Jobs, Chat-Threads). `NotesPanel` macht das schon vor.
+- Render-Loops pausieren, wenn eine View versteckt ist (`IntersectionObserver` plus `visibilitychange`). Kritisch in PKG Studio, wo Tabs nie entladen werden.
+
+---
+
+## 7. Säule E: Synaipse als PKG-Studio-Baustein
+
+Heute ist Synaipse in PKG Studio ein **Sonderfall** (`vite.config.ts:93,124,324-385`). Das Interface ist dort dupliziert, das Backend kommt aus `dist/`, das Frontend aus `src/` (Versions-Skew), es gibt keinen Teardown, und ca. 110 Zeilen Host-CSS reparieren Leaks. Ziel ist ein **formaler Baustein-Vertrag**, den Synaipse als Referenzimplementierung erfüllt und den nppm und vtseditor später übernehmen.
+
+### E1. Frontend-Vertrag
+```ts
+// packages/web/src/Mount.ts  (exportiert als 'synaipse/web/mount')
+export interface MountOptions {
+    apiBase: string;                 // z. B. '/synaipse' — für fetch, EventSource UND <img src>
+    project?: string;                // vom Host vorgegeben
+    theme?: 'dark' | 'light';        // initial; Updates über handle.setTheme
+    locale?: 'de' | 'en';
+    routing?: 'hash' | 'host' | 'none';
+    onNavigate?: (route: string) => void;   // Host kann Deep-Links spiegeln
+}
+export interface MountHandle {
+    unmount(): Promise<void>;        // stoppt SSE, Timer, rAF, Listener; entfernt DOM
+    setTheme(t: 'dark' | 'light'): void;
+    setProject(p: string): void;
+    navigate(route: string): void;
+    onShow(): void; onHide(): void;  // Host-Tab sichtbar/versteckt
+}
+export function mount(el: HTMLElement, opts: MountOptions): Promise<MountHandle>;
+```
+- **Ein `apiUrl(path)`-Helfer** für alle ca. 71 hartkodierten `/api/...`-Stellen (`Api.ts`, `Auth.ts`, `AssetUrl.ts:66`, `Events.ts:21`, `ChatPanel.ts`, `MarkdownPreview.ts`). Danach braucht PKG Studio keinen globalen `fetch`/`EventSource`-Rewrite mehr (`pkgstudio/frontend/main.ts:85`). Das löst auch das dort dokumentierte Problem, dass Polling aus Hintergrund-Tabs an das falsche Modul geht.
+- Theme wird auf den **Container** gesetzt, nicht auf `document.documentElement` (`Theme.ts:72`). Das hljs-Theme wird als gescopte CSS-Regel eingebunden statt als `<style>` im `<head>`.
+- Kein `location.reload()` (`Settings.ts:68`, `Main.ts:32`). Stattdessen interner Remount.
+- Globale Shortcuts nur bei Fokus im Container oder per Opt-in.
+- `localStorage`-Keys mit Instanz-Präfix (`synaipse:<instance>:…`).
+
+### E2. Backend-Vertrag
+- `createSynaipseEmbed(opts)` bekommt **explizite Konfiguration** (`vaultPath`, `project`, `embeddings`, `qdrant`, …) statt `.env` und mutiertem `process.env` (`pkgstudio/vite.config.ts:342`).
+- `close()` schließt *alles*: `EventBroadcaster`-Clients, laufende Jobs, Worker, Watcher, SQLite (heute unvollständig, `embed.ts:166-171`). Zusätzlich `health()` und `ready: Promise<void>` statt der 503-Heuristik im Host.
+- Der Typ `SynaipseEmbed` wird aus einem eigenen Entry-Point exportiert. PKG Studio importiert ihn, statt ihn zu kopieren (`vite.config.ts:348`).
+- `apiHandle` liest den Body selbst robust, auch wenn der Host schon `express.json()` gemountet hat. Die Reihenfolge-Abhängigkeit (`vite.config.ts:90-96`) fällt damit weg.
+- **MCP-Tools beim Host registrieren** statt eines eigenen `/synaipse/mcp`: `registerTools(registrar: McpToolRegistrar)`. Dann läuft *ein* MCP-Endpoint für ganz PKG Studio, wie in dessen Konzept „one Vite, one MCP“ vorgesehen.
+- Auth-Brücke: Der Host liefert einen `principal`-Callback, Synaipse wendet seine ACL darauf an. Damit funktioniert auch der Server-Mode im Embed. Heute überspringt `mount.ts` den Login.
+
+### E3. Gemeinsames Design-System
+- Ein gemeinsames Token-Set (Farben, Abstände, Radien, Typo, Motion) mit Namespace `--pkg-*`, z. B. als kleines Paket `pkg-tokens` oder als Teil des PKG-Studio-Shells. Synaipse mappt `--syn-*` → `var(--pkg-*, <eigener Fallback>)`. Standalone sieht dadurch alles aus wie heute, eingebettet übernimmt Synaipse das Theme des Hosts.
+- jsNGraph bekommt dieselben Tokens über `ThemeTokens.fromCssVars(el)` (Säule F). Graphen in allen Bausteinen sehen dann einheitlich aus.
+
+### E4. Build und Paketierung
+- `@synaipse/web` aufteilen in **`@synaipse/web-client`** (Vite, Browser-Dependencies) und **`@synaipse/web-api`** (Node). Heute zieht das Server-Image three, cytoscape und @antv mit.
+- Der Embed-Frontend-Entry wird als **Library-Build** (`vite build --lib`, ESM, CSS als separate Datei) ausgeliefert. Der Host konsumiert ein konsistentes Artefakt aus `dist/` für Front- *und* Backend, damit gibt es keinen Versions-Skew mehr. Für die Entwicklung bleibt der Source-Alias optional.
+- PKG-Studio-Manifest: Synaipse liefert ein `pkgstudio.module.json` (id, label, color, entries, capabilities). PKG Studio liest es, statt `MODULE_ENTRY` und `ModuleLoaders.ts` von Hand zu pflegen.
+
+> Die Gegenseite (Generalisierung des Modul-Loaders, Entfernen der Synaipse-Sonderfälle und des CSS-Pflasters in `pkgstudio/frontend/main.css:429-540`) ist ein eigener Plan im PKG-Studio-Repo. Er hängt von E1 und E2 ab.
+
+---
+
+## 8. Säule F: jsNGraph als Visualisierungs-Engine
+
+Heute hat Synaipse **drei** Graph-Engines: cytoscape (2D), 3d-force-graph/three (3D) und eine eigene Canvas-„Atlas“ mit Quadtree, LOD und Community-Aggregation (`GraphAtlas.ts`, `Quadtree.ts`). Dazu kommt ein eigener Canvas-Editor mit Kamera (`CanvasRenderer.ts`). jsNGraph hat Bausteine, die genau dazu passen (Camera in ModelView, RectBoard mit Connector-Routing, Radial- und Layered-Layout), ist aber auf Netzwerk-Monitoring zugeschnitten (O(n²)-Force, keine Kamera in NGraph, Device-Semantik, rAF-Loop ohne Ende).
+
+**Strategie:** Was in Synaipse an Graph-Engineering steckt (Atlas, Quadtree, LOD), **wandert nach jsNGraph**. Synaipse wird dessen erster großer Konsument. PKG Studio und andere Bausteine (nornen, flyingfish) profitieren mit.
+
+### F1. jsNGraph-Erweiterungen (im jsNGraph-Repo, je Slice mit Tests und Beispiel)
+
+| # | Erweiterung | Herkunft / Notiz |
+|---|---|---|
+| J1 | **Camera** in NGraph (Pan, Zoom, Fit, `focusNode`, animierte Fahrten) | `modelview/Camera.ts` generalisieren |
+| J2 | **Generischer Style-Layer**: Node- und Edge-Style aus Daten oder Callback (Farbe, Größe, Form, Icon, Label). Device-Kinds werden *ein* Preset. **Edge-Typen** (gerichtet, gestrichelt, Label, Kind: wikilink, typed, tag, semantic) | Typed Wikilinks (`supersedes`, `relates_to`, …) direkt darstellbar |
+| J3 | **Quadtree** für Hit-Testing und Viewport-Culling | aus `synaipse/packages/web/src/Quadtree.ts` übernehmen |
+| J4 | **LOD**: Punkte → Kanten → Labels je Zoom, Label-Kollisionsvermeidung, Community-Aggregation in Super-Nodes beim Herauszoomen | Logik aus `GraphAtlas.ts` |
+| J5 | **Layout-Engine**: Barnes-Hut (O(n log n)), Alpha-Cooling, Ausführung im **Web Worker**, Modus `static` (vorberechnete Positionen vom Server) | Ersetzt die O(n²)-`ForceLayout` |
+| J6 | **Cluster-Hüllen** (Convex/Concave Hull pro Community) und Community-Paletten im Theme | ersetzt `Hulls.ts` und das SVG-Overlay |
+| J7 | **Interaktions-API**: `highlight(ids)`, `dimOthers`, `filter(predicate)`, `neighborhood(id, depth)`, Auswahl (Lasso, Multi), erweiterte Events (`edgeClick`, `dblclick`, `contextmenu`, `selectionChange`, `viewportChange`) | Suche → Highlight, Pinned-„Boost-Zone“ (Backlog #13) |
+| J8 | **Overlays**: Minimap, Heat- und Trail-Animationen als Plugin-Hooks (`onBeforeDraw`/`onAfterDraw`) | Heat und Trails aus `Graph.ts` |
+| J9 | **Idle- und Visibility-Stop**: Render-Loop nur bei Änderung oder Animation, Pause bei `hidden` | Pflicht für PKG-Studio-Tabs |
+| J10 | **Theme aus CSS-Variablen** `ThemeTokens.fromCssVars(el)` | Brücke zu E3 |
+| J11 | Optionaler **WebGL2-Instanced-Renderer** hinter demselben Interface, für über 50k Knoten | Erfahrung aus dem Lean-Tier von `Graph3D` (Draw-Calls 5576 → 2) |
+| J12 | `RectBoard`: editierbare Karten (Drag, Resize, Seiten-Anker), Undo-Hooks | Basis für den Canvas-Tab |
+| J13 | Distribution: Versions-Tags. Synaipse konsumiert per `github:stefanwerfling/jsNGraph#<tag>` (`prepare: tsup` ist vorhanden). nornen stellt vom kopierten IIFE auf eine Dependency um | Reproduzierbare Builds |
+
+### F2. Einsatz in Synaipse
+
+| Stufe | Synaipse-Änderung | Benötigt | Effekt |
+|---|---|---|---|
+| S1 | **Lokaler Graph** im Note-Viewer (RadialLayout) | J1, J2, J7, J9 | Neues Feature, risikoarm, validiert die API |
+| S2 | **`GraphNGraph.ts`** als `GraphRenderer`-Implementierung. 2D-Graph von cytoscape auf jsNGraph umstellen, danach cytoscape entfernen | J1–J8 | −455 KB, keine SVG-Overlay-Schichten mehr |
+| S3 | **Atlas auf jsNGraph** (Modus `static` plus LOD plus Aggregation). `GraphAtlas.ts` und `Quadtree.ts` werden ein dünner Adapter | J3, J4, J5 | Eine Engine von 1 bis 100k Knoten. Die 5k/20k-Schwellen (`App.ts:39-46`) werden zu einer LOD-Frage statt eines View-Wechsels |
+| S4 | **Roadmap-DAG** mit LayeredLayout bzw. ModelView-Granularität | J2, J7 | Abhängigkeiten sichtbar, Phasen ein- und ausklappbar |
+| S5 | **Benchmarks und Activity** mit `RectCharts` (Sparkline, BarStrip, Timeline, Heatmap) statt handgerollter Charts | — | Weniger Code, einheitlicher Look |
+| S6 | **Canvas-Tab** auf RectBoard-Kamera und -Connector-Routing | J1, J12 | `CanvasRenderer.ts` wird deutlich kleiner |
+| S7 | Infographic-Light: einfache `:::infographic`-Blöcke über RectCharts, @antv nur für komplexe Templates | Adapter DSL → Rect | Weniger Bundle |
+
+**Bleibt bewusst:** **3D-Graph** auf three.js. jsNGraph wird nicht 3D. Graph3D wird aber in Module zerlegt (D2), und seine Instancing-Erfahrung fließt in J11 ein.
+
+---
+
+## 9. Säule G: Engineering-Hygiene
+
+### G1. Tests
+- Contract-Tests für beide NoteAdapter (siehe Phase 0).
+- Neue Tests für `routes.ts` (per Router-Table testbar), `jobs.ts`, `Watcher.ts`, `Communities.ts`, `Layout.ts`, Qdrant-Store und Embedder (gemockt).
+- `service.test.ts` (1840 Zeilen) entlang der Service-Aufteilung zerlegen.
+- E2E: Embed-Ausfall → Recovery (B1/B4), Write → SSE → UI-Update.
+
+### G2. Observability
+- **pino** mit Levels und Request-IDs statt ca. 82 `stderr.write`/`console.*`. Keine geschluckten Fehler (`Cache.ts:48,70,205`).
+- `/api/metrics` (Prometheus-Format): Embed-Latenz, Index-Lag, Queue-Tiefe, Event-Loop-Delay, Cache-Hit-Rate, Tokens pro MCP-Antwort.
+- Die UI-Seite „System“ (Admin) zeigt dieselben Werte.
+
+### G3. Qualitätssicherung in CI
+- GitHub Actions: `lint`, `tsc --build`, `vitest`, Bench-Gate (A7), Bundle-Budget (D4), **Playwright-Smoke** (Standalone *und* Embed-Mount in einer Test-Host-Seite) mit axe-a11y-Check. Die vielen offenen „Browser-Smoke offen“ aus den letzten Sessions werden so automatisiert.
+
+### G4. Konfiguration
+- Ein typisiertes Config-Schema (VTS) mit Startup-Validierung und generierter Doku in `doc/configuration.md`. Die 8 direkten `process.env`-Zugriffe außerhalb von `core/Config.ts` werden entfernt. Die Embed-Dimension kommt vom Modell statt aus der Lookup-Tabelle (`vector/Factory.ts:10-37`).
+
+### G5. Dependencies
+- Git-Dependencies (`ngit`, `vts`, `mdfloor`, künftig `jsngraph`) auf **Tags oder Commit-SHA pinnen**.
+- `@modelcontextprotocol/sdk` auf `^1.29`, `vitest` auf eine aktuelle Major-Version, Qdrant-Client auf die `query`-API.
+- `gray-matter` (unmaintained, js-yaml 3) durch `yaml` plus einen schlanken Frontmatter-Splitter ersetzen. Mit Round-Trip-Tests, weil Frontmatter-Treue für Obsidian-Kompatibilität kritisch ist.
+
+### G6. Dokumentation
+- `doc/architecture.md` neu schreiben: aktuelle Packages, Server-Mode, Embed, Worker, SQLite-State, jsNGraph.
+- `doc/mcp-tools.md` aus den Tool-Definitionen **generieren** (Script plus CI-Check gegen Drift). Ebenso `templates/Memory/Project/architecture/mcp-tool-set.md`.
+- Neu: `doc/embedding.md` (Baustein-Vertrag E1/E2) und `doc/adr/` für die großen Entscheidungen in diesem Plan.
+
+---
+
+## 10. Umsetzungs-Roadmap
+
+Jede Phase besteht aus einzeln committbaren Slices und endet grün (Tests, Lint, Bench-Gate).
+
+| Phase | Inhalt | Abhängig von | Grobe Größe |
+|---|---|---|---|
+| **P0 Korrektheit** | B1–B12 plus Adapter-Contract-Tests | — | 2–3 Tage |
+| **P1 Fundament** | G3 CI-Grundgerüst, G2 Logging, G5 Pinning, A2 SQLite-State, A1 `LinkIndex` und Bulk-Write | P0 | 1 Woche |
+| **P2 LLM-Protokoll** | B1 (SDK, instructions, annotations, structured output), B3 Token-Ökonomie, B2 Konsolidierung mit Aliasen, B6 Hook über `additionalContext` | P0 | 1 Woche |
+| **P3 Embed-Vertrag** | D1 View/Disposables/Tab-Registry, E1 `mount → MountHandle` plus `apiUrl`, D3 CSS-Scoping, E2 `close`/`ready`/explizite Config | P1 | 1–1,5 Wochen |
+| **P4 Performance** | A3 Worker (Layout, suggestLinks, HF), A4 Qdrant-`query`-API und Diff-Embedding, A5 Router/ETag/Pagination/Graph-Deltas, D4 Lazy-Panels, D5 Chat-Streaming | P1 | 1,5 Wochen |
+| **P5 jsNGraph I** | J1, J2, J3, J7, J9, J10, J13 → S1 Lokaler Graph | parallel zu P3/P4 | 1 Woche |
+| **P6 jsNGraph II** | J4, J5, J6, J8 → S2 cytoscape raus, S3 Atlas auf jsNGraph | P5 | 1,5–2 Wochen |
+| **P7 UX** | C1 Routing und Palette, C2 Toast/Confirm/States, C3 i18n, C4 a11y, D2 God-Files zerlegen | P3 | 1,5 Wochen |
+| **P8 Gedächtnis-Qualität** | B4 Dedupe/supersedes/Konsolidierung/temporal, B5 Resources/Prompts/Elicitation, B7 Eval-Harness, C5 Inbox-UI | P2 | 1,5 Wochen |
+| **P9 PKG-Studio-Integration** | E3 Tokens, E4 Paket-Split und Lib-Build und Manifest, MCP-Registrierung beim Host. Danach der Gegenplan im PKG-Studio-Repo | P3, P5 | 1 Woche |
+| **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | offen |
+| **P11 Server-Mode** | A6 Skalierung Server-Mode | P0, P1 | 1 Woche |
+
+**Empfohlene Reihenfolge, wenn nur ein Strang läuft:** P0 → P2 → P1 → P3 → P5 → P4 → P7 → P6 → P8 → P9 → Rest.
+Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größten Nutzen pro Aufwand für die tägliche Claude-Code-Nutzung. P3 ist die Voraussetzung für einen sauberen PKG-Studio-Baustein.
+
+---
+
+## 11. Erfolgsmessung
+
+| KPI | Heute | Ziel |
+|---|---|---|
+| MCP Tool-Liste (Tokens) | ca. 6k | < 3k |
+| Write-Antwort (Tokens) | ganze Note | < 150 |
+| Recall@5 im Eval-Harness | (neu messen) | +10 % ggü. Baseline bei ≤ gleichen Tokens |
+| Write p95 bei 50k Notes | O(N) Backlink-Rebuild | < 30 ms |
+| Event-Loop-Stall max. | Layout/Louvain synchron | < 50 ms |
+| Initial-JS | 639 KB | < 250 KB |
+| Graph-Engines in `web` | 3 (+ Canvas-Kamera) | 2 (jsNGraph, three) |
+| Interaktiver 2D-Graph | Warnung ab 5k, aus ab 20k | flüssig (≥ 30 FPS) bis 50k mit LOD |
+| Native `alert`/`confirm`/`prompt` | ca. 44 | 0 |
+| Listener-Leaks nach `unmount()` | kein Unmount | 0 (Playwright-Test zählt Listener und Timer) |
+| Host-CSS-Workarounds in PKG Studio | ca. 110 Zeilen | 0 |
+| Doku-Drift MCP-Tools | 23/36 dokumentiert | generiert, CI-geprüft |
+
+---
+
+## 12. Bewusst nicht im Plan
+
+- Kein Framework-Wechsel in `web` (React, Svelte, Lit). Das Komponenten-Fundament (D1) bleibt Vanilla TS.
+- Kein 3D in jsNGraph. Der 3D-Graph bleibt auf three.js.
+- Keine Auto-Capture aller Tool-Calls und kein LLM-generierter Wiki-Ingest (siehe die Backlog-Entscheidungen).
+- ChromaDB und LanceDB (Backlog #11/#14) bleiben im Backlog. Mit dem SQLite-State (A2) und der Qdrant-`query`-API ist ein `VectorStore`-Port aber vorbereitet, und LanceDB wäre danach ein kleiner Slice.
+
+## 13. Offene Entscheidungen
+
+1. **SQLite-State:** `node:sqlite` (setzt Node ≥ 22.5 voraus, heute `engines >=20`) oder `better-sqlite3` (native Abhängigkeit)?
+2. **MCP im Embed:** Tools beim PKG-Studio-Gateway registrieren (E2) oder `/synaipse/mcp` beibehalten? Das hat Auswirkungen auf Token und ACL.
+3. **Tool-Konsolidierung (B2):** Wie lange bleiben die alten Tool-Namen als Aliase bestehen (eine Version oder dauerhaft)?
+4. **Shared Tokens (E3):** eigenes Paket `pkg-tokens` oder Teil des PKG-Studio-Shells?
+5. **i18n-Default:** UI-Default Deutsch oder Englisch? Die Doku ist überwiegend Englisch.
