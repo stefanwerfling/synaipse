@@ -178,3 +178,14 @@ describe('Vault backlinks via aliases', () => {
         expect(vault.backlinksOf('plain.md')).toEqual([]);
     });
 });
+describe('isIgnoredPath', () => {
+    it('ignores sidecar and tool folders, not notes', async () => {
+        const {isIgnoredPath} = await import('../src/Walker.js');
+        expect(isIgnoredPath('.ngit/objects/ab')).toBe(true);
+        expect(isIgnoredPath('.synaipse/state.db')).toBe(true);
+        expect(isIgnoredPath('.synaipse-chats/x.json')).toBe(true);
+        expect(isIgnoredPath('Projects/.git/HEAD')).toBe(true);
+        expect(isIgnoredPath('Projects/alpha.md')).toBe(false);
+        expect(isIgnoredPath('synaipse-notes/a.md')).toBe(false);
+    });
+});

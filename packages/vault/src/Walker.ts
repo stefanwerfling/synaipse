@@ -1,9 +1,16 @@
 import {readdir} from 'node:fs/promises';
 import path from 'node:path';
 
-// Keep in sync with Watcher.ts. `.synaipse/` holds the SQLite state DB,
-// `.ngit/` the version history — neither contains notes.
-const IGNORED_DIRS = new Set(['.git', '.ngit', '.synaipse', '.obsidian', 'node_modules', '.trash', '.synaipse-chats']);
+// Shared with Watcher.ts. `.synaipse*` covers every sidecar (`.synaipse/`
+// with the SQLite state DB, `.synaipse-chats/`, …), `.ngit/` holds the
+// version history — none of them contains notes.
+const IGNORED_DIRS = new Set(['.git', '.ngit', '.obsidian', 'node_modules', '.trash']);
+
+/** True for directory names that are never part of the vault's notes. */
+export const isIgnoredDir = (name: string): boolean => IGNORED_DIRS.has(name) || name.startsWith('.synaipse');
+
+/** True when any segment of `p` is an ignored directory. */
+export const isIgnoredPath = (p: string): boolean => p.split(/[\\/]/).some(isIgnoredDir);
 
 export async function* walkMarkdown(root: string): AsyncIterableIterator<string> {
     const entries = await readdir(root, {withFileTypes: true});
@@ -12,7 +19,7 @@ export async function* walkMarkdown(root: string): AsyncIterableIterator<string>
         const full = path.join(root, entry.name);
 
         if (entry.isDirectory()) {
-            if (IGNORED_DIRS.has(entry.name)) {
+            if (isIgnoredDir(entry.name)) {
                 continue;
             }
 
@@ -33,7 +40,7 @@ export async function* walkCanvas(root: string): AsyncIterableIterator<string> {
         const full = path.join(root, entry.name);
 
         if (entry.isDirectory()) {
-            if (IGNORED_DIRS.has(entry.name)) {
+            if (isIgnoredDir(entry.name)) {
                 continue;
             }
 

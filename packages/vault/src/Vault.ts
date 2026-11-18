@@ -11,6 +11,9 @@ import {walkMarkdown} from './Walker.js';
 import {currentWriteBatch} from './WriteBatch.js';
 import type {WriteBatchChanges} from '@synaipse/core';
 
+/** Files read concurrently during the initial load. */
+const LOAD_CONCURRENCY = 32;
+
 const log = createLogger('vault');
 
 export interface VaultHistoryConfig {
@@ -94,8 +97,19 @@ export class Vault {
         this.links.clear();
         this.tagIndex.clear();
 
+        // Read + stat with bounded parallelism (plan P4 / A4); indexing
+        // stays sequential and in walk order, so the result is identical
+        // to the old one-file-at-a-time load.
+        const files: string[] = [];
         for await (const file of walkMarkdown(this.root)) {
-            await this.ingestFile(file);
+            files.push(file);
+        }
+
+        for (let i = 0; i < files.length; i += LOAD_CONCURRENCY) {
+            const batch = await Promise.all(files.slice(i, i + LOAD_CONCURRENCY).map((file) => this.readSource(file)));
+            for (const source of batch) {
+                this.applySource(source);
+            }
         }
 
         this.loaded = true;
@@ -269,14 +283,20 @@ export class Vault {
     }
 
     private async ingestFile(absolutePath: string): Promise<void> {
-        const raw = await readFile(absolutePath, 'utf8');
-        const info = await stat(absolutePath);
+        this.applySource(await this.readSource(absolutePath));
+    }
 
+    private async readSource(absolutePath: string): Promise<{absolutePath: string; raw: string; mtime: number}> {
+        const [raw, info] = await Promise.all([readFile(absolutePath, 'utf8'), stat(absolutePath)]);
+        return {absolutePath, raw, mtime: info.mtimeMs};
+    }
+
+    private applySource({absolutePath, raw, mtime}: {absolutePath: string; raw: string; mtime: number}): void {
         const note = parseNote({
             vaultRoot: this.root,
             absolutePath,
             raw,
-            mtime: info.mtimeMs
+            mtime
         });
 
         const validation = validateFrontmatter(note.frontmatter);
