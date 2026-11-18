@@ -5138,7 +5138,7 @@ body.synaipse-sidebar-resizing {
     position: absolute;
     top: var(--space-2);
     right: var(--space-3);
-    z-index: 1;
+    z-index: 2;
     font-size: 11px;
     color: var(--text-2);
     background: var(--bg-elev);
@@ -5159,21 +5159,6 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .graph-canvas-3d .graph {
     background: #000000;
 }
-
-.synaipse-root .graph-hulls,
-.synaipse-root .graph-trails,
-.synaipse-root .graph-waves {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
-}
-
-.synaipse-root .graph-hulls { z-index: 0; }
-.synaipse-root .graph-trails { z-index: 2; }
-.synaipse-root .graph-waves { z-index: 3; }
 
 .synaipse-root .loading {
     padding: var(--space-6);

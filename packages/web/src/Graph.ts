@@ -1,254 +1,121 @@
-import cytoscape, {Core, ElementDefinition} from 'cytoscape';
+import type {NGraph, NGraphEdgeData, NGraphHull, NGraphNodeData} from 'jsngraph';
 import type {Graph as GraphData} from '@synaipse/core';
 import {colorForNode, tagColor} from './Colors.js';
 import {communityColor, detectCommunities, type CommunityResult} from './Communities.js';
-import {clear, el} from './Dom.js';
+import {el} from './Dom.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
-import {CONCENTRATE_COLOR, PULSE_COLORS, concentrateOpacity, concentrateRadius} from './GraphRenderer.js';
+import {CONCENTRATE_COLOR, PULSE_COLORS, filterGraph} from './GraphRenderer.js';
+import {resolvePositions, type PositionMap} from './GraphPositions.js';
+import {edgeKinds, loadJsNGraph, readGraphTheme, type JsNGraph} from './GraphStyle.js';
 import {normalizeHeat} from './Heat.js';
-import {convexHull, expandHull, toSvgPoints, type Point} from './Hulls.js';
 import {PersistentValue} from './Persistence.js';
-import {bezierControl, trailOpacity, trailSvgPath} from './Trail.js';
+import {onThemeChange} from './Theme.js';
 
 const STORAGE_POSITIONS = 'synaipse.graph.positions';
-type PositionMap = Record<string, {x: number; y: number}>;
 const positionsStore = new PersistentValue<PositionMap>(STORAGE_POSITIONS, {});
 
 export type GraphState = GraphRendererState;
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const HULL_PADDING = 24;
-const TRAIL_DURATION_MS = 2200;
-const TRAIL_CURVE = 28;
-const WAVE_DURATION_MS = 1100;
-const WAVE_END_RADIUS = 140;
-const WAVE_SECONDARY_DELAY_MS = 220;
-
-interface TrailRecord {
-    path: SVGPathElement;
-    fromId: string;
-    toId: string;
-    color: string;
-    startedAt: number;
-}
-
-interface WaveRecord {
-    circle: SVGCircleElement;
-    nodeId: string;
-    startRadius: number;
-    startedAt: number;
-}
-
 export type GraphCallbacks = GraphRendererCallbacks;
 
-interface FilterResult {
-    elements: ElementDefinition[];
-    visibleNodeCount: number;
-    visibleEdgeCount: number;
+const HULL_PADDING = 24;
+const HULL_MIN_NODES = 3;
+const HEAT_COLOR = '#ffd166';
+
+interface BuiltGraph {
+    nodes: NGraphNodeData[];
+    edges: NGraphEdgeData[];
+    hulls: NGraphHull[];
     communityCount: number;
 }
 
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const SPIRAL_SPACING = 32;
+/** Radius 7..16 by tag count, like the old cytoscape mapData(tagCount, 0, 5, 14, 32) diameter. */
+export const nodeRadius = (tagCount: number): number => 7 + (Math.min(5, Math.max(0, tagCount)) / 5) * 9;
 
 /**
- * Place all visible nodes deterministically without running a force layout.
- * - Nodes with a saved position use it verbatim.
- * - Nodes without one are placed at the centroid of their already-placed
- *   neighbours (with a small index-based jitter so coincident nodes don't
- *   pile up exactly on top of each other).
- * - Orphan new nodes are dropped on a golden-angle spiral around (0,0).
- *
- * This replaces the previous cose-on-missing-positions path that blocked
- * the main thread for seconds on large vaults.
+ * The visible graph as jsNGraph data: filtered nodes coloured by community
+ * or tag, stable edge ids (endpoints + kind, plus a counter for duplicates)
+ * and one hull per tag with at least three visible notes.
  */
-export const resolvePositions = (
-    elements: readonly ElementDefinition[],
-    savedPositions: Readonly<Record<string, {x: number; y: number}>>
-): Map<string, {x: number; y: number}> => {
-    const out = new Map<string, {x: number; y: number}>();
-    const nodeIds: string[] = [];
-    const neighbours = new Map<string, string[]>();
-
-    for (const e of elements) {
-        const id = e.data.id;
-        if (typeof id !== 'string') continue;
-
-        if (e.data.source === undefined) {
-            nodeIds.push(id);
-            const saved = savedPositions[id];
-            if (saved !== undefined) {
-                out.set(id, {x: saved.x, y: saved.y});
-            }
-        } else {
-            const source = e.data.source as string;
-            const target = e.data.target as string;
-            const a = neighbours.get(source) ?? [];
-            a.push(target);
-            neighbours.set(source, a);
-            const b = neighbours.get(target) ?? [];
-            b.push(source);
-            neighbours.set(target, b);
-        }
-    }
-
-    let orphanIndex = 0;
-
-    for (const id of nodeIds) {
-        if (out.has(id)) continue;
-
-        const neighbourIds = neighbours.get(id) ?? [];
-        let sumX = 0;
-        let sumY = 0;
-        let count = 0;
-
-        for (const n of neighbourIds) {
-            if (n === id) continue;
-            const pos = out.get(n);
-            if (pos !== undefined) {
-                sumX += pos.x;
-                sumY += pos.y;
-                count += 1;
-            }
-        }
-
-        if (count > 0) {
-            // Centroid of placed neighbours, plus a deterministic jitter on
-            // a tiny golden-angle ring so multiple new siblings don't overlap.
-            const jitterAngle = orphanIndex * GOLDEN_ANGLE;
-            out.set(id, {
-                x: sumX / count + Math.cos(jitterAngle) * 18,
-                y: sumY / count + Math.sin(jitterAngle) * 18
-            });
-        } else {
-            // No neighbour anchor — spiral around origin.
-            const r = SPIRAL_SPACING * Math.sqrt(orphanIndex + 1);
-            const theta = orphanIndex * GOLDEN_ANGLE;
-            out.set(id, {x: r * Math.cos(theta), y: r * Math.sin(theta)});
-        }
-
-        orphanIndex += 1;
-    }
-
-    return out;
-};
-
-const buildElements = (state: GraphState, communities: CommunityResult | null): FilterResult => {
-    const tagOk = (nodeTags: string[]): boolean => {
-        if (state.selectedTags.size === 0) {
-            return true;
-        }
-
-        return nodeTags.some((t) => state.selectedTags.has(t));
-    };
-
-    const visibleIds = new Set<string>();
-
-    for (const node of state.data.nodes) {
-        if (tagOk(node.tags)) {
-            visibleIds.add(node.id);
-        }
-    }
-
-    const filteredEdges = state.data.edges.filter(
-        (e) => visibleIds.has(e.from) && visibleIds.has(e.to)
-    );
-
-    if (state.hideIsolated) {
-        const endpoints = new Set<string>();
-        for (const e of filteredEdges) {
-            endpoints.add(e.from);
-            endpoints.add(e.to);
-        }
-
-        for (const id of visibleIds) {
-            if (!endpoints.has(id)) {
-                visibleIds.delete(id);
-            }
-        }
-    }
-
+export const buildGraph = (state: GraphState, communities: CommunityResult | null): BuiltGraph => {
+    const filtered = filterGraph(state);
     const useCommunity = state.showCommunities && communities !== null;
+    const nodes: NGraphNodeData[] = filtered.nodes.map((n) => {
+        const community = communities?.partition.get(n.id);
 
-    const nodes: ElementDefinition[] = state.data.nodes
-        .filter((n) => visibleIds.has(n.id))
-        .map((n) => {
-            const community = communities?.partition.get(n.id);
-            const color = useCommunity && community !== undefined
-                ? communityColor(community)
-                : colorForNode(n.tags);
+        return {
+            id: n.id,
+            label: n.title,
+            shape: 'dot',
+            color: useCommunity && community !== undefined ? communityColor(community) : colorForNode(n.tags),
+            size: nodeRadius(n.tags.length)
+        };
+    });
 
-            return {
-                data: {
-                    id: n.id,
-                    label: n.title,
-                    color,
-                    tagCount: n.tags.length
-                }
-            };
-        });
-
-    // Stable edge ids (endpoints + kind, plus a counter for duplicates) so
-    // an update can diff against the live elements instead of rebuilding.
     const seen = new Map<string, number>();
-    const edges: ElementDefinition[] = filteredEdges
-        .filter((e) => visibleIds.has(e.from) && visibleIds.has(e.to))
-        .map((e) => {
-            const key = `e:${e.kind}:${e.from}→${e.to}`;
-            const n = seen.get(key) ?? 0;
-            seen.set(key, n + 1);
-            return {data: {id: n === 0 ? key : `${key}#${n}`, source: e.from, target: e.to, kind: e.kind}};
-        });
+    const edges: NGraphEdgeData[] = filtered.edges.map((e) => {
+        const key = `e:${e.kind}:${e.from}→${e.to}`;
+        const n = seen.get(key) ?? 0;
+        seen.set(key, n + 1);
+        return {id: n === 0 ? key : `${key}#${n}`, source: e.from, target: e.to, kind: e.kind};
+    });
 
-    return {
-        elements: [...nodes, ...edges],
-        visibleNodeCount: nodes.length,
-        visibleEdgeCount: edges.length,
-        communityCount: communities?.count ?? 0
-    };
+    const hulls: NGraphHull[] = [];
+
+    if (state.showHulls) {
+        const byTag = new Map<string, string[]>();
+
+        for (const n of filtered.nodes) {
+            for (const tag of n.tags) {
+                const ids = byTag.get(tag) ?? [];
+                ids.push(n.id);
+                byTag.set(tag, ids);
+            }
+        }
+
+        for (const [tag, ids] of byTag) {
+            if (ids.length >= HULL_MIN_NODES) {
+                hulls.push({id: tag, nodeIds: ids, color: tagColor(tag), label: `${tag} · ${ids.length}`, padding: HULL_PADDING, opacity: 0.12});
+            }
+        }
+    }
+
+    return {nodes, edges, hulls, communityCount: communities?.count ?? 0};
 };
 
+/**
+ * The 2D vault graph on jsNGraph (plan P6 / S2), replacing cytoscape:
+ * canvas rendering with a static layout. Positions come from the saved
+ * arrangement; new notes land next to their neighbours (resolvePositions),
+ * drags are persisted. Tag hulls, heat rings and the live-activity effects
+ * (pulse, trail, concentrate) are drawn by jsNGraph itself.
+ */
 export class GraphView implements GraphRenderer {
     public readonly element: HTMLElement;
     private state: GraphState;
-    private canvas: HTMLElement;
-    private stats: HTMLElement;
-    private hullLayer: SVGSVGElement;
-    private trailLayer: SVGSVGElement;
-    private waveLayer: SVGSVGElement;
-    private cy: Core | null = null;
-    private rafHandle: number | null = null;
-    private trailRaf: number | null = null;
-    private waveRaf: number | null = null;
-    private nodeIndex: Map<string, GraphData['nodes'][number]> = new Map();
+    private readonly stage: HTMLElement;
+    private readonly stats: HTMLElement;
+    private graph: NGraph | null = null;
+    private lib: JsNGraph | null = null;
+    private destroyed = false;
+    private heat: Map<string, number> = new Map();
+    private hullLabels: Map<string, string> = new Map();
+    private hoveredNode = false;
     private cachedCommunities: {data: GraphData; result: CommunityResult} | null = null;
-    private trails: TrailRecord[] = [];
-    private waves: WaveRecord[] = [];
+    private unsubscribeTheme: (() => void) | null = null;
 
     public constructor(initial: GraphState, private readonly cb: GraphCallbacks) {
         this.state = initial;
         this.element = el('div', {class: 'graph-canvas'});
+        this.stage = el('div', {class: 'graph'});
         this.stats = el('div', {class: 'graph-stats'});
-        this.hullLayer = document.createElementNS(SVG_NS, 'svg');
-        this.hullLayer.setAttribute('class', 'graph-hulls');
-        this.hullLayer.setAttribute('preserveAspectRatio', 'none');
-        this.trailLayer = document.createElementNS(SVG_NS, 'svg');
-        this.trailLayer.setAttribute('class', 'graph-trails');
-        this.trailLayer.setAttribute('preserveAspectRatio', 'none');
-        this.waveLayer = document.createElementNS(SVG_NS, 'svg');
-        this.waveLayer.setAttribute('class', 'graph-waves');
-        this.waveLayer.setAttribute('preserveAspectRatio', 'none');
-        this.canvas = el('div', {class: 'graph'});
+        this.element.appendChild(this.stage);
+        // After the stage: the canvas paints its own background.
         this.element.appendChild(this.stats);
-        this.element.appendChild(this.hullLayer);
-        this.element.appendChild(this.canvas);
-        this.element.appendChild(this.trailLayer);
-        this.element.appendChild(this.waveLayer);
     }
 
     public mount(): void {
-        this.render();
+        void this.init();
     }
 
     public update(state: GraphState): void {
@@ -257,290 +124,100 @@ export class GraphView implements GraphRenderer {
     }
 
     public destroy(): void {
-        if (this.rafHandle !== null) {
-            cancelAnimationFrame(this.rafHandle);
-            this.rafHandle = null;
-        }
-        if (this.trailRaf !== null) {
-            cancelAnimationFrame(this.trailRaf);
-            this.trailRaf = null;
-        }
-        if (this.waveRaf !== null) {
-            cancelAnimationFrame(this.waveRaf);
-            this.waveRaf = null;
-        }
-        for (const trail of this.trails) {
-            trail.path.remove();
-        }
-        this.trails = [];
-        for (const wave of this.waves) {
-            wave.circle.remove();
-        }
-        this.waves = [];
-        if (this.cy !== null) {
-            this.cy.destroy();
-            this.cy = null;
-        }
+        this.destroyed = true;
+        this.unsubscribeTheme?.();
+        this.unsubscribeTheme = null;
+        this.graph?.destroy();
+        this.graph = null;
     }
 
     public applyHeat(heatById: ReadonlyMap<string, number>): void {
-        if (this.cy === null) {
-            return;
+        const heat = new Map<string, number>();
+
+        for (const [id, raw] of heatById) {
+            const h = normalizeHeat(raw);
+            if (h > 0) heat.set(id, h);
         }
 
-        const cy = this.cy;
-
-        // Coalesce all per-node style() / removeStyle() calls into a single
-        // Cytoscape re-render. Without batch(), each mutation triggers its
-        // own style-recalc + paint — on multi-thousand-node vaults that's
-        // seconds of jank per heat update.
-        cy.batch(() => {
-            if (!this.state.showHeat) {
-                cy.nodes().forEach((node) => {
-                    node.removeStyle('border-width border-color border-opacity');
-                });
-                return;
-            }
-
-            cy.nodes().forEach((node) => {
-                const raw = heatById.get(node.id()) ?? 0;
-                const heat = normalizeHeat(raw);
-
-                if (heat <= 0) {
-                    node.removeStyle('border-width border-color border-opacity');
-                    return;
-                }
-
-                node.style({
-                    'border-width': 2 + heat * 6,
-                    'border-color': '#ffd166',
-                    'border-opacity': 0.35 + heat * 0.55
-                });
-            });
-        });
-    }
-
-    public trail(fromId: string, toId: string, kind: EventKind): void {
-        if (this.cy === null || fromId === toId) {
-            return;
-        }
-
-        const from = this.cy.getElementById(fromId);
-        const to = this.cy.getElementById(toId);
-
-        if (from.length === 0 || to.length === 0 || !from.isNode() || !to.isNode()) {
-            return;
-        }
-
-        const a = from.renderedPosition();
-        const b = to.renderedPosition();
-        const control = bezierControl({x: a.x, y: a.y}, {x: b.x, y: b.y}, TRAIL_CURVE);
-        const color = PULSE_COLORS[kind];
-
-        const path = document.createElementNS(SVG_NS, 'path');
-        path.setAttribute('d', trailSvgPath({x: a.x, y: a.y}, {x: b.x, y: b.y}, control));
-        path.setAttribute('stroke', color);
-        path.setAttribute('stroke-width', '2.4');
-        path.setAttribute('stroke-linecap', 'round');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke-opacity', '0.95');
-        path.setAttribute('filter', `drop-shadow(0 0 6px ${color})`);
-
-        this.trailLayer.appendChild(path);
-
-        this.trails.push({path, fromId, toId, color, startedAt: performance.now()});
-        this.scheduleTrailTick();
-    }
-
-    private scheduleTrailTick(): void {
-        if (this.trailRaf !== null) {
-            return;
-        }
-
-        const tick = (): void => {
-            const now = performance.now();
-            const survivors: TrailRecord[] = [];
-
-            for (const trail of this.trails) {
-                const elapsed = now - trail.startedAt;
-                const opacity = trailOpacity(elapsed, TRAIL_DURATION_MS);
-
-                if (opacity <= 0) {
-                    trail.path.remove();
-                    continue;
-                }
-
-                trail.path.setAttribute('stroke-opacity', opacity.toFixed(3));
-
-                if (this.cy !== null) {
-                    const from = this.cy.getElementById(trail.fromId);
-                    const to = this.cy.getElementById(trail.toId);
-
-                    if (from.length > 0 && to.length > 0 && from.isNode() && to.isNode()) {
-                        const a = from.renderedPosition();
-                        const b = to.renderedPosition();
-                        const control = bezierControl({x: a.x, y: a.y}, {x: b.x, y: b.y}, TRAIL_CURVE);
-                        trail.path.setAttribute('d', trailSvgPath({x: a.x, y: a.y}, {x: b.x, y: b.y}, control));
-                    }
-                }
-
-                survivors.push(trail);
-            }
-
-            this.trails = survivors;
-
-            if (this.trails.length === 0) {
-                this.trailRaf = null;
-                return;
-            }
-
-            this.trailRaf = requestAnimationFrame(tick);
-        };
-
-        this.trailRaf = requestAnimationFrame(tick);
+        this.heat = heat;
+        this.graph?.redraw();
     }
 
     public pulse(noteIds: readonly string[], kind: EventKind): void {
-        if (this.cy === null || noteIds.length === 0) {
-            return;
-        }
-
-        const color = PULSE_COLORS[kind];
-
-        for (const id of noteIds) {
-            const node = this.cy.getElementById(id);
-
-            if (node.length === 0 || !node.isNode()) {
-                continue;
-            }
-
-            node.stop(true, true);
-            node.style({
-                'overlay-color': color,
-                'overlay-opacity': 0.55,
-                'overlay-padding': 14
-            });
-
-            node.animate(
-                {
-                    style: {
-                        'overlay-opacity': 0,
-                        'overlay-padding': 28
-                    }
-                },
-                {duration: 1400, easing: 'ease-out'}
-            );
-        }
+        if (noteIds.length > 0) this.graph?.pulse(noteIds, PULSE_COLORS[kind], {durationMs: 1400});
     }
 
-    public focus(_noteId: string): void {
-        // 2D: no camera, nothing to orbit. Intentional no-op.
+    public trail(fromId: string, toId: string, kind: EventKind): void {
+        this.graph?.trail(fromId, toId, PULSE_COLORS[kind], {durationMs: 2200, curve: 28});
     }
 
     public concentrate(noteId: string): void {
-        if (this.cy === null) {
-            return;
-        }
-
-        const node = this.cy.getElementById(noteId);
-
-        if (node.length === 0 || !node.isNode()) {
-            return;
-        }
-
-        const startRadius = Math.max(8, node.renderedOuterWidth() / 2);
-        this.spawnWave(noteId, startRadius, 0);
-        this.spawnWave(noteId, startRadius, WAVE_SECONDARY_DELAY_MS);
-        this.scheduleWaveTick();
+        this.graph?.ripple(noteId, CONCENTRATE_COLOR, {waves: 2, delayMs: 220, durationMs: 1100, endRadius: 140});
     }
 
-    private spawnWave(nodeId: string, startRadius: number, delayMs: number): void {
-        if (this.cy === null) {
-            return;
-        }
+    public focus(_noteId: string): void {
+        // Called on every live event; moving the 2D camera each time would
+        // fight the user. Intentional no-op (the 3D view orbits instead).
+    }
 
-        const node = this.cy.getElementById(nodeId);
+    private async init(): Promise<void> {
+        const lib = await loadJsNGraph();
 
-        if (node.length === 0 || !node.isNode()) {
-            return;
-        }
+        if (this.destroyed) return;
 
-        const pos = node.renderedPosition();
-        const circle = document.createElementNS(SVG_NS, 'circle');
-        circle.setAttribute('cx', pos.x.toString());
-        circle.setAttribute('cy', pos.y.toString());
-        circle.setAttribute('r', startRadius.toString());
-        circle.setAttribute('fill', 'none');
-        circle.setAttribute('stroke', CONCENTRATE_COLOR);
-        circle.setAttribute('stroke-width', '2.4');
-        circle.setAttribute('stroke-opacity', '0');
-        circle.setAttribute('filter', `drop-shadow(0 0 8px ${CONCENTRATE_COLOR})`);
-
-        this.waveLayer.appendChild(circle);
-
-        this.waves.push({
-            circle,
-            nodeId,
-            startRadius,
-            startedAt: performance.now() + delayMs
+        this.lib = lib;
+        this.graph = new lib.NGraph(this.stage, {
+            theme: readGraphTheme(lib, this.element),
+            layoutMode: 'static',
+            panZoom: true,
+            detailPanel: false,
+            draggable: true,
+            grid: false,
+            lasso: false,
+            // cytoscape hid labels below ~7 px on screen at a 10 px font.
+            labelMinZoom: 0.7,
+            edgeKinds: {
+                ...edgeKinds(lib),
+                // Solid with an arrow, as before; solid edges are also drawn batched.
+                wikilink: {tone: 'neutral', directed: true, animated: false},
+                tag: {tone: 'neutral', directed: true, animated: false}
+            },
+            tooltip: (node) => node.label,
+            styleNode: (node) => {
+                const h = this.state.showHeat ? this.heat.get(node.id) : undefined;
+                return h === undefined ? null : {ring: {color: HEAT_COLOR, width: 1.5 + h * 4.5, opacity: 0.35 + h * 0.55}};
+            }
         });
+
+        this.graph.on('nodeClick', (node) => {
+            if (node !== null) this.cb.onSelectNote(node.id);
+        });
+        this.graph.on('nodeDragEnd', () => this.snapshotPositions());
+        this.graph.on('nodeHover', (node) => {
+            this.hoveredNode = node !== null;
+            if (this.hoveredNode) this.stage.title = '';
+        });
+        this.stage.addEventListener('mousemove', this.onMouseMove);
+        this.unsubscribeTheme = onThemeChange(() => {
+            if (this.graph !== null && this.lib !== null) this.graph.setTheme(readGraphTheme(this.lib, this.element));
+        });
+
+        this.render(true);
     }
 
-    private scheduleWaveTick(): void {
-        if (this.waveRaf !== null) {
+    /** Tag name and size as a native tooltip over a hull (not over a node). */
+    private readonly onMouseMove = (event: MouseEvent): void => {
+        if (this.graph === null || this.hoveredNode || this.hullLabels.size === 0) {
+            if (this.stage.title !== '') this.stage.title = '';
             return;
         }
 
-        const tick = (): void => {
-            const now = performance.now();
-            const survivors: WaveRecord[] = [];
+        const rect = this.stage.getBoundingClientRect();
+        const ids = this.graph.hullsAt(event.clientX - rect.left, event.clientY - rect.top);
+        const title = ids.map((id) => this.hullLabels.get(id) ?? id).join('\n');
 
-            for (const wave of this.waves) {
-                const elapsed = now - wave.startedAt;
-
-                if (elapsed < 0) {
-                    survivors.push(wave);
-                    continue;
-                }
-
-                if (elapsed >= WAVE_DURATION_MS) {
-                    wave.circle.remove();
-                    continue;
-                }
-
-                const radius = concentrateRadius(elapsed, WAVE_DURATION_MS, wave.startRadius, WAVE_END_RADIUS);
-                const opacity = concentrateOpacity(elapsed, WAVE_DURATION_MS);
-                const widthFactor = 1 - elapsed / WAVE_DURATION_MS;
-
-                if (this.cy !== null) {
-                    const node = this.cy.getElementById(wave.nodeId);
-
-                    if (node.length > 0 && node.isNode()) {
-                        const pos = node.renderedPosition();
-                        wave.circle.setAttribute('cx', pos.x.toString());
-                        wave.circle.setAttribute('cy', pos.y.toString());
-                    }
-                }
-
-                wave.circle.setAttribute('r', radius.toFixed(2));
-                wave.circle.setAttribute('stroke-opacity', (opacity * 0.95).toFixed(3));
-                wave.circle.setAttribute('stroke-width', (1.2 + widthFactor * 2.4).toFixed(2));
-
-                survivors.push(wave);
-            }
-
-            this.waves = survivors;
-
-            if (this.waves.length === 0) {
-                this.waveRaf = null;
-                return;
-            }
-
-            this.waveRaf = requestAnimationFrame(tick);
-        };
-
-        this.waveRaf = requestAnimationFrame(tick);
-    }
+        if (this.stage.title !== title) this.stage.title = title;
+    };
 
     private getCommunities(): CommunityResult | null {
         if (!this.state.showCommunities) return null;
@@ -554,231 +231,50 @@ export class GraphView implements GraphRenderer {
         return result;
     }
 
-    private render(): void {
-        const communities = this.getCommunities();
-        const filter = buildElements(this.state, communities);
-        clear(this.stats);
-        const statsParts = [`${filter.visibleNodeCount} nodes`, `${filter.visibleEdgeCount} edges`];
+    /**
+     * Bring the graph to the current state. Live positions win over saved
+     * ones, so a write elsewhere does not move anything; new notes are
+     * placed next to their neighbours. The camera and selection stay
+     * (setData keeps both), only the first render fits the view.
+     */
+    private render(first = false): void {
+        const graph = this.graph;
+        if (graph === null) return;
 
-        if (this.state.showCommunities && filter.communityCount > 0) {
-            statsParts.push(`${filter.communityCount} communities`);
+        const built = buildGraph(this.state, this.getCommunities());
+        const statsParts = [`${built.nodes.length} nodes`, `${built.edges.length} edges`];
+
+        if (this.state.showCommunities && built.communityCount > 0) {
+            statsParts.push(`${built.communityCount} communities`);
         }
 
         this.stats.textContent = statsParts.join(' · ');
 
-        if (this.cy !== null) {
-            this.reconcile(filter.elements);
-            return;
-        }
+        const anchors: PositionMap = {...positionsStore.get(), ...graph.getPositions()};
+        const positions = resolvePositions(built.nodes.map((n) => n.id), built.edges, anchors);
 
-        const savedPositions = positionsStore.get();
-        const resolvedPositions = resolvePositions(filter.elements, savedPositions);
+        for (const node of built.nodes) {
+            const pos = positions.get(node.id);
 
-        const elementsWithPositions = filter.elements.map((e) => {
-            const id = e.data.id;
-            const isNode = e.data.source === undefined;
-
-            if (!isNode || typeof id !== 'string') {
-                return e;
+            if (pos !== undefined) {
+                node.x = pos.x;
+                node.y = pos.y;
             }
-
-            const pos = resolvedPositions.get(id);
-            return pos !== undefined ? {...e, position: pos} : e;
-        });
-
-        this.cy = cytoscape({
-            container: this.canvas,
-            elements: elementsWithPositions,
-            hideEdgesOnViewport: true,
-            textureOnViewport: true,
-            pixelRatio: 1,
-            style: [
-                {
-                    selector: 'node',
-                    style: {
-                        'background-color': 'data(color)',
-                        'label': 'data(label)',
-                        'color': '#e6e6e6',
-                        'font-size': 10,
-                        'text-valign': 'bottom',
-                        'text-margin-y': 4,
-                        'text-outline-width': 2,
-                        'text-outline-color': '#0f1115',
-                        // Skip label paint entirely once the on-screen text
-                        // would be ~7px or smaller. Eliminates thousands of
-                        // text-outline draws per pan/zoom frame on big vaults.
-                        'min-zoomed-font-size': 7,
-                        'width': 'mapData(tagCount, 0, 5, 14, 32)',
-                        'height': 'mapData(tagCount, 0, 5, 14, 32)'
-                    }
-                },
-                {
-                    selector: 'edge',
-                    style: {
-                        'width': 1,
-                        'line-color': '#3a3f4b',
-                        'target-arrow-color': '#3a3f4b',
-                        'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier',
-                        'arrow-scale': 0.8
-                    }
-                },
-                {
-                    selector: 'node:selected',
-                    style: {'border-width': 2, 'border-color': '#ffb86c'}
-                }
-            ],
-            // Always preset: cose was O(N²) and blocked the main thread on
-            // multi-thousand-node vaults. resolvePositions() places new nodes
-            // near their neighbours, which is good enough — the user can drag
-            // to refine, and snapshotPositions() persists the result.
-            layout: {name: 'preset', fit: true, padding: 24},
-            // Bigger wheel steps → fewer zoom events → fewer re-renders.
-            wheelSensitivity: 0.4
-        });
-
-        this.cy.on('tap', 'node', (event) => {
-            this.cb.onSelectNote(event.target.id());
-        });
-
-        this.nodeIndex = new Map(this.state.data.nodes.map((n) => [n.id, n]));
-
-        this.cy.on('pan zoom resize layoutstop', () => this.scheduleHullRender());
-        this.cy.on('layoutstop', () => this.snapshotPositions());
-        // dragfree fires when the user finishes dragging a single node — capture that too
-        this.cy.on('dragfree', 'node', () => this.snapshotPositions());
-        this.scheduleHullRender();
-    }
-
-    /**
-     * Bring the live Cytoscape graph to `elements` in one batch: remove
-     * what is gone, update changed node data, add what is new (placed near
-     * its neighbours). Camera, positions and selection stay, so a write
-     * elsewhere no longer resets the view (plan P4 / A5).
-     */
-    private reconcile(elements: readonly ElementDefinition[]): void {
-        const cy = this.cy;
-        if (cy === null) return;
-
-        const wanted = new Map<string, ElementDefinition>();
-        for (const e of elements) {
-            if (typeof e.data.id === 'string') wanted.set(e.data.id, e);
         }
 
-        const anchors: PositionMap = {...positionsStore.get()};
-        cy.nodes().forEach((node) => {
-            anchors[node.id()] = {...node.position()};
-        });
-        const positions = resolvePositions(elements, anchors);
+        graph.setData(built.nodes, built.edges);
+        graph.setHulls(built.hulls);
+        this.hullLabels = new Map(built.hulls.map((h) => [h.id, h.label ?? h.id]));
 
-        cy.batch(() => {
-            cy.elements().forEach((ele) => {
-                if (ele.removed()) return;
-                const target = wanted.get(ele.id());
-
-                if (target === undefined) {
-                    ele.remove();
-                    return;
-                }
-
-                wanted.delete(ele.id());
-
-                if (ele.isNode()) {
-                    const d = target.data;
-                    if (ele.data('label') !== d.label || ele.data('color') !== d.color || ele.data('tagCount') !== d.tagCount) {
-                        ele.data({label: d.label, color: d.color, tagCount: d.tagCount});
-                    }
-                }
-            });
-
-            const added = [...wanted.values()];
-            const nodes = added
-                .filter((e) => e.data.source === undefined)
-                .map((e) => {
-                    const pos = positions.get(e.data.id as string);
-                    return pos !== undefined ? {...e, position: pos} : e;
-                });
-            const edges = added.filter((e) => e.data.source !== undefined);
-
-            if (nodes.length > 0) cy.add(nodes);
-            if (edges.length > 0) cy.add(edges);
-        });
-
-        this.nodeIndex = new Map(this.state.data.nodes.map((n) => [n.id, n]));
-        this.scheduleHullRender();
+        if (first) {
+            graph.fit({padding: 24});
+            // Persist the placement of notes that had no saved position yet.
+            this.snapshotPositions();
+        }
     }
 
     private snapshotPositions(): void {
-        if (this.cy === null) return;
-
-        const out: PositionMap = {...positionsStore.get()};
-
-        this.cy.nodes().forEach((node) => {
-            const id = node.id();
-            const pos = node.position();
-            out[id] = {x: pos.x, y: pos.y};
-        });
-
-        positionsStore.set(out);
-    }
-
-    private scheduleHullRender(): void {
-        if (this.rafHandle !== null) {
-            return;
-        }
-
-        this.rafHandle = requestAnimationFrame(() => {
-            this.rafHandle = null;
-            this.renderHulls();
-        });
-    }
-
-    private renderHulls(): void {
-        clear(this.hullLayer as unknown as HTMLElement);
-
-        if (this.cy === null || !this.state.showHulls) {
-            return;
-        }
-
-        const tagToPoints = new Map<string, Point[]>();
-
-        this.cy.nodes().forEach((node) => {
-            const info = this.nodeIndex.get(node.id());
-
-            if (info === undefined) {
-                return;
-            }
-
-            const pos = node.renderedPosition();
-
-            for (const tag of info.tags) {
-                const points = tagToPoints.get(tag) ?? [];
-                points.push([pos.x, pos.y]);
-                tagToPoints.set(tag, points);
-            }
-        });
-
-        for (const [tag, points] of tagToPoints) {
-            if (points.length < 3) {
-                continue;
-            }
-
-            const hull = expandHull(convexHull(points), HULL_PADDING);
-            const color = tagColor(tag);
-            const poly = document.createElementNS(SVG_NS, 'polygon');
-            poly.setAttribute('points', toSvgPoints(hull));
-            poly.setAttribute('fill', color);
-            poly.setAttribute('fill-opacity', '0.12');
-            poly.setAttribute('stroke', color);
-            poly.setAttribute('stroke-opacity', '0.35');
-            poly.setAttribute('stroke-width', '1');
-            poly.setAttribute('stroke-linejoin', 'round');
-
-            const title = document.createElementNS(SVG_NS, 'title');
-            title.textContent = `${tag} · ${points.length}`;
-            poly.appendChild(title);
-
-            this.hullLayer.appendChild(poly);
-        }
+        if (this.graph === null) return;
+        positionsStore.set({...positionsStore.get(), ...this.graph.getPositions()});
     }
 }

@@ -203,10 +203,13 @@ export class App {
         });
 
         this.showHeat.subscribe(() => {
-            this.scheduleHeatApply();
-
+            // The views read showHeat from their state, so it has to reach
+            // them via update() (applyGraphFilter also schedules the heat).
             if (this.tab === 'graph') {
+                this.applyGraphFilter();
                 this.renderTagBar();
+            } else {
+                this.scheduleHeatApply();
             }
         });
 

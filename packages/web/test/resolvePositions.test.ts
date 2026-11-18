@@ -1,11 +1,17 @@
 import {describe, it, expect} from 'vitest';
-import type {ElementDefinition} from 'cytoscape';
-import {resolvePositions} from '../src/Graph.js';
+import {resolvePositions as resolve, type PositionMap} from '../src/GraphPositions.js';
 
-const node = (id: string): ElementDefinition => ({data: {id}});
-const edge = (id: string, source: string, target: string): ElementDefinition => ({
-    data: {id, source, target}
-});
+type Element = {id: string; source?: string; target?: string};
+
+const node = (id: string): Element => ({id});
+const edge = (id: string, source: string, target: string): Element => ({id, source, target});
+
+/** Nodes and edges in one list, as the tests were written against. */
+const resolvePositions = (elements: Element[], saved: PositionMap) => resolve(
+    elements.filter((e) => e.source === undefined).map((e) => e.id),
+    elements.flatMap((e) => (e.source !== undefined && e.target !== undefined ? [{source: e.source, target: e.target}] : [])),
+    saved
+);
 
 describe('resolvePositions', () => {
     it('returns saved positions verbatim', () => {

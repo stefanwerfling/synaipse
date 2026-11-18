@@ -1,8 +1,9 @@
-import type {EdgeKindStyle, NGraph, NGraphEdgeData, NGraphNodeData, ThemeTokens} from 'jsngraph';
+import type {NGraph, NGraphEdgeData, NGraphNodeData, ThemeTokens} from 'jsngraph';
 import {api, type LocalGraphData} from './Api.js';
 import {el} from './Dom.js';
+import {edgeKinds, loadJsNGraph, readGraphTheme, TYPED_LABEL, type JsNGraph} from './GraphStyle.js';
 import {PersistentValue} from './Persistence.js';
-import {getTheme, onThemeChange} from './Theme.js';
+import {onThemeChange} from './Theme.js';
 
 interface LocalGraphPrefs {
     open: boolean;
@@ -11,31 +12,6 @@ interface LocalGraphPrefs {
 
 const PREFS_KEY = 'synaipse-local-graph';
 const NODE_LIMIT = 60;
-
-type JsNGraph = typeof import('jsngraph');
-
-/** jsNGraph is loaded on first use, so it stays out of the initial bundle (plan D4). */
-let jsngraphModule: Promise<JsNGraph> | null = null;
-const loadJsNGraph = (): Promise<JsNGraph> => jsngraphModule ??= import('jsngraph');
-
-/**
- * Typed frontmatter links as edge kinds: all directed, in the neutral tone,
- * labelled so the relation is readable when zoomed in. `supersedes` keeps
- * its dashed preset look.
- */
-const edgeKinds = (lib: JsNGraph): Record<string, EdgeKindStyle> => ({
-    ...lib.EdgeKindPresets.knowledge,
-    duplicates: {tone: 'neutral', directed: true, dashed: [3, 3], animated: false},
-    relates_to: {tone: 'neutral', directed: true, animated: false},
-    replies_to: {tone: 'neutral', directed: true, animated: false}
-});
-
-const TYPED_LABEL: Record<string, string> = {
-    supersedes: 'supersedes',
-    duplicates: 'duplicates',
-    relates_to: 'relates to',
-    replies_to: 'replies to'
-};
 
 /**
  * Local graph of the open note (plan P5 / S1): the note's ego network
@@ -276,31 +252,8 @@ export class LocalGraphPanel {
         this.fitPending = true;
     }
 
-    /**
-     * Graph tokens from the Synaipse design tokens, so the local graph
-     * matches the app in both themes (plan E3 / J10).
-     */
     private readTheme(lib: JsNGraph): ThemeTokens {
-        return lib.Theme.fromCssVars(this.element.isConnected ? this.element : document.documentElement, {
-            base: getTheme() === 'light' ? lib.Theme.light : lib.Theme.dark,
-            map: {
-                background: '--bg-1',
-                gridDot: '--border-soft',
-                nodeFill: '--bg-2',
-                nodeStroke: '--border-strong',
-                nodeIcon: '--text-1',
-                nodeLabel: '--text-2',
-                nodeHoverStroke: '--accent-hover',
-                nodeSelectedStroke: '--accent',
-                edgeNeutral: '--border-strong',
-                edgeLabel: '--text-3',
-                highlightStroke: '--gold',
-                panelBackground: '--bg-2',
-                panelBorder: '--border',
-                panelText: '--text-0',
-                panelSubtext: '--text-2'
-            }
-        });
+        return readGraphTheme(lib, this.element);
     }
 
     /**

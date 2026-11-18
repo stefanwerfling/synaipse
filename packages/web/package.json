@@ -34,10 +34,9 @@
     "@synaipse/vector": "*",
     "@types/turndown": "^5.0.6",
     "3d-force-graph": "^1.74.0",
-    "cytoscape": "^3.30.4",
     "dotenv": "^16.4.7",
     "highlight.js": "^11.11.1",
-    "jsngraph": "github:stefanwerfling/jsNGraph#815e9773d2a246fe6faa6e2d310e3606981a3e11",
+    "jsngraph": "github:stefanwerfling/jsNGraph",
     "jszip": "^3.10.1",
     "marked": "^15.0.4",
     "mdfloor": "github:OpenSourcePKG/mdfloor#1caba5b46c7edb64ba3944f821adb170724c69b0",
@@ -46,7 +45,6 @@
     "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
-    "@types/cytoscape": "^3.21.8",
     "@types/three": "^0.171.0",
     "concurrently": "^9.1.0",
     "rimraf": "^6.0.1",
