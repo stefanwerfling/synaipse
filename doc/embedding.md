@@ -83,8 +83,9 @@ theme, otherwise a light Synaipse would get dark borders.
 | `--sh-r-sm`, `--sh-r` | `--r-2`, `--r-3` | radii |
 | `--sh-font-sans`, `--sh-font-mono` | `--font-sans`, `--font-mono` | type |
 
-Every token is optional; a host can start with a few (PKG Studio today sets
-`--sh-border`, `--sh-accent`, `--sh-accent-soft`). The focus ring and the soft
+Every token is optional; a host can start with a few. PKG Studio sets the
+full set for light and dark, including the accent, so Synaipse takes on the
+shell's look there. The focus ring and the soft
 gold are derived from accent and warn, so they follow the host too. The graph
 reads its colours from the same variables. Roadmap status hues, shadows and
 motion stay Synaipse's own.
