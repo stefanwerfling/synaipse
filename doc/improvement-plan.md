@@ -240,6 +240,25 @@ Offen bzw. Folgearbeit:
 - Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
 - Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
 
+### Status P8 (2026-11-18): begonnen
+
+Slices (in dieser Reihenfolge; jede endet mit `npm run eval` gegen die Baseline):
+
+| Slice | Inhalt | Stand |
+|---|---|---|
+| S1 B7 Eval-Harness | Fixture-Vault, Fragen-Kategorien, MCP-Agent, Baseline, CI | erledigt |
+| S2 B4 Ranking | `supersedes`, `confidence`, `valid_until` wirken in `search` und `prime` | offen |
+| S3 B4 Schreiben | `possibleDuplicates[]` bei `write_note`/`remember`, `mode: create\|overwrite\|upsert`, `expectedHash` | offen |
+| S4 B4 Zeit + Inbox | `synaipse_changes`, `synaipse_note_history`, Kandidaten für `consolidate_inbox`; dazu B3 `search`-Filter und Treffer-Anker | offen |
+| S5 B5 Resources/Prompts/Completions | dazu B1 `outputSchema`/`structuredContent`, `resource_link` | offen |
+| S6 B5 Elicitation | `delete_note`, Consent-Flow statt Long-Poll, Progress, HTTP-Session-TTL | offen |
+| S7 C5 Inbox-UI | Übernehmen in eine Note, Verwerfen | offen |
+| S8 B6 Plugin-Rest | `.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | offen |
+
+S1: `npm run eval` (`vitest.eval.config.ts`, in CI nach `bundle:check`). `packages/mcp-server/eval/fixture.ts` ist eine Vault mit 38 Notizen (zwei Projekte plus geteiltes Wissen) und 32 Fragen in fünf Kategorien: `lookup`, `paraphrase`, `current` (abgelöste Entscheidung neben der aktuellen), `trust` (niedrige `confidence`, abgelaufenes `valid_until`) und `scoped` (gleiches Thema in beiden Projekten). Ein geskripteter Agent ruft wie vom Arbeitsprotokoll vorgesehen `synaipse_search` (limit 5) und `synaipse_read_note` auf den Top-Treffer auf. Gemessen: hit@1, Recall@5, MRR, Anteil der Fragen mit veralteter Notiz vor der Antwort, Tokens pro Frage (Zeichen / 4) sowie Kontextkosten (Tool-Liste, Instructions, Prime). `eval/baseline.json` ist eingecheckt; schlechtere Werte (Tokens: mehr als 5 % mehr) lassen den Lauf scheitern, `EVAL_UPDATE_BASELINE=1 npm run eval` schreibt eine neue Baseline. Ohne Embeddings (offline, deterministisch).
+
+Baseline: hit@1 0,625, Recall@5 0,953, MRR 0,763, **veraltete Notiz vor der Antwort in 45 % der betroffenen Fragen**, 497 Tokens pro Frage. In C5 (Frage nach der Session-TTL) fehlt die aktuelle Notiz ganz in den Top 5. Kontext: Tool-Liste ≈ 4500 Tokens (Ziel < 3k), Instructions 266, Prime ≈ 1000.
+
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.
