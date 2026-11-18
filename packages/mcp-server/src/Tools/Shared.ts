@@ -100,7 +100,12 @@ const filterNotesByConsent = (
 // A type alias (not an interface) so it stays assignable to the SDK's
 // index-signature CallToolResult.
 export type ToolResponse = {
-    content: Array<{type: 'text'; text: string}>;
+    content: Array<
+        | {type: 'text'; text: string}
+        | {type: 'resource_link'; uri: string; name: string; title?: string; mimeType?: string}
+    >;
+    /** Set for tools with an outputSchema (the same object as the text). */
+    structuredContent?: Record<string, unknown>;
     isError?: boolean;
 };
 

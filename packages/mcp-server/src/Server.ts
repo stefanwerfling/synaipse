@@ -15,6 +15,7 @@ import {buildInstructions} from './Instructions.js';
 import {resolveContextFromRequest} from './Project.js';
 import {checkScope, isAdminScope, isAuthConfigured, NO_AUTH_SCOPE, resolveTokenScope, type TokenScope} from './Auth.js';
 import {CachedUserStore} from './CachedUserStore.js';
+import {registerExtras, withNoteLink} from './Resources.js';
 
 const log = createLogger('mcp');
 
@@ -59,13 +60,18 @@ export const buildMcpServer = (
     publisher: EventPublisher,
     project: string | null,
     ctx: ToolContext = {},
-    scope: TokenScope = NO_AUTH_SCOPE
+    scope: TokenScope = NO_AUTH_SCOPE,
+    /** With the service: resources, prompts and completions too (plan P8 / B5). */
+    service?: SynaipseService
 ): Server => {
     const byName = new Map(tools.map((t) => [t.definition.name, t]));
 
     const server = new Server(
         {name: config.server.name, title: 'Synaipse', version: config.server.version},
-        {capabilities: {tools: {}}, instructions: buildInstructions(project)}
+        {
+            capabilities: service === undefined ? {tools: {}} : {tools: {}, resources: {}, prompts: {}, completions: {}},
+            instructions: buildInstructions(project)
+        }
     );
 
     // ListTools filters by tool whitelist when the scope has one set —
@@ -84,19 +90,23 @@ export const buildMcpServer = (
             .map((t) => t.definition)
     }));
 
-    server.setRequestHandler(CallToolRequestSchema, async (request): Promise<ToolResponse> => {
-        const tool = byName.get(request.params.name);
+    /**
+     * One tool call with scope check, audit context and live event. Tool
+     * calls and resource reads (which reuse the read tools) both go
+     * through here, so a resource can never see more than the tool would.
+     */
+    const runTool = async (name: string, args: Record<string, unknown>, callCtx: ToolContext = ctx): Promise<ToolResponse> => {
+        const tool = byName.get(name);
 
         // Tool-level error, not a protocol error: the model sees it and can
         // correct itself instead of the client aborting the turn.
         if (!tool) {
             return {
                 isError: true,
-                content: [{type: 'text', text: `Unknown tool: ${request.params.name}. Call tools/list for the available synaipse_* tools.`}]
+                content: [{type: 'text', text: `Unknown tool: ${name}. Call tools/list for the available synaipse_* tools.`}]
             };
         }
 
-        const args = (request.params.arguments ?? {}) as Record<string, unknown>;
         const denial = checkScope(
             scope,
             {name: tool.definition.name, mode: tool.mode ?? 'read', ...(tool.unscopedOnly === true ? {unscopedOnly: true} : {})},
@@ -116,12 +126,12 @@ export const buildMcpServer = (
             // threading the label through every service-method signature.
             const outcome = await auditContextStorage.run(
                 {tokenLabel: scope.label, pathPrefixes: scope.pathPrefixes},
-                () => tool.handle(args, ctx)
+                () => tool.handle(args, callCtx)
             );
 
             if (outcome.event !== undefined) {
                 publisher.publish({
-                    tool: request.params.name,
+                    tool: name,
                     kind: outcome.event.kind,
                     touched: outcome.event.touched,
                     ...(outcome.event.query !== undefined ? {query: outcome.event.query} : {}),
@@ -137,7 +147,16 @@ export const buildMcpServer = (
                 content: [{type: 'text', text: `Error: ${message}`}]
             };
         }
+    };
+
+    server.setRequestHandler(CallToolRequestSchema, async (request): Promise<ToolResponse> => {
+        const response = await runTool(request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
+        return service === undefined ? response : withNoteLink(request.params.name, response);
     });
+
+    if (service !== undefined) {
+        registerExtras(server, {service, project, ctx, scope, tools: byName, runTool});
+    }
 
     return server;
 };
@@ -300,7 +319,7 @@ export const buildMcpHttpHandler = (
                 headers: req.headers,
                 basePath: options.basePath
             });
-            const server = buildMcpServer(config, tools, publisher, service.getProject(ctx.project), ctx, scope);
+            const server = buildMcpServer(config, tools, publisher, service.getProject(ctx.project), ctx, scope, service);
             const tokenLabel = scope.label;
 
             const transport = new StreamableHTTPServerTransport({
@@ -414,7 +433,7 @@ export const startServer = async (config: Config, options: StartServerOptions): 
     } else {
         const publisher = new EventPublisher(options.eventsUrl);
         const tools = buildTools(service);
-        const server = buildMcpServer(config, tools, publisher, service.getProject());
+        const server = buildMcpServer(config, tools, publisher, service.getProject(), {}, NO_AUTH_SCOPE, service);
         const transport = new StdioServerTransport();
         await server.connect(transport);
     }

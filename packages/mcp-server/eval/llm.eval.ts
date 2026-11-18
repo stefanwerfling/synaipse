@@ -190,7 +190,9 @@ describe('LLM usability eval', () => {
             const flagged: Record<string, string[]> = {};
             for (const draft of EVAL_DRAFTS) flagged[draft.id] = await session((client) => attemptWrite(client, draft));
             const context = await session(async (client) => ({
-                toolListTokens: tokens(JSON.stringify((await client.listTools()).tools)),
+                // Only what reaches the model: an LLM API tool definition has name,
+                // description and input schema (title, annotations, outputSchema stay in the client).
+                toolListTokens: tokens(JSON.stringify((await client.listTools()).tools.map(({name, description, inputSchema}) => ({name, description, inputSchema})))),
                 instructionsTokens: tokens(client.getInstructions() ?? ''),
                 primeTokens: tokens(textOf(await client.callTool({name: 'synaipse_prime', arguments: {}})))
             }));

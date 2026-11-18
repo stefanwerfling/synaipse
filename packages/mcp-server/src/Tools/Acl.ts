@@ -1,4 +1,5 @@
-import {LIMIT_MAX, type ToolHandler} from './Shared.js';
+import {OUTPUT_SCHEMAS} from './OutputSchemas.js';
+import {LIMIT_MAX, type ToolHandler, type ToolResponse} from './Shared.js';
 
 interface AclEntry {
     mode: 'read' | 'write';
@@ -85,13 +86,31 @@ const boundLimits = (schema: ToolHandler['definition']['inputSchema']): ToolHand
     };
 };
 
+/** The JSON text of a successful result, also as structuredContent. */
+const withStructured = (response: ToolResponse): ToolResponse => {
+    const first = response.content[0];
+    if (response.isError === true || first === undefined || first.type !== 'text') return response;
+    const data: unknown = JSON.parse(first.text);
+    return typeof data === 'object' && data !== null && !Array.isArray(data)
+        ? {...response, structuredContent: data as Record<string, unknown>}
+        : response;
+};
+
 const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t) => {
     const entry: AclEntry = ACL_TABLE[t.definition.name] ?? {mode: 'read'};
     const readOnly = entry.mode === 'read';
+    const outputSchema = OUTPUT_SCHEMAS[t.definition.name];
     return {
         ...t,
+        ...(outputSchema !== undefined
+            ? {handle: async (args, ctx) => {
+                const outcome = await t.handle(args, ctx);
+                return {...outcome, response: withStructured(outcome.response)};
+            }}
+            : {}),
         definition: {
             ...t.definition,
+            ...(outputSchema !== undefined ? {outputSchema} : {}),
             title: t.definition.title ?? titleFromName(t.definition.name),
             inputSchema: boundLimits(t.definition.inputSchema),
             annotations: {
