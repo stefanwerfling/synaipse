@@ -202,13 +202,13 @@ Offen bzw. Folgearbeit:
 - Subpath-Exports in jsNGraph, damit der Lazy-Chunk nicht den Rect-Kit und ModelView mitschleppt.
 - Tag `v0.2.0` pushen.
 
-### Status P6 (2026-11-18): umgesetzt (J4/J5/J6/J8 + S2 + S3)
+### Status P6 (2026-11-18): umgesetzt (J4/J5/J6/J8 + S2 + S3, 2D/Atlas vereint)
 
 Im jsNGraph-Repo (`1f8a191`, `07715fb`, gepusht):
 
 - J5 nur als `layoutMode: 'static'` (vorberechnete Server-Positionen). Barnes-Hut und Worker bewusst nicht gebaut (Nutzer-Entscheidung).
 - J4 Label-Kollision und Kanten-Batching. Pfeilspitzen werden in 64er-Chunks gefüllt, unter 2 px weggelassen (ein `fill()` über 5000 Teilpfade kostete in Chrome ≈ 250 ms).
-- J4 LOD und Aggregation (`25d3dbe`, nur lokal, Nutzer pusht): `setClusters`/`clusterAt`/`focusCluster`/`isClustered` und Event `clusterClick`. Unter `clusterZoom` zeichnet jsNGraph Cluster-Scheiben (Größe nach Mitgliederzahl, begrenzt durch die Ausdehnung des Clusters) mit gewichteten Sammelkanten; Labels nur, wo sie keine Scheibe verdecken. Dazu `edgeMinZoom`, Viewport-Culling per Quadtree ab 2000 Knoten, Punkte unter 2 px als gebündelte Quadrate, `repaint()`. Beispiel `examples/atlas.html`. Gemessen mit 100 000 Notizen in der Übersicht: vorher ≈ 500 ms pro Frame, mit Clustern ≈ 3 ms, ohne Cluster ≈ 60 ms. `vault.html` mit 3000 und 6000 Notizen ist gleich schnell oder schneller.
+- J4 LOD und Aggregation (`25d3dbe`, gepusht): `setClusters`/`clusterAt`/`focusCluster`/`isClustered` und Event `clusterClick`. Unter `clusterZoom` zeichnet jsNGraph Cluster-Scheiben (Größe nach Mitgliederzahl, begrenzt durch die Ausdehnung des Clusters) mit gewichteten Sammelkanten; Labels nur, wo sie keine Scheibe verdecken. Dazu `edgeMinZoom`, Viewport-Culling per Quadtree ab 2000 Knoten, Punkte unter 2 px als gebündelte Quadrate, `repaint()`. Beispiel `examples/atlas.html`. Gemessen mit 100 000 Notizen in der Übersicht: vorher ≈ 500 ms pro Frame, mit Clustern ≈ 3 ms, ohne Cluster ≈ 60 ms. `vault.html` mit 3000 und 6000 Notizen ist gleich schnell oder schneller.
 - J6 `setHulls`/`hullsAt` (Cluster-Hüllen), `NodeStyle.ring`.
 - J8 `addOverlay` plus Effekte `pulse`/`trail`/`ripple`; Beispiel `examples/vault.html`.
 
@@ -231,10 +231,10 @@ S3 in Synaipse (`9ead549`):
 
 Louvain-Fix (`2617b15`), beim Smoke-Test gefunden: Die Community-Erkennung verglich Wechsel gegen 0 statt gegen das Bleiben in der eigenen Community. Die Modularität wurde auf dem kollabierten Graphen berechnet, und Self-Loops wurden halbiert. Ergebnis in der 25k-Vault vorher: eine Community mit 23 389 Notizen, Modularität −0,50. Nachher: 1563 Communities, die größte mit 563 Notizen, Modularität 0,87. Der Algorithmus liegt jetzt einmal in `@synaipse/core/louvain`, statt in zwei identischen Kopien. Der Layout-Hash (= ETag) enthält `LAYOUT_ALGORITHM_VERSION`; sonst hätten Browser per 304 das alte Layout behalten.
 
+2D und Atlas zusammengelegt (2026-11-18): Es gibt nur noch eine 2D-Ansicht für jede Vault-Größe; die Notizanzahl ändert nur den Detailgrad. Bis 2999 Notizen platziert der Client (gespeicherte Anordnung, ziehbar, Tag-Hüllen); ab 3000 übernimmt das Server-Layout mit Community-Scheiben beim Herauszoomen (`choosePlacement`, zurück erst unter 2500, damit eine Vault an der Grenze nicht bei jedem Write springt). Der Wechsel passiert live ohne Neuladen. `GraphAtlas.ts` ist aufgegangen in `ServerLayout.ts` (`buildServerGraph`, `ServerLayoutFeed`) und `Graph.ts`. Der Atlas-Knopf ist weg; ein gespeichertes `atlas` liest sich als 2D. Ab 5k Notizen warnt nur noch 3D, ab 20k ist 3D aus. Lock auf jsNGraph `25d3dbe` (`dd20a46`). Browser: 25k-Vault zeigt die Übersicht in 2D, Klick auf Community zoomt hinein; 2999-Vault zeigt Client-Positionen, die 3000. Notiz per Write schaltet ohne Konsolenfehler um. Hüllen gibt es im Server-Layout nicht.
+
 Offen bzw. Folgearbeit:
 
-- jsNGraph `25d3dbe` pushen, danach `npm install --allow-git=all`. Erst dann steht `package-lock.json` auf dem neuen Stand; bis dahin bricht `tsc` in CI am Atlas.
-- Die Schwellen 5k/20k sind weiter ein Wechsel der Ansicht, keine reine LOD-Frage. Die 2D-Ansicht platziert Notizen auf dem Client und hat keine Übersicht. Nächster Schritt wäre, dass 2D ab einigen Tausend Notizen Server-Positionen und Cluster nutzt; dann könnten 2D und Atlas zusammenfallen.
 - Server-Layout: Die Kachel-Packung erzeugt sehr breite erste Reihen, und Notizen ohne Links werden als einzelne Ein-Knoten-Kacheln gelegt (in der 25k-Vault 1368 Stück).
 - Der ForceLayout-Test „speed cap“ in jsNGraph flackert gelegentlich (war schon vorher so).
 - Das in den Webserver eingehängte `/mcp` postet keine Live-Events. Getestet wurde deshalb über `POST /api/events`.
