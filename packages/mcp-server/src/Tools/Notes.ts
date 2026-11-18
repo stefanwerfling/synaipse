@@ -96,11 +96,15 @@ export const noteTools = (service: SynaipseService): ToolHandler[] => [
             const truncated = offset > 0 || end < body.length;
 
             const {path: _path, mtime, content: _content, ...rest} = note;
+            // Tell the reader when this knowledge is outdated (plan P8 / B4).
+            const state = service.knowledgeState(id);
             return {
                 response: ok({
                     note: {
                         ...rest,
                         ...modifiedOf(mtime),
+                        ...(state?.supersededBy !== undefined ? {supersededBy: state.supersededBy} : {}),
+                        ...(state?.expired === true ? {expired: true} : {}),
                         content: body.slice(offset, end),
                         ...(truncated ? {range: {offset, end, total: body.length}, ...(end < body.length ? {next: `offset: ${end}`} : {})} : {})
                     }

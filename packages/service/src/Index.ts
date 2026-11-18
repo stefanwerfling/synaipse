@@ -44,3 +44,5 @@ export {
 export {ConsentStore} from './ConsentStore.js';
 export type {ConsentDecision, ConsentRequest, ConsentResult} from './ConsentStore.js';export {buildLocalGraph} from './LocalGraph.js';
 export type {LocalGraph, LocalGraphNode, LocalGraphEdge, LocalGraphEdgeKind, LocalGraphOptions} from './LocalGraph.js';
+export {applyKnowledgeState, buildSuccessors, knowledgeStateOf, supersededTargets} from './KnowledgeState.js';
+export type {AnnotatedHit, KnowledgeNote, KnowledgeState} from './KnowledgeState.js';

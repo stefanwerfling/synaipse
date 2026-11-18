@@ -85,6 +85,7 @@ import {annotateSingleSignal, defaultDemote, reciprocalRankFusion, type RankedSi
 import {buildAdjacency, rankByGraphProximity, type AdjacencyMap} from './Graph.js';
 import {buildLocalGraph, type LocalGraph, type LocalGraphOptions} from './LocalGraph.js';
 import {InvertedIndex} from './InvertedIndex.js';
+import {applyKnowledgeState, buildSuccessors, isOutdated, knowledgeStateOf, type KnowledgeState} from './KnowledgeState.js';
 import {findDecayCandidates, archivePathFor, type DecayCandidate, type DecayOptions} from './MemoryDecay.js';
 
 export interface IndexingStats {
@@ -337,6 +338,9 @@ export interface ServiceOverrides {
     vectorStore?: VectorStore;
 }
 
+/** Extra search candidates fetched so demoted (outdated) hits can make room. */
+const KNOWLEDGE_HEADROOM = 5;
+
 export class SynaipseService {
     /** Vault kept around for filesystem-specific concerns: root path, ngit repo handle, and file-watcher sync (`handleExternalChange`). All note-payload reads/writes go through `notes` (a NoteAdapter) so a MariaDB implementation can drop in later. */
     private readonly vault: Vault;
@@ -384,6 +388,8 @@ export class SynaipseService {
     private cachedGraph: Graph | null = null;
     private cachedAdjacency: AdjacencyMap | null = null;
     private cachedLinkKeys: Map<string, NoteId> | null = null;
+    /** Superseded note → successor (plan P8 / B4), rebuilt after topology changes. */
+    private cachedSuccessors: Map<NoteId, NoteId> | null = null;
     private lastStats: IndexingStats = {total: 0, reindexed: 0, removed: 0, unchanged: 0, pending: 0};
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
     private readonly topologyListeners = new Set<(version: number) => void>();
@@ -550,6 +556,7 @@ export class SynaipseService {
         this.cachedGraph = null;
         this.cachedAdjacency = null;
         this.cachedLinkKeys = null;
+        this.cachedSuccessors = null;
 
         for (const listener of this.topologyListeners) {
             try {
@@ -558,6 +565,26 @@ export class SynaipseService {
                 log.warn('topology listener failed', {error});
             }
         }
+    }
+
+    /**
+     * How current a note is (plan P8 / B4): the note that supersedes it,
+     * whether its `valid_until` has passed, a `confidence` below 1, and
+     * the resulting ranking weight. Null for an unknown id.
+     */
+    public knowledgeState(id: NoteId): KnowledgeState | null {
+        const note = this.notes.tryGet(id);
+        return note === undefined ? null : knowledgeStateOf(note, this.successors(), Date.now());
+    }
+
+    /** Superseded note → successor, from `supersedes` frontmatter and typed links (path, title or alias). */
+    private successors(): Map<NoteId, NoteId> {
+        if (this.cachedSuccessors === null) {
+            const keys = this.linkKeyMap();
+            this.cachedSuccessors = buildSuccessors(this.notes.list(), (target) =>
+                this.notes.tryGet(target)?.id ?? this.notes.tryGet(`${target}.md`)?.id ?? keys.get(target));
+        }
+        return this.cachedSuccessors;
     }
 
     /** Cached wikilink-target → note-id map (titles, then aliases; see buildLinkKeyMap). */
@@ -802,7 +829,34 @@ export class SynaipseService {
         return this.runSearch(query, mode, limit, isUnscoped(effective) ? undefined : effective);
     }
 
+    /**
+     * Search plus knowledge state (plan P8 / B4): superseded, expired and
+     * low-confidence notes rank lower, the successor of a superseded hit
+     * takes its place. A few extra candidates let demoted hits make room.
+     */
     private async runSearch(query: string, mode: SearchMode, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
+        const hits = await this.runSearchSignals(query, mode, limit + KNOWLEDGE_HEADROOM, scope);
+        let successors = this.successors();
+
+        if (successors.size === 0 && !hits.some((h) => this.mayBeDemoted(h.noteId))) {
+            return hits.slice(0, limit);
+        }
+
+        if (scope !== undefined) {
+            // Never point at (or pull in) a successor outside the caller's scope.
+            successors = new Map([...successors].filter(([, to]) => inScope(to, scope)));
+        }
+
+        return applyKnowledgeState(hits, limit, (id) => this.notes.tryGet(id), successors, Date.now());
+    }
+
+    /** Cheap pre-check: frontmatter that can lower a note's weight. */
+    private mayBeDemoted(id: NoteId): boolean {
+        const fm = this.notes.tryGet(id)?.frontmatter;
+        return fm !== undefined && (fm['valid_until'] !== undefined || typeof fm.confidence === 'number');
+    }
+
+    private async runSearchSignals(query: string, mode: SearchMode, limit: number, scope?: SearchScope): Promise<SearchHit[]> {
         const accept = scope === undefined ? undefined : (id: NoteId): boolean => inScope(id, scope);
 
         if (mode === 'fulltext') {
@@ -3356,8 +3410,13 @@ export class SynaipseService {
         const seen = new Set<NoteId>();
         const context: PrimerEntry[] = [];
 
+        const successors = this.successors();
+        const now = Date.now();
+
         const push = (note: Note, reason: PrimerReason): void => {
             if (seen.has(note.id)) return;
+            // Superseded or expired knowledge stays out of the primer unless pinned.
+            if (reason !== 'pinned' && isOutdated(knowledgeStateOf(note, successors, now))) return;
             seen.add(note.id);
             context.push({
                 id: note.id,
