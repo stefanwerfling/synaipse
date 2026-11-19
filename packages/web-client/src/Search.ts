@@ -1,6 +1,6 @@
 import type {SearchHit, SearchHitComponents, SearchMode} from '@synaipse/core';
 import {api} from './Api.js';
-import {clear, el, isAppVisible} from './Dom.js';
+import {clear, el, isAppVisible, isTypingTarget} from './Dom.js';
 
 export interface SearchOptions {
     semanticEnabled: boolean;
@@ -54,7 +54,7 @@ export class Search {
     private build(): void {
         this.input = el('input', {
             class: 'search-input',
-            attrs: {type: 'search', placeholder: 'Search…  (Ctrl+K)', autocomplete: 'off', spellcheck: 'false'},
+            attrs: {type: 'search', placeholder: 'Search…  (/)', 'aria-label': 'Search notes', 'aria-keyshortcuts': '/', autocomplete: 'off', spellcheck: 'false'},
             on: {
                 input: (e) => this.onInput((e.target as HTMLInputElement).value),
                 focus: () => {
@@ -291,11 +291,12 @@ export class Search {
         }
     }
 
+    /** `/` focuses the search field (Ctrl+K belongs to the command palette, plan P7 / C1). */
     private handleGlobalKey(event: KeyboardEvent): void {
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-            event.preventDefault();
-            this.focus();
-        }
+        if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+        if (isTypingTarget(event.target)) return;
+        event.preventDefault();
+        this.focus();
     }
 
     private showDropdown(): void {

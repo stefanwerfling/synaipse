@@ -9,8 +9,8 @@ import {getTheme, initTheme, onThemeChange, ROOT_CLASS, setTheme, type Theme} fr
  * The one entry point for the Synaipse web UI (plan P3 / E1) — used by
  * `Main.ts` standalone and by embedding hosts such as PKG Studio.
  *
- *   const handle = await mount(container, {apiBase: '/synaipse'});
- *   handle.onHide(); handle.onShow(); handle.navigate('graph');
+ *   const handle = await mount(container, {apiBase: '/synaipse', onRouteChange: (r) => …});
+ *   handle.onHide(); handle.onShow(); handle.navigate('#/roadmap/synaipse');
  *   await handle.unmount();   // stops SSE, timers, listeners; removes DOM
  *
  * `apiBase` prefixes every API URL via apiUrl(), so the host needs no
@@ -30,8 +30,17 @@ export interface SynaipseMountOptions {
      * no account for them, never a login form.
      */
     authGate?: boolean;
-    /** Initial route: a tab name ("graph") or a note id. */
+    /** Initial route: `#/notes/<path>`, `#/graph?focus=<id>`, `#/roadmap/<project>`, a tab name or a note id. */
     route?: string;
+    /**
+     * Where the current view lives (plan P7 / C1). 'hash': in location.hash,
+     * so deep links, Back and sharing work — standalone uses it. 'none'
+     * (default): the page URL belongs to the host; Synaipse only reports
+     * views via onRouteChange and takes them via handle.navigate().
+     */
+    routing?: 'hash' | 'none';
+    /** Every view change as a route (`#/notes/a.md`), for a host that mirrors it in its own URL. */
+    onRouteChange?: (route: string) => void;
     /** false: hide the Synaipse logo and name in the top bar, when the host's tab names it already (default true). */
     brand?: boolean;
     /**
@@ -46,7 +55,8 @@ export interface SynaipseMountHandle {
     unmount(): Promise<void>;
     setTheme(theme: Theme): void;
     getTheme(): Theme;
-    navigate(route: string): void;
+    /** Go to a route (see SynaipseMountOptions.route); resolves when the view is shown. */
+    navigate(route: string): Promise<void>;
     /** Host tab became visible / hidden. */
     onShow(): void;
     onHide(): void;
@@ -70,9 +80,14 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
 
     const showApp = async (account: Account | null): Promise<void> => {
         container.replaceChildren();
-        app = new App(account, {onSignedOut: () => void boot()});
+        app = new App(account, {
+            onSignedOut: () => void boot(),
+            routing: opts.routing ?? 'none',
+            ...(opts.onRouteChange !== undefined ? {onRouteChange: opts.onRouteChange} : {})
+        });
         await app.mount(container);
-        if (opts.route !== undefined) app.navigate(opts.route);
+        const initial = opts.route ?? (opts.routing === 'hash' ? window.location.hash : '');
+        await app.navigate(initial, {replace: true});
     };
 
     const showLogin = (): void => {
@@ -135,7 +150,9 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
         },
         setTheme: (theme) => setTheme(theme),
         getTheme: () => getTheme(),
-        navigate: (route) => app?.navigate(route),
+        navigate: async (route) => {
+            await app?.navigate(route);
+        },
         onShow: () => app?.onShow(),
         onHide: () => app?.onHide()
     };

@@ -52,6 +52,8 @@ export interface PanelContext {
     resolveNoteLink(ref: string): string | null;
     /** Notes were created or changed outside the editor (jobs, imports). */
     notesChanged(): void;
+    /** Something a route names changed inside a panel (roadmap project). */
+    routeChanged(): void;
 }
 
 export interface LazyPanels {
@@ -78,7 +80,8 @@ export const PANEL_FACTORIES: {[K in LazyTab]: (ctx: PanelContext) => Promise<La
     }),
     roadmap: async (ctx) => new (await import('./RoadmapPanel.js')).RoadmapPanel({
         onOpenNote: ctx.openRef,
-        resolveNoteLink: ctx.resolveNoteLink
+        resolveNoteLink: ctx.resolveNoteLink,
+        onProjectChange: ctx.routeChanged
     }),
     benchmarks: async (ctx) => new (await import('./BenchmarksPanel.js')).BenchmarksPanel({onOpenNote: ctx.openRef}),
     chat: async (ctx) => new (await import('./ChatPanel.js')).ChatPanel({

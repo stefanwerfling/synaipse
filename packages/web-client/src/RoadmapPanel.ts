@@ -3,6 +3,7 @@ import {setStepDeleted, withoutDeleted} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog, formDialog, promptDialog, validProjectName} from './Dialogs.js';
+import {toast} from './Toast.js';
 
 export interface RoadmapPanelOptions {
     /** Open a linked note in the Notes tab. */
@@ -13,6 +14,8 @@ export interface RoadmapPanelOptions {
      * panel reject dead links at creation time instead of persisting them.
      */
     resolveNoteLink?: (ref: string) => string | null;
+    /** The shown project changed: the app keeps the URL in step. */
+    onProjectChange?: (project: string | null) => void;
 }
 
 const STATUS_ORDER: RoadmapStatus[] = [
@@ -202,6 +205,43 @@ export class RoadmapPanel {
         await this.loadProjects();
     }
 
+    /** The project on screen, null when there is none. */
+    public currentProject(): string | null {
+        return this.project;
+    }
+
+    /**
+     * Show this project (a route or the palette). Unknown names fall back to
+     * the first project when the list loads.
+     */
+    public async selectProject(name: string): Promise<void> {
+        if (this.project === name && this.roadmap?.project === name) return;
+        this.project = name;
+        if (this.element.isConnected) await this.loadProjects();
+    }
+
+    /** Palette: create a project. */
+    public newProject(): Promise<void> {
+        return this.createProject();
+    }
+
+    /** Palette: add a top-level step to the shown project. */
+    public async newStep(): Promise<void> {
+        if (this.project === null || this.roadmap === null) {
+            toast('Erst ein Projekt anlegen oder auswählen.', {kind: 'info'});
+            return;
+        }
+        await this.addStep(null);
+    }
+
+    private notifiedProject: string | null | undefined = undefined;
+
+    private notifyProject(): void {
+        if (this.notifiedProject === this.project) return;
+        this.notifiedProject = this.project;
+        this.opts.onProjectChange?.(this.project);
+    }
+
     /**
      * React to a vault-change event (from the MCP event stream). When the AI
      * mutates the current project's roadmap via MCP, refetch so the live
@@ -244,6 +284,7 @@ export class RoadmapPanel {
 
         if (this.project === null) {
             this.roadmap = null;
+            this.notifyProject();
             this.renderEmpty('Noch keine Roadmap. Lege eine für ein Projekt an — oder lass die KI per MCP (synaipse_roadmap_plan) planen.');
             this.renderKpis(null);
             return;
@@ -278,6 +319,7 @@ export class RoadmapPanel {
 
     private async loadRoadmap(): Promise<void> {
         if (this.project === null) return;
+        this.notifyProject();
         try {
             this.roadmap = await api.getRoadmap(this.project);
         } catch (e) {

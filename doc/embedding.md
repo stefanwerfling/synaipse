@@ -15,12 +15,13 @@ import '@synaipse/web-client/mount.css';            // the one stylesheet
 const handle = await mount(container, {
     apiBase: '/synaipse',   // prefixed to every fetch, EventSource and <img src>
     theme: 'dark',          // optional; default: the stored preference
-    route: 'graph'          // optional; a tab name or a note id
+    route: '#/roadmap/synaipse',   // optional; see Routes below
+    onRouteChange: (route) => host.setSubPath(route)   // optional
 });
 
 handle.onHide();            // host tab hidden
 handle.onShow();            // host tab visible again
-handle.navigate('Memory/demo/note.md');
+await handle.navigate('#/notes/Memory/demo/note.md');
 handle.setTheme('light');
 handle.getTheme();          // 'light'
 await handle.unmount();     // stops SSE, timers, listeners; removes DOM and overlays
@@ -30,16 +31,30 @@ await handle.unmount();     // stops SSE, timers, listeners; removes DOM and ove
 |---|---|
 | `apiBase` | URL prefix for the backend. All API calls go through `apiUrl()`. The host needs **no** global `window.fetch` or `EventSource` rewrite; a rewrite that only touches `/api/...` leaves the prefixed URLs alone. |
 | `theme` | `'dark'` or `'light'`. The theme is set as `data-theme` on the container, never on `<html>`. |
-| `route` | Initial tab (`notes`, `graph`, `canvas`, `inbox`, `roadmap`, `benchmarks`, `chat`, `jobs`, `activity`, `audit`, `consent`) or a note id. |
+| `route` | Initial view: a route (see below), a tab name or a note id. |
+| `routing` | `'none'` (default): the page URL belongs to the host; Synaipse does not touch `location`. `'hash'`: the view lives in `location.hash`, so deep links, Back and sharing work. The standalone UI uses `'hash'`. |
+| `onRouteChange` | Called with the route after every view change (tab, open note, roadmap project), and once at the end of every `navigate()`, also when the user stayed put (kept unsaved changes). A host mirrors it in its own URL and hands it back via `route` or `navigate()`. |
 | `onThemeChange` | Called with the active theme once after mount and on every change (the user's toggle, `setTheme`). The host switches its shell tokens along, see below. |
 | `brand` | `false` hides the Synaipse logo and name in the top bar, for a host whose tab already names it. Default `true`. |
 | `authGate` | Standalone only: show the login screen in server mode. A host owns authentication and leaves it off. |
+
+### Routes
+
+| Route | View |
+|---|---|
+| `#/notes` | Notes tab |
+| `#/notes/Memory/demo/note.md` | a note; each path segment URI-encoded |
+| `#/graph?focus=Memory%2Fdemo%2Fnote.md` | graph, centred on a note |
+| `#/roadmap/<project>` | a project's roadmap |
+| `#/<tab>` | any other tab (`canvas`, `inbox`, `benchmarks`, `chat`, `jobs`, `activity`, `audit`, `consent`) |
+
+`navigate()` and `route` also take a bare tab name (`'graph'`) or a note id (`'Memory/demo/note.md'`), as before routes existed.
 
 What the host can rely on:
 
 - **Scoped CSS.** Every Synaipse rule sits under `.synaipse-root`, the class that `mount()` puts on the container. Nothing styles `body`, `*`, `::selection` or scrollbars outside it. Dialogs and menus render into one `.synaipse-root.synaipse-portal` layer at the end of `<body>`. That layer is removed when the last instance unmounts.
 - **Sizing.** The app fills its container (`height: 100%`) and scrolls its own overflow, so tall views (roadmap) scroll inside it. Give the container a height, for example as a flex child; the host needs no overflow rule of its own.
-- **Shortcuts.** `Ctrl/Cmd+K` and the search shortcut only react while the app is visible. A hidden host tab therefore does not take them away from the host.
+- **Shortcuts.** `Ctrl/Cmd+K` (command palette), `/` (search) and `?` (shortcut overview) only react while the app is visible. A hidden host tab therefore does not take them away from the host. `/` and `?` never fire while the user types in a field.
 - **Lazy panels.** Every tab except Notes, Graph and Consent is imported on first open.
 - **Teardown.** `unmount()` closes both SSE streams and a running chat stream. It clears every interval and animation frame and removes global listeners. A fresh `mount()` into the same container afterwards works.
 

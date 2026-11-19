@@ -22,6 +22,8 @@ import type {WikilinkMatch} from './WikilinkAutocomplete.js';
 export interface NotesPanelOptions {
     onNotesChanged: () => void;
     onAskAboutSelection?: (noteId: string, selection: string) => void;
+    /** The open note changed (or none is open): the app keeps the URL in step. */
+    onActiveNoteChange?: (noteId: string | null) => void;
 }
 
 type GroupMode = 'folder' | 'tag' | 'recent';
@@ -1004,8 +1006,25 @@ export class NotesPanel {
         });
     }
 
-    public openNote(id: string): void {
-        void this.handleSelect(id);
+    /** Resolves once the note is shown, or the user kept unsaved changes. */
+    public openNote(id: string): Promise<void> {
+        return this.handleSelect(id);
+    }
+
+    /** The id of the note in the viewer, null when none is open. */
+    public activeNoteId(): string | null {
+        return this.activeId;
+    }
+
+    /** Starts a new note (asks first when the editor has unsaved changes). */
+    public newNote(): Promise<void> {
+        return this.handleNew();
+    }
+
+    private setActiveId(id: string | null): void {
+        if (this.activeId === id) return;
+        this.activeId = id;
+        this.opts.onActiveNoteChange?.(id);
     }
 
     private async confirmDiscardIfDirty(promptMessage: string): Promise<boolean> {
@@ -1030,7 +1049,7 @@ export class NotesPanel {
             return;
         }
 
-        this.activeId = id;
+        this.setActiveId(id);
         this.editing = false;
         this.renderNoteList();
         this.renderLoading();
@@ -1122,7 +1141,7 @@ export class NotesPanel {
             const note = await api.writeNote({path, content: '', frontmatter: {title}});
             this.closeCreateRow();
             this.opts.onNotesChanged();
-            this.activeId = note.id;
+            this.setActiveId(note.id);
             this.active = note;
             this.editing = true;
             this.renderEditor();
@@ -1151,7 +1170,7 @@ export class NotesPanel {
         try {
             await api.deleteNote(this.active.id);
             this.active = null;
-            this.activeId = null;
+            this.setActiveId(null);
             this.editing = false;
             this.opts.onNotesChanged();
             this.renderEmpty();

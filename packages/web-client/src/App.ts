@@ -2,8 +2,8 @@ import type {Graph} from '@synaipse/core';
 import {resolveNoteRef as resolveNoteRefCore, resolveNoteRefTarget as resolveNoteRefTargetCore, canonicalNoteLink} from '@synaipse/core';
 import {ActivityLog} from './ActivityLog.js';
 import {api, NoteSummary} from './Api.js';
-import {CommandPalette} from './CommandPalette.js';
-import {clear, el} from './Dom.js';
+import {CommandPalette, type PaletteCommand} from './CommandPalette.js';
+import {clear, el, isAppVisible, isTypingTarget} from './Dom.js';
 import {EventStream, SynaipseEvent} from './Events.js';
 import {applyGraphDelta, applyNotesDelta, isEmptyGraphDelta, type GraphDelta} from './GraphDelta.js';
 import type {GraphRenderer} from './GraphRenderer.js';
@@ -13,13 +13,16 @@ import {ImportDialog} from './ImportDialog.js';
 import logoSvg from './Logo.svg?raw';
 import {NotesPanel} from './NotesPanel.js';
 import {PersistentValue, setCodec} from './Persistence.js';
+import {formatRoute, parseRoute, type Route} from './Router.js';
 import {Search} from './Search.js';
+import {openShortcutsDialog} from './Shortcuts.js';
 import {Settings} from './Settings.js';
 import {TagBar, TagEntry, viewModeCodec, type ViewMode} from './TagBar.js';
 import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 import {Disposables} from './Disposables.js';
 import type {ChatPanel} from './ChatPanel.js';
-import {isLazyTab, PANEL_FACTORIES, TAB_DEFS, TABS, type LazyPanels, type LazyTab, type PanelContext, type PanelView, type Tab} from './Tabs.js';
+import type {RoadmapPanel} from './RoadmapPanel.js';
+import {isLazyTab, PANEL_FACTORIES, TAB_DEFS, type LazyPanels, type LazyTab, type PanelContext, type PanelView, type Tab} from './Tabs.js';
 import {toast} from './Toast.js';
 
 const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
@@ -41,6 +44,14 @@ const HEAT_TICK_MS = 15_000;
 const HUGE_GRAPH_FORCE_2D = 20_000;
 const HUGE_GRAPH_WARN_3D = 5_000;
 
+
+export interface AppOptions {
+    onSignedOut?: () => void;
+    /** 'hash': the view lives in location.hash (standalone); 'none': only onRouteChange (embedded). */
+    routing?: 'hash' | 'none';
+    /** Every view change, as a route like `#/notes/a.md`, for a host that mirrors it. */
+    onRouteChange?: (route: string) => void;
+}
 
 export class App {
     public readonly element: HTMLElement;
@@ -76,6 +87,11 @@ export class App {
     private importDialog!: ImportDialog;
     private themeToggleBtn!: HTMLButtonElement;
     private settings: Settings | null = null;
+    /** go() calls in progress; their intermediate steps stay out of the history. */
+    private navigating = 0;
+    private lastRoute: string | null = null;
+    /** The note a `#/graph?focus=` route centred on; kept in the URL while the graph shows. */
+    private graphFocus: string | null = null;
 
     private selectedTags: PersistentValue<ReadonlySet<string>>;
     private hideIsolated: PersistentValue<boolean>;
@@ -93,7 +109,7 @@ export class App {
 
     public constructor(
         private readonly account: {id: number; email: string; isAdmin: boolean; managedByHost?: boolean} | null = null,
-        private readonly appOpts: {onSignedOut?: () => void} = {}
+        private readonly appOpts: AppOptions = {}
     ) {
         this.selectedTags = new PersistentValue<ReadonlySet<string>>(
             STORAGE_SELECTED_TAGS,
@@ -114,20 +130,20 @@ export class App {
                 this.graph = null;
                 this.loadNotes();
             },
+            onActiveNoteChange: () => this.routeChanged(),
             onAskAboutSelection: (noteId, selection) => {
                 void this.panel('chat').then((chat) => {
                     chat.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
-                    void this.switchTab('chat');
+                    void this.go({tab: 'chat'});
                 });
             }
         });
 
         this.palette = new CommandPalette<NoteSummary>({
             onSelectNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: noteId});
             },
-            onSwitchTab: (tab) => void this.switchTab(tab)
+            commands: () => this.paletteCommands()
         });
 
         this.importDialog = new ImportDialog({
@@ -140,8 +156,7 @@ export class App {
         this.consentPanel = new ConsentInbox({
             onCountChange: (count) => this.setConsentBadge(count),
             onOpenNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: noteId});
             }
         });
 
@@ -155,8 +170,7 @@ export class App {
                 const target = event.touched[0];
 
                 if (target !== undefined) {
-                    this.notesPanel.openNote(target);
-                    void this.switchTab('notes');
+                    void this.go({tab: 'notes', note: target});
                 }
             },
             onUnreadChange: (count) => this.setActivityBadge(count)
@@ -278,6 +292,11 @@ export class App {
         this.events.start();
         this.consentPanel.start();
         this.life.interval(() => this.scheduleHeatApply(), HEAT_TICK_MS);
+        this.life.listen(document, 'keydown', (event) => this.onShortcutKey(event));
+        if (this.appOpts.routing === 'hash') {
+            // Back/Forward and edited URLs; our own pushState fires no hashchange.
+            this.life.listen(window, 'hashchange', () => void this.navigate(window.location.hash, {replace: true}));
+        }
         await Promise.all([this.loadNotes(), this.installSearch()]);
     }
 
@@ -346,8 +365,7 @@ export class App {
     private panelContext(): PanelContext {
         return {
             openNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: noteId});
             },
             openRef: (ref) => {
                 const id = this.resolveNoteRef(ref);
@@ -355,8 +373,7 @@ export class App {
                     toast(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`, {kind: 'error'});
                     return;
                 }
-                this.notesPanel.openNote(id);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: id});
             },
             resolveNoteLink: (ref) => {
                 const target = resolveNoteRefTargetCore(ref, this.notes);
@@ -365,21 +382,147 @@ export class App {
             notesChanged: () => {
                 this.graph = null;
                 void this.loadNotes();
-            }
+            },
+            routeChanged: () => this.routeChanged()
         };
     }
 
-    /** Route from the host: a tab name, or anything else is opened as a note. */
-    public navigate(route: string): void {
-        const target = route.replace(/^#?\/?/, '');
-        if ((TABS as readonly string[]).includes(target)) {
-            void this.switchTab(target as Tab);
-            return;
+    /**
+     * Go to a route (plan P7 / C1): a hash like `#/notes/a.md`, a tab name,
+     * or a note id. From the host (handle.navigate) and from the URL.
+     * `replace` updates the history entry instead of adding one.
+     */
+    public navigate(route: string, opts: {replace?: boolean} = {}): Promise<void> {
+        return this.go(parseRoute(route) ?? {tab: 'notes'}, opts.replace === true ? 'replace' : 'push');
+    }
+
+    /**
+     * The one way to change the view. Steps on the way (tab switch, note
+     * load) stay out of the history; the view that results is recorded
+     * once at the end — also when the user kept unsaved changes and so
+     * stayed where they were.
+     */
+    private async go(route: Route, mode: 'push' | 'replace' = 'push'): Promise<void> {
+        this.navigating += 1;
+        try {
+            if (route.tab === 'roadmap' && route.project !== undefined) {
+                // Before the tab shows, so its first load picks the project.
+                await (await this.panel('roadmap')).selectProject(route.project);
+            }
+            await this.switchTab(route.tab);
+            if (route.tab === 'notes' && route.note !== undefined) await this.notesPanel.openNote(route.note);
+            this.graphFocus = route.tab === 'graph' ? route.focus ?? null : null;
+            if (this.graphFocus !== null) this.graphView?.focus(this.graphFocus);
+        } catch (error) {
+            console.error('navigation failed', error);
+        } finally {
+            this.navigating -= 1;
         }
-        if (target.length > 0) {
-            this.notesPanel.openNote(target);
-            void this.switchTab('notes');
+        // Always settle: the host learns where the app ended up, also when it stayed put.
+        this.routeChanged(mode, true);
+    }
+
+    private currentRoute(): Route {
+        const route: Route = {tab: this.tab};
+        const note = this.tab === 'notes' ? this.notesPanel.activeNoteId() : null;
+        if (note !== null) route.note = note;
+        const project = this.tab === 'roadmap' ? this.loadedPanel('roadmap')?.currentProject() ?? null : null;
+        if (project !== null) route.project = project;
+        if (this.tab === 'graph' && this.graphFocus !== null) route.focus = this.graphFocus;
+        return route;
+    }
+
+    /**
+     * Record the current view: in the URL hash (standalone) and for the
+     * host (onRouteChange). Quiet while go() is on its way.
+     */
+    private routeChanged(mode: 'push' | 'replace' = 'push', settle = false): void {
+        if (this.navigating > 0) return;
+        const hash = formatRoute(this.currentRoute());
+        const changed = hash !== this.lastRoute;
+        const first = this.lastRoute === null;
+        this.lastRoute = hash;
+        // The URL can name another view than the one shown: an edited hash or
+        // a host route the user declined (kept unsaved changes). Put it back.
+        if (this.appOpts.routing === 'hash' && window.location.hash !== hash) {
+            if (first || mode === 'replace' || !changed) window.history.replaceState(window.history.state, '', hash);
+            else window.history.pushState(null, '', hash);
         }
+        if (changed || settle) this.appOpts.onRouteChange?.(hash);
+    }
+
+    private async withRoadmap(action: (panel: RoadmapPanel) => Promise<void>): Promise<void> {
+        await this.go({tab: 'roadmap'});
+        await action(await this.panel('roadmap'));
+    }
+
+    /** What the command palette offers besides notes (plan P7 / C1). */
+    private paletteCommands(): PaletteCommand[] {
+        const commands: PaletteCommand[] = TAB_DEFS.map((def) => ({
+            id: `tab:${def.id}`,
+            label: `Go to ${def.label}`,
+            hint: 'tab',
+            keywords: [def.id, ...(def.title !== undefined ? [def.title] : [])],
+            run: () => void this.go({tab: def.id})
+        }));
+        const isLight = getTheme() === 'light';
+        const is3d = this.viewMode.get() === '3d';
+        commands.push(
+            {
+                id: 'note:new', label: 'New note', hint: 'note', keywords: ['create', 'neu', 'notiz'],
+                run: () => void this.go({tab: 'notes'}).then(() => this.notesPanel.newNote())
+            },
+            {
+                id: 'search', label: 'Search notes (full text / semantic)', hint: '/', keywords: ['find', 'suche'],
+                run: () => this.search?.focus()
+            },
+            {id: 'import', label: 'Import ChatGPT export', hint: 'import', keywords: ['zip', 'chatgpt'], run: () => void this.importDialog.open()},
+            {
+                id: 'theme', label: isLight ? 'Switch to dark theme' : 'Switch to light theme', hint: 'theme',
+                keywords: ['dark', 'light', 'dunkel', 'hell'], run: () => toggleTheme()
+            },
+            {id: 'activity', label: 'Toggle activity log', hint: 'panel', keywords: ['events', 'mcp'], run: () => this.activityLog.toggle()},
+            {
+                id: 'graph:mode', label: is3d ? 'Graph: switch to 2D' : 'Graph: switch to 3D', hint: 'graph', keywords: ['2d', '3d', 'view'],
+                run: () => {
+                    this.viewMode.set(is3d ? '2d' : '3d');
+                    void this.go({tab: 'graph'});
+                }
+            },
+            {
+                id: 'roadmap:project', label: 'Roadmap: new project', hint: 'roadmap', keywords: ['projekt', 'create'],
+                run: () => void this.withRoadmap((panel) => panel.newProject())
+            },
+            {
+                id: 'roadmap:step', label: 'Roadmap: new step', hint: 'roadmap', keywords: ['schritt', 'create'],
+                run: () => void this.withRoadmap((panel) => panel.newStep())
+            },
+            {id: 'shortcuts', label: 'Keyboard shortcuts', hint: '?', keywords: ['help', 'keys', 'hilfe', 'tasten'], run: () => openShortcutsDialog()}
+        );
+        if (this.appOpts.routing === 'hash') {
+            commands.push({
+                id: 'link', label: 'Copy link to this view', hint: 'link', keywords: ['share', 'url', 'teilen'],
+                run: () => {
+                    void navigator.clipboard.writeText(window.location.href).then(
+                        () => toast('Link copied', {kind: 'success'}),
+                        () => toast(window.location.href, {durationMs: 0})
+                    );
+                }
+            });
+        }
+        if (this.settings !== null) {
+            commands.push({id: 'settings', label: 'Account settings', hint: 'account', keywords: ['token', 'sign out'], run: () => this.settings?.open()});
+        }
+        return commands;
+    }
+
+    /** `?` opens the shortcut overview, unless the user is typing or a dialog is open. */
+    private onShortcutKey(event: KeyboardEvent): void {
+        if (event.key !== '?' || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+        if (isTypingTarget(event.target) || this.palette.isOpen() || !isAppVisible(this.element)) return;
+        if (document.querySelector('body > .synaipse-portal > .modal-backdrop') !== null) return;
+        event.preventDefault();
+        openShortcutsDialog();
     }
 
     private lastEventNode: {id: string; ts: number} | null = null;
@@ -505,8 +648,7 @@ export class App {
         this.search = new Search({
             semanticEnabled,
             onOpenNote: (noteId) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: noteId});
             },
             onTopHitChanged: (noteId) => {
                 if (noteId !== null && this.graphView !== null) {
@@ -524,7 +666,7 @@ export class App {
             const btn = el('button', {
                 class: def.id === this.tab ? 'tab active' : 'tab',
                 attrs: {type: 'button', ...(def.title !== undefined ? {title: def.title} : {})},
-                on: {click: () => void this.switchTab(def.id)}
+                on: {click: () => void this.go({tab: def.id})}
             }, el('span', {text: def.label})) as HTMLButtonElement;
             if (def.id === 'consent') btn.appendChild(this.consentBadge);
             this.tabButtons.set(def.id, btn);
@@ -639,9 +781,13 @@ export class App {
         }
 
         this.tab = tab;
+        if (tab !== 'graph') this.graphFocus = null;
         for (const [id, btn] of this.tabButtons) {
             btn.classList.toggle('active', id === tab);
+            if (id === tab) btn.setAttribute('aria-current', 'page');
+            else btn.removeAttribute('aria-current');
         }
+        this.routeChanged();
 
         if (tab === 'notes') {
             this.showNotes();
@@ -764,8 +910,7 @@ export class App {
 
         const callbacks = {
             onSelectNote: (noteId: string) => {
-                this.notesPanel.openNote(noteId);
-                void this.switchTab('notes');
+                void this.go({tab: 'notes', note: noteId});
             }
         };
 

@@ -132,3 +132,17 @@ export const isAppVisible = (node: Element): boolean => {
     const root = node.closest('.synaipse-root:not(.synaipse-portal)');
     return root !== null && root.getClientRects().length > 0;
 };
+
+/**
+ * Whether a key event's target takes text (inputs, textareas, selects,
+ * contenteditable), so single-key shortcuts like `/` and `?` stay out.
+ */
+export const isTypingTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag !== 'INPUT') return false;
+    const type = (target as HTMLInputElement).type;
+    return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type);
+};

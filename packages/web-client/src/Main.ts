@@ -7,4 +7,4 @@ if (host === null) {
     throw new Error('Root element not found');
 }
 
-void mount(host, {authGate: true});
+void mount(host, {authGate: true, routing: 'hash'});
