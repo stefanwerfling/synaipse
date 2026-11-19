@@ -1,5 +1,6 @@
 import {logout} from './Auth.js';
-import {clear, el, portalHost} from './Dom.js';
+import {clear, el} from './Dom.js';
+import {openModal, type ModalHandle} from './Modal.js';
 import {TokensPanel} from './TokensPanel.js';
 import {AdminPanel} from './AdminPanel.js';
 
@@ -19,8 +20,7 @@ type TabKey = 'tokens' | 'admin';
  *   Tab 2: Admin     — user-management (admin accounts only)
  */
 export class Settings {
-    private overlay: HTMLElement | null = null;
-    private isOpen = false;
+    private modal: ModalHandle | null = null;
     private activeTab: TabKey = 'tokens';
     private bodyHost: HTMLElement | null = null;
     private tokensPanel: TokensPanel | null = null;
@@ -30,35 +30,14 @@ export class Settings {
     public constructor(private readonly opts: SettingsOptions) {}
 
     public open(): void {
-        if (this.isOpen) return;
-        this.isOpen = true;
+        if (this.modal !== null) return;
         this.activeTab = 'tokens';
 
-        this.overlay = el('div', {class: 'settings-overlay'});
-        this.overlay.addEventListener('click', (e) => {
-            if (e.target === this.overlay) this.close();
-        });
-
-        const dialog = el('div', {class: 'settings-dialog'});
-        this.overlay.appendChild(dialog);
-
-        const closeBtn = el('button', {
-            class: 'import-close',
-            attrs: {type: 'button', 'aria-label': 'close'},
-            text: '×',
-            on: {click: () => this.close()}
-        });
-
-        const head = el('div', {class: 'settings-head'},
-            el('div', {class: 'settings-head-main'},
-                el('h2', {text: 'Account settings'}),
-                el('div', {class: 'settings-head-email', text: this.opts.account.email})
-            ),
-            closeBtn
-        );
-
         const tabs = this.buildTabs();
-        this.bodyHost = el('div', {class: 'settings-body'});
+        this.bodyHost = el('div', {
+            class: 'settings-body',
+            attrs: tabs !== null ? {role: 'tabpanel', id: 'settings-tabpanel'} : {}
+        });
 
         const logoutBtn = el('button', {
             class: 'btn',
@@ -77,27 +56,35 @@ export class Settings {
         });
 
         const footer = this.opts.account.managedByHost === true
-            ? el('div', {class: 'settings-footer'},
-                el('span', {class: 'settings-footer-hint', text: 'Signed in through the host application; sign out there.'}))
-            : el('div', {class: 'settings-footer'},
+            ? [el('span', {class: 'settings-footer-hint', text: 'Signed in through the host application; sign out there.'})]
+            : [
                 el('span', {class: 'settings-footer-hint', text: 'You stay signed in across browser sessions until you sign out.'}),
                 logoutBtn
-            );
+            ];
 
-        dialog.appendChild(head);
-        if (tabs !== null) dialog.appendChild(tabs);
-        dialog.appendChild(this.bodyHost);
-        dialog.appendChild(footer);
-
-        portalHost().appendChild(this.overlay);
+        this.modal = openModal({
+            title: 'Account settings',
+            subtitle: this.opts.account.email,
+            closeLabel: 'Close',
+            size: 'lg',
+            layout: 'sections',
+            className: 'settings-dialog',
+            body: tabs !== null ? [tabs, this.bodyHost] : [this.bodyHost],
+            footer,
+            ...(tabs !== null ? {initialFocus: this.tabButtons.get('tokens')!} : {}),
+            onDismiss: () => this.reset()
+        });
         this.renderActiveTab();
     }
 
     public close(): void {
-        if (!this.isOpen) return;
-        this.isOpen = false;
-        this.overlay?.remove();
-        this.overlay = null;
+        if (this.modal === null) return;
+        this.modal.close();
+        this.reset();
+    }
+
+    private reset(): void {
+        this.modal = null;
         this.bodyHost = null;
         this.tokensPanel = null;
         this.adminPanel = null;
@@ -111,32 +98,48 @@ export class Settings {
             return null;
         }
 
-        const tokensBtn = el('button', {
-            class: 'settings-tab active',
-            attrs: {type: 'button'},
-            text: 'My tokens',
-            on: {click: () => this.switchTab('tokens')}
-        }) as HTMLButtonElement;
+        const tab = (key: TabKey, label: string): HTMLButtonElement => {
+            const btn = el('button', {
+                class: 'settings-tab',
+                attrs: {type: 'button', role: 'tab', 'aria-controls': 'settings-tabpanel'},
+                text: label,
+                on: {click: () => this.switchTab(key)}
+            }) as HTMLButtonElement;
+            this.tabButtons.set(key, btn);
+            return btn;
+        };
 
-        const adminBtn = el('button', {
-            class: 'settings-tab',
-            attrs: {type: 'button'},
-            text: 'Admin',
-            on: {click: () => this.switchTab('admin')}
-        }) as HTMLButtonElement;
+        const nav = el('nav', {class: 'settings-tabs', attrs: {role: 'tablist', 'aria-label': 'Settings sections'}},
+            tab('tokens', 'My tokens'),
+            tab('admin', 'Admin')
+        );
+        // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+        nav.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+            const keys = [...this.tabButtons.keys()];
+            const i = keys.indexOf(this.activeTab);
+            const next = keys[(i + (ev.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length]!;
+            ev.preventDefault();
+            this.switchTab(next);
+            this.tabButtons.get(next)?.focus();
+        });
+        this.syncTabs();
+        return nav;
+    }
 
-        this.tabButtons.set('tokens', tokensBtn);
-        this.tabButtons.set('admin', adminBtn);
-
-        return el('nav', {class: 'settings-tabs'}, tokensBtn, adminBtn);
+    private syncTabs(): void {
+        for (const [k, btn] of this.tabButtons) {
+            const active = k === this.activeTab;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', String(active));
+            btn.tabIndex = active ? 0 : -1;
+        }
     }
 
     private switchTab(key: TabKey): void {
         if (this.activeTab === key) return;
         this.activeTab = key;
-        for (const [k, btn] of this.tabButtons) {
-            btn.className = k === key ? 'settings-tab active' : 'settings-tab';
-        }
+        this.syncTabs();
         this.renderActiveTab();
     }
 

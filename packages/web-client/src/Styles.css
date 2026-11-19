@@ -2082,54 +2082,6 @@ body.synaipse-sidebar-resizing {
 }
 
 /* DSGVO preview modal — last gate before vault content reaches an external LLM. */
-.synaipse-root .preview-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 130;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .preview-dialog {
-    background: var(--bg-1);
-    border: 1px solid rgba(240, 170, 90, 0.55);
-    border-radius: var(--r-3);
-    width: min(560px, 100%);
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
-}
-
-.synaipse-root .preview-head {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.synaipse-root .preview-head h2 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text-0);
-}
-
-.synaipse-root .preview-close {
-    background: transparent;
-    border: none;
-    color: var(--text-3);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 6px;
-}
-
-.synaipse-root .preview-close:hover {
-    color: var(--red);
-}
 
 .synaipse-root .preview-lead {
     margin: 0;
@@ -2190,14 +2142,6 @@ body.synaipse-sidebar-resizing {
 
 .synaipse-root .preview-skip-input {
     margin-top: 2px;
-}
-
-.synaipse-root .preview-footer {
-    padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--border-soft);
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
 }
 
 .synaipse-root .chat-card-privacy-pill {
@@ -2553,44 +2497,6 @@ body.synaipse-sidebar-resizing {
     background: var(--accent-hover);
 }
 
-.synaipse-root .summarize-modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 110;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .summarize-modal {
-    background: var(--bg-1);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--r-3);
-    max-width: 640px;
-    width: 100%;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
-}
-
-.synaipse-root .summarize-modal-head {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-}
-
-.synaipse-root .summarize-modal-head h3 {
-    margin: 0;
-    font-size: 14px;
-    color: var(--text-0);
-}
-
 .synaipse-root .summarize-modal-status {
     font-size: 11px;
     color: var(--text-3);
@@ -2604,14 +2510,6 @@ body.synaipse-sidebar-resizing {
     white-space: pre-wrap;
     flex: 1 1 auto;
     min-height: 80px;
-}
-
-.synaipse-root .summarize-modal-actions {
-    padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--border-soft);
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
 }
 
 .synaipse-root .topbar-import {
@@ -2650,56 +2548,6 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .theme-toggle:hover {
     color: var(--accent);
     border-color: var(--accent);
-}
-
-.synaipse-root .import-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 120;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .import-dialog {
-    background: var(--bg-1);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--r-3);
-    width: min(960px, 100%);
-    max-height: 86vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
-}
-
-.synaipse-root .import-head {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.synaipse-root .import-head h2 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text-0);
-}
-
-.synaipse-root .import-close {
-    background: transparent;
-    border: none;
-    color: var(--text-3);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 6px;
-}
-
-.synaipse-root .import-close:hover {
-    color: var(--red);
 }
 
 .synaipse-root .import-dropzone {
@@ -2904,15 +2752,6 @@ body.synaipse-sidebar-resizing {
     font-size: 13px;
     line-height: 1.5;
     white-space: pre-wrap;
-}
-
-.synaipse-root .import-footer {
-    padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--border-soft);
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: var(--space-2);
 }
 
 .synaipse-root .import-status {
@@ -5441,44 +5280,6 @@ body.synaipse-sidebar-resizing {
     white-space: pre-wrap;
 }
 
-.synaipse-root .floorplan-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 1001;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .floorplan-modal {
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--r-3);
-    padding: var(--space-4);
-    width: min(1280px, 96vw);
-    height: min(860px, 92vh);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.synaipse-root .floorplan-modal-heading {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-weight: 600;
-    color: var(--text-0);
-    font-size: 15px;
-}
-
-.synaipse-root .floorplan-modal-icon {
-    font-size: 18px;
-    line-height: 1;
-}
-
 .synaipse-root .floorplan-modal-stage {
     flex: 1 1 auto;
     min-height: 0;
@@ -5511,12 +5312,6 @@ body.synaipse-sidebar-resizing {
     font-size: 12px;
     padding: var(--space-3) var(--space-4);
     white-space: pre-wrap;
-}
-
-.synaipse-root .floorplan-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
 }
 
 .synaipse-root .infographic-modal-backdrop {
@@ -5621,44 +5416,6 @@ body.synaipse-sidebar-resizing {
 /* ============================================================
    DSGVO dialog — wraps a text selection in a privacy marker
    ============================================================ */
-
-.synaipse-root .dsgvo-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 1001;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .dsgvo-modal {
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--r-3);
-    padding: var(--space-4);
-    width: min(680px, 96vw);
-    max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-
-.synaipse-root .dsgvo-modal-heading {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-weight: 600;
-    color: var(--text-0);
-    font-size: 15px;
-}
-
-.synaipse-root .dsgvo-modal-lock {
-    font-size: 18px;
-}
 
 .synaipse-root .dsgvo-modal-selection {
     display: flex;
@@ -5773,13 +5530,6 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .dsgvo-modal-error {
     color: var(--red);
     font-size: 12px;
-}
-
-.synaipse-root .dsgvo-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
 }
 
 /* ============================================================
@@ -6161,62 +5911,10 @@ body.synaipse-sidebar-resizing {
 
 /* Account settings modal --------------------------------------------------- */
 
-.synaipse-root .settings-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 130;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .settings-dialog {
-    background: var(--bg-1);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--r-3);
-    width: min(720px, 100%);
-    max-height: 86vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: var(--shadow-lg);
-}
-
-.synaipse-root .settings-head {
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border-soft);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-3);
-}
-
-.synaipse-root .settings-head-main h2 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text-0);
-}
-
-.synaipse-root .settings-head-email {
-    margin-top: 2px;
-    color: var(--text-3);
-    font-size: 12px;
-}
-
 .synaipse-root .settings-body {
     flex: 1 1 auto;
     overflow-y: auto;
     padding: var(--space-4);
-}
-
-.synaipse-root .settings-footer {
-    padding: var(--space-3) var(--space-4);
-    border-top: 1px solid var(--border-soft);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
 }
 
 .synaipse-root .settings-footer-hint {
@@ -6420,35 +6118,6 @@ body.synaipse-sidebar-resizing {
 
 /* Plain-bearer reveal modal ------------------------------------------------ */
 
-.synaipse-root .tokens-modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 140;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4);
-}
-
-.synaipse-root .tokens-modal {
-    background: var(--bg-1);
-    border: 1px solid var(--accent);
-    border-radius: var(--r-3);
-    width: min(540px, 100%);
-    padding: var(--space-4);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    box-shadow: var(--shadow-lg);
-}
-
-.synaipse-root .tokens-modal-title {
-    margin: 0;
-    color: var(--text-0);
-    font-size: 15px;
-}
-
 .synaipse-root .tokens-modal-warning {
     margin: 0;
     color: var(--text-1);
@@ -6473,12 +6142,6 @@ body.synaipse-sidebar-resizing {
     font-size: 12px;
     word-break: break-all;
     user-select: all;
-}
-
-.synaipse-root .tokens-modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
 }
 
 /* Settings tab bar -------------------------------------------------------- */
@@ -7603,7 +7266,6 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .canvas-save-indicator.saved  { color: var(--green, #5dbb63); }
 .synaipse-root .canvas-save-indicator.error  { color: var(--red); }
 
-
 /* ─────────────────────────────────────────────────────────────────────────
    Roadmap tab — per-project planning table (mockup-styled, token-mapped)
    ───────────────────────────────────────────────────────────────────────── */
@@ -8014,6 +7676,147 @@ body.synaipse-sidebar-resizing {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
+}
+
+.synaipse-root .modal-footer[hidden] {
+    display: none;
+}
+
+.synaipse-root .modal-md { width: min(560px, 100%); }
+.synaipse-root .modal-lg { width: min(720px, 100%); }
+.synaipse-root .modal-xl { width: min(960px, 100%); }
+
+.synaipse-root .modal-full {
+    width: min(1280px, 100%);
+    height: min(860px, 92vh);
+}
+
+.synaipse-root .modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.synaipse-root .modal-head-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.synaipse-root .modal-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.synaipse-root .modal-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.synaipse-root .modal-subtitle,
+.synaipse-root .modal-head-main > [role='status'] {
+    color: var(--text-3);
+    font-size: 12px;
+}
+
+.synaipse-root .modal-close {
+    flex: 0 0 auto;
+    margin: -4px -6px 0 0;
+    padding: 2px 8px;
+    background: transparent;
+    border: none;
+    border-radius: var(--r-1);
+    color: var(--text-3);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.synaipse-root .modal-close:hover {
+    color: var(--red);
+}
+
+/* Full-height dialogs: the body takes the room between head and footer. */
+.synaipse-root .modal-full .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Sections layout: head, body and footer padded apart; the body scrolls and
+   its content brings its own padding (lists, tab panels, split panes). */
+.synaipse-root .modal-sections {
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+}
+
+.synaipse-root .modal-sections .modal-head {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.synaipse-root .modal-sections .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    gap: 0;
+}
+
+.synaipse-root .modal-sections .modal-footer {
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-soft);
+}
+
+/* A hint or status line in the footer pushes the buttons to the right. */
+.synaipse-root .modal-footer > span:first-child {
+    flex: 1 1 auto;
+}
+
+/* Per-dialog accents and shapes. */
+.synaipse-root .preview-dialog {
+    border-color: rgba(240, 170, 90, 0.55);
+}
+
+.synaipse-root .tokens-modal {
+    border-color: var(--accent);
+}
+
+.synaipse-root .import-dialog {
+    max-height: 86vh;
+}
+
+/* The conversation list scrolls inside the split, not the whole body. */
+.synaipse-root .import-dialog .modal-body {
+    overflow: hidden;
+}
+
+.synaipse-root .settings-dialog {
+    max-height: 86vh;
+}
+
+.synaipse-root .settings-dialog .modal-body {
+    overflow: hidden;
+}
+
+.synaipse-root .settings-dialog .settings-body {
+    min-height: 0;
+}
+
+.synaipse-root .summarize-modal {
+    max-height: 80vh;
+}
+
+/* Keyboard focus is always visible (plan P7 / C4). :where keeps this at
+   the lowest weight, so controls with their own focus style (.btn glow,
+   input border) keep it. */
+.synaipse-root :where(button, a[href], summary, [role='button'], [role='tab'], [role='menuitem'], [role='option'],
+    [tabindex]:not([tabindex='-1']), input[type='checkbox'], input[type='radio']):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .synaipse-root .toast-stack {

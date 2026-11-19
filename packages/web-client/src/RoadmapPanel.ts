@@ -557,14 +557,14 @@ export class RoadmapPanel {
 
         const actions = step.deleted
             ? el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreStep(step.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen', 'aria-label': 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreStep(step.id)}})
             )
             : el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'KI-Cursor hier setzen'}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Zeit buchen'}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Notiz verlinken'}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Unterschritt hinzufügen'}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
-                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'KI-Cursor hier setzen', 'aria-label': 'KI-Cursor hier setzen'}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Zeit buchen', 'aria-label': 'Zeit buchen'}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Notiz verlinken', 'aria-label': 'Notiz verlinken'}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Unterschritt hinzufügen', 'aria-label': 'Unterschritt hinzufügen'}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
+                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)', 'aria-label': 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
             );
 
         const indent = el('span', {class: 'rm-indent', style: {width: `${depth * 20}px`}});

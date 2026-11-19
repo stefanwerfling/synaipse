@@ -1,4 +1,4 @@
-import {clear, el, portalHost} from './Dom.js';
+import {clear, el} from './Dom.js';
 import {
     createToken,
     listTokens,
@@ -8,6 +8,7 @@ import {
 } from './Auth.js';
 import {confirmDialog} from './Dialogs.js';
 import {toastError} from './Toast.js';
+import {openModal} from './Modal.js';
 
 const formatDate = (ms: number | null): string => {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) return '—';
@@ -299,8 +300,6 @@ export class TokensPanel {
 }
 
 const showPlainTokenModal = (plain: string, label: string, action: 'created' | 'rotated'): void => {
-    const overlay = el('div', {class: 'tokens-modal-overlay'});
-
     const closeBtn = el('button', {
         class: 'btn btn-primary',
         attrs: {type: 'button'},
@@ -313,7 +312,7 @@ const showPlainTokenModal = (plain: string, label: string, action: 'created' | '
         text: 'Copy'
     }) as HTMLButtonElement;
 
-    const tokenBox = el('code', {class: 'tokens-modal-code', text: plain});
+    const tokenBox = el('code', {class: 'tokens-modal-code', attrs: {'aria-label': 'New token'}, text: plain});
 
     copyBtn.addEventListener('click', () => {
         void (async () => {
@@ -334,22 +333,20 @@ const showPlainTokenModal = (plain: string, label: string, action: 'created' | '
         })();
     });
 
-    const dismiss = (): void => overlay.remove();
-    closeBtn.addEventListener('click', dismiss);
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) dismiss();
+    const modal = openModal({
+        title: `Token ${action}: ${label}`,
+        size: 'md',
+        className: 'tokens-modal',
+        body: [
+            el('p', {class: 'tokens-modal-warning'},
+                el('strong', {text: 'Copy this token now.'}),
+                ' Synaipse stores only a hash — once this dialog closes the plain bearer is gone forever.'
+            ),
+            el('div', {class: 'tokens-modal-codewrap'}, tokenBox, copyBtn)
+        ],
+        footer: [closeBtn],
+        initialFocus: copyBtn,
+        onDismiss: () => undefined
     });
-
-    const modal = el('div', {class: 'tokens-modal'},
-        el('h3', {class: 'tokens-modal-title', text: `Token ${action}: ${label}`}),
-        el('p', {class: 'tokens-modal-warning'},
-            el('strong', {text: 'Copy this token now.'}),
-            ' Synaipse stores only a hash — once this dialog closes the plain bearer is gone forever.'
-        ),
-        el('div', {class: 'tokens-modal-codewrap'}, tokenBox, copyBtn),
-        el('div', {class: 'tokens-modal-actions'}, closeBtn)
-    );
-
-    overlay.appendChild(modal);
-    portalHost().appendChild(overlay);
+    closeBtn.addEventListener('click', () => modal.close());
 };

@@ -882,12 +882,12 @@ export class BenchmarksPanel {
 
         const actions = entry.deleted
             ? el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreEntry(entry.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen', 'aria-label': 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreEntry(entry.id)}})
             )
             : el('div', {class: 'rm-row-actions'},
                 el('button', {
                     class: 'rm-icon',
-                    attrs: {type: 'button', title: 'Bearbeiten'},
+                    attrs: {type: 'button', title: 'Bearbeiten', 'aria-label': 'Bearbeiten'},
                     text: '✎',
                     on: {click: () => {
                         this.editingId = this.editingId === entry.id ? null : entry.id;
@@ -895,7 +895,7 @@ export class BenchmarksPanel {
                         this.render();
                     }}
                 }),
-                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
+                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)', 'aria-label': 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
         const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', depth > 0 ? 'bm-child-row' : ''].filter(Boolean).join(' ');
@@ -925,7 +925,7 @@ export class BenchmarksPanel {
             const row = el('div', {class: 'bm-dim-row'}, keyInput, valueInput,
                 el('button', {
                     class: 'rm-icon danger',
-                    attrs: {type: 'button', title: 'Dimension entfernen'},
+                    attrs: {type: 'button', title: 'Dimension entfernen', 'aria-label': 'Dimension entfernen'},
                     text: '✕',
                     on: {click: () => {
                         row.remove();

@@ -1,4 +1,5 @@
-import {clear, el, portalHost} from './Dom.js';
+import {el} from './Dom.js';
+import {openModal, type ModalHandle} from './Modal.js';
 
 export interface PreviewSummary {
     provider: string;
@@ -19,54 +20,23 @@ export interface PreviewDialogResult {
  * or cancels — the chat send is aborted on cancel and the input stays
  * populated so the user can edit and retry.
  *
- * Pattern mirrors ImportDialog: overlay + dialog body, click-outside
- * closes. Returns a promise that resolves with the user's choice; the
+ * Runs in the shared modal frame. Resolves with the user's choice; the
  * caller awaits it before invoking /api/chat.
  */
 export class PreviewDialog {
-    private overlay: HTMLElement | null = null;
+    private modal: ModalHandle | null = null;
+    private settle: ((result: PreviewDialogResult) => void) | null = null;
 
     public async open(summary: PreviewSummary): Promise<PreviewDialogResult> {
         return new Promise<PreviewDialogResult>((resolve) => {
-            const overlay = el('div', {class: 'preview-overlay'});
-            const body = el('div', {class: 'preview-dialog'});
-
-            let result: PreviewDialogResult = {confirmed: false, rememberSkip: false};
-
-            const settle = (next: PreviewDialogResult): void => {
-                result = next;
-                overlay.remove();
-                this.overlay = null;
+            this.settle = (result): void => {
+                this.modal?.close();
+                this.modal = null;
+                this.settle = null;
                 resolve(result);
             };
+            const dismiss = (): void => this.settle?.({confirmed: false, rememberSkip: false});
 
-            const dismiss = (): void => settle({confirmed: false, rememberSkip: false});
-
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) dismiss();
-            });
-
-            // Esc closes too — modal etiquette.
-            const onKey = (e: KeyboardEvent): void => {
-                if (e.key === 'Escape') {
-                    document.removeEventListener('keydown', onKey);
-                    dismiss();
-                }
-            };
-            document.addEventListener('keydown', onKey);
-
-            // Head
-            const head = el('div', {class: 'preview-head'},
-                el('h2', {text: 'DSGVO-Vorschau vor dem Senden'}),
-                el('button', {
-                    class: 'preview-close',
-                    attrs: {type: 'button', 'aria-label': 'close'},
-                    text: '×',
-                    on: {click: dismiss}
-                })
-            );
-
-            // Lead paragraph
             const lead = el('p', {class: 'preview-lead'},
                 'Du sendest gleich an einen ',
                 el('strong', {text: 'externen'}),
@@ -75,12 +45,11 @@ export class PreviewDialog {
                 '. Synaipse hat das Folgende vorbereitet:'
             );
 
-            // Stats list
             const stats = el('ul', {class: 'preview-stats'});
 
             if (summary.filteredPrivate > 0) {
                 stats.appendChild(el('li', {},
-                    el('span', {class: 'preview-stat-icon', text: '🔒'}),
+                    el('span', {class: 'preview-stat-icon', attrs: {'aria-hidden': 'true'}, text: '🔒'}),
                     ` ${summary.filteredPrivate} Notiz${summary.filteredPrivate === 1 ? '' : 'en'} wurde${summary.filteredPrivate === 1 ? '' : 'n'} ausgeblendet (Privacy-Marker)`
                 ));
             }
@@ -90,7 +59,7 @@ export class PreviewDialog {
             if (redactTotal > 0) {
                 const detail = summary.redactions.map((r) => `${r.count} ${r.kind}`).join(', ');
                 stats.appendChild(el('li', {},
-                    el('span', {class: 'preview-stat-icon', text: '🛡'}),
+                    el('span', {class: 'preview-stat-icon', attrs: {'aria-hidden': 'true'}, text: '🛡'}),
                     ` ${redactTotal} PII/Secret-Treffer werden automatisch geschwärzt: `,
                     el('span', {class: 'preview-stat-detail', text: detail})
                 ));
@@ -100,21 +69,16 @@ export class PreviewDialog {
                 stats.appendChild(el('li', {class: 'preview-stat-empty', text: 'Keine Privacy-relevanten Treffer in der aktuellen Source-Selektion.'}));
             }
 
-            // Skip checkbox
             const skipInput = el('input', {
                 class: 'preview-skip-input',
-                attrs: {type: 'checkbox', id: 'preview-skip'}
+                attrs: {type: 'checkbox'}
             }) as HTMLInputElement;
 
-            const skipRow = el('label', {
-                class: 'preview-skip',
-                attrs: {for: 'preview-skip'}
-            },
+            const skipRow = el('label', {class: 'preview-skip'},
                 skipInput,
                 el('span', {text: 'Künftig nicht mehr nachfragen (kann in den Browser-Daten zurückgesetzt werden).'})
             );
 
-            // Footer
             const cancelBtn = el('button', {
                 class: 'btn',
                 attrs: {type: 'button'},
@@ -126,34 +90,29 @@ export class PreviewDialog {
                 class: 'btn btn-primary',
                 attrs: {type: 'button'},
                 text: 'Trotzdem senden',
-                on: {click: () => {
-                    document.removeEventListener('keydown', onKey);
-                    settle({confirmed: true, rememberSkip: skipInput.checked});
-                }}
+                on: {click: () => this.settle?.({confirmed: true, rememberSkip: skipInput.checked})}
             }) as HTMLButtonElement;
 
-            const footer = el('div', {class: 'preview-footer'}, cancelBtn, sendBtn);
-
-            clear(body);
-            body.appendChild(head);
-            body.appendChild(lead);
-            body.appendChild(stats);
-            body.appendChild(skipRow);
-            body.appendChild(footer);
-
-            overlay.appendChild(body);
-            portalHost().appendChild(overlay);
-            this.overlay = overlay;
-
-            sendBtn.focus();
+            this.modal = openModal({
+                title: 'DSGVO-Vorschau vor dem Senden',
+                closeLabel: 'Schließen',
+                size: 'md',
+                layout: 'sections',
+                className: 'preview-dialog',
+                body: [lead, stats, skipRow],
+                footer: [cancelBtn, sendBtn],
+                initialFocus: sendBtn,
+                onDismiss: () => {
+                    this.modal = null;
+                    dismiss();
+                }
+            });
         });
     }
 
+    /** Closes the dialog as cancelled. */
     public close(): void {
-        if (this.overlay !== null) {
-            this.overlay.remove();
-            this.overlay = null;
-        }
+        this.settle?.({confirmed: false, rememberSkip: false});
     }
 }
 

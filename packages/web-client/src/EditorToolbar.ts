@@ -156,7 +156,7 @@ export class EditorToolbar {
 
         const btn = el('button', {
             class: 'editor-toolbar-btn',
-            attrs: {type: 'button', title: 'Insert container block (infographic / tip / warning / note / …)', 'aria-haspopup': 'true'},
+            attrs: {type: 'button', title: 'Insert container block (infographic / tip / warning / note / …)', 'aria-label': 'Insert container block (infographic / tip / warning / note / …)', 'aria-haspopup': 'true'},
             text: '::: ▾',
             on: {click: (e) => {
                 e.preventDefault();

@@ -1,4 +1,5 @@
-import {el, portalHost} from './Dom.js';
+import {el} from './Dom.js';
+import {openModal} from './Modal.js';
 
 /**
  * Modal wrapper around mdfloor's `mountEditor` for inserting or editing
@@ -31,16 +32,8 @@ const DEFAULT_TEMPLATE = [
 export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     const {initial, onConfirm} = opts;
 
-    const backdrop = el('div', {class: 'floorplan-modal-backdrop'});
-    const box = el('div', {class: 'floorplan-modal'});
-
-    const heading = el('div', {class: 'floorplan-modal-heading'},
-        el('span', {class: 'floorplan-modal-icon', text: '🏠'}),
-        el('span', {text: initial.length > 0 ? 'Grundriss bearbeiten' : 'Grundriss einfügen'})
-    );
-
     const stage = el('div', {class: 'floorplan-modal-stage'},
-        el('div', {class: 'floorplan-modal-loading', text: 'mdfloor lädt …'})
+        el('div', {class: 'floorplan-modal-loading', attrs: {role: 'status'}, text: 'mdfloor lädt …'})
     );
 
     // The confirm handler is captured under a mutable ref so the OK button
@@ -48,55 +41,42 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     // and swapped in the real getSource-based capture.
     let confirmSource: () => string | null = () => null;
 
-    const dismiss = (): void => {
-        document.removeEventListener('keydown', onKey);
-        backdrop.remove();
-        opts.onCancel?.();
-    };
-
     const confirm = (): void => {
         const src = confirmSource();
         if (src === null) return;
-        document.removeEventListener('keydown', onKey);
-        backdrop.remove();
+        modal.close();
         onConfirm(src);
-    };
-
-    const onKey = (ev: KeyboardEvent): void => {
-        if (ev.key === 'Escape') {
-            dismiss();
-        } else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
-            ev.preventDefault();
-            confirm();
-        }
     };
 
     const cancelBtn = el('button', {
         class: 'btn',
         attrs: {type: 'button'},
         text: 'Abbrechen',
-        on: {click: dismiss}
+        on: {click: () => {
+            modal.close();
+            opts.onCancel?.();
+        }}
     });
     const okBtn = el('button', {
         class: 'btn btn-primary',
-        attrs: {type: 'button', title: 'Übernehmen (Ctrl+Enter)'},
+        attrs: {type: 'button', title: 'Übernehmen (Ctrl+Enter)', 'aria-keyshortcuts': 'Control+Enter'},
         text: 'Übernehmen',
         on: {click: confirm}
     }) as HTMLButtonElement;
     okBtn.disabled = true;
 
-    const actions = el('div', {class: 'floorplan-modal-actions'}, cancelBtn, okBtn);
-
-    document.addEventListener('keydown', onKey);
-    backdrop.addEventListener('click', (ev) => {
-        if (ev.target === backdrop) dismiss();
+    const modal = openModal({
+        title: initial.length > 0 ? 'Grundriss bearbeiten' : 'Grundriss einfügen',
+        icon: '🏠',
+        closeLabel: 'Schließen',
+        size: 'full',
+        className: 'floorplan-modal',
+        body: stage,
+        footer: [cancelBtn, okBtn],
+        initialFocus: cancelBtn,
+        onSubmitShortcut: confirm,
+        onDismiss: () => opts.onCancel?.()
     });
-
-    box.appendChild(heading);
-    box.appendChild(stage);
-    box.appendChild(actions);
-    backdrop.appendChild(box);
-    portalHost().appendChild(backdrop);
 
     void (async () => {
         let mdfloor: typeof import('mdfloor');
@@ -105,6 +85,7 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
         } catch (e) {
             stage.replaceChildren(el('div', {
                 class: 'floorplan-modal-error',
+                attrs: {role: 'alert'},
                 text: `mdfloor konnte nicht geladen werden: ${e instanceof Error ? e.message : String(e)}`
             }));
             return;

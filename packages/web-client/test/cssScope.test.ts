@@ -14,6 +14,24 @@ const preludes = (css: string): string[] => {
     return [...noKeyframes.matchAll(/([^{};]+)\{/g)].map((m) => m[1]!.trim());
 };
 
+/** Splits a selector list at its top-level commas, not those inside :where()/:is(). */
+const selectors = (prelude: string): string[] => {
+    const out: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < prelude.length; i++) {
+        const c = prelude[i];
+        if (c === '(') depth++;
+        else if (c === ')') depth--;
+        else if (c === ',' && depth === 0) {
+            out.push(prelude.slice(start, i).trim());
+            start = i + 1;
+        }
+    }
+    out.push(prelude.slice(start).trim());
+    return out;
+};
+
 const ALLOWED = ['.synaipse-root', '.synaipse-portal', 'body.synaipse-'];
 
 describe('Styles.css scoping', () => {
@@ -29,7 +47,7 @@ describe('Styles.css scoping', () => {
         const offenders: string[] = [];
         for (const prelude of preludes(css)) {
             if (prelude.startsWith('@')) continue;
-            for (const sel of prelude.split(',').map((s) => s.trim())) {
+            for (const sel of selectors(prelude)) {
                 if (!ALLOWED.some((prefix) => sel.startsWith(prefix))) offenders.push(sel);
             }
         }

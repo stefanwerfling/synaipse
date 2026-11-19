@@ -4,6 +4,7 @@ import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el, portalHost} from './Dom.js';
 import {confirmDialog} from './Dialogs.js';
+import {openModal, type ModalHandle} from './Modal.js';
 import {listDraftIds} from './Drafts.js';
 import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
@@ -1556,14 +1557,12 @@ export class NotesPanel {
         if (this.active === null) return;
         const noteId = this.active.id;
 
-        const overlay = el('div', {class: 'summarize-modal-overlay'});
-        const body = el('div', {class: 'summarize-modal-body'});
-        const status = el('div', {class: 'summarize-modal-status', text: 'streaming…'});
+        const body = el('div', {class: 'summarize-modal-body', attrs: {'aria-live': 'polite'}});
+        const status = el('div', {class: 'summarize-modal-status', attrs: {role: 'status'}, text: 'streaming…'});
         const closeBtn = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Close',
-            on: {click: () => this.closeSummarizeModal(overlay)}
+            text: 'Close'
         });
         const saveBtn = el('button', {
             class: 'btn btn-primary',
@@ -1571,21 +1570,19 @@ export class NotesPanel {
             text: 'Save to frontmatter.summary'
         }) as HTMLButtonElement;
 
-        const modal = el('div', {class: 'summarize-modal'},
-            el('div', {class: 'summarize-modal-head'},
-                el('h3', {text: `Summarize · ${this.active.title}`}),
-                status
-            ),
+        const modal = openModal({
+            title: `Summarize · ${this.active.title}`,
+            subtitle: status,
+            closeLabel: 'Close',
+            size: 'md',
+            layout: 'sections',
+            className: 'summarize-modal',
             body,
-            el('div', {class: 'summarize-modal-actions'}, closeBtn, saveBtn)
-        );
-
-        overlay.appendChild(modal);
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) this.closeSummarizeModal(overlay);
+            footer: [closeBtn, saveBtn],
+            initialFocus: closeBtn,
+            onDismiss: () => this.closeSummarizeModal(modal)
         });
-
-        portalHost().appendChild(overlay);
+        closeBtn.addEventListener('click', () => this.closeSummarizeModal(modal));
 
         const ctl = new AbortController();
         this.summarizeAbort = ctl;
@@ -1606,7 +1603,7 @@ export class NotesPanel {
                     try {
                         await this.saveSummaryToFrontmatter(noteId, finalSummary);
                         saveBtn.textContent = '✓ Saved';
-                        window.setTimeout(() => this.closeSummarizeModal(overlay), 800);
+                        window.setTimeout(() => this.closeSummarizeModal(modal), 800);
                     } catch (cause) {
                         saveBtn.textContent = 'Save failed';
                         status.textContent = String(cause);
@@ -1652,12 +1649,12 @@ export class NotesPanel {
         this.opts.onNotesChanged();
     }
 
-    private closeSummarizeModal(overlay: HTMLElement): void {
+    private closeSummarizeModal(modal: ModalHandle): void {
         if (this.summarizeAbort !== null) {
             this.summarizeAbort.abort();
             this.summarizeAbort = null;
         }
-        overlay.remove();
+        modal.close();
     }
 
     private renderLinks(): void {

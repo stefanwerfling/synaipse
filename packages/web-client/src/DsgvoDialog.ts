@@ -1,4 +1,5 @@
-import {clear, el, portalHost} from './Dom.js';
+import {clear, el} from './Dom.js';
+import {openModal} from './Modal.js';
 
 /**
  * Modal dialog for wrapping a selected text span in a DSGVO/privacy
@@ -93,14 +94,6 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
     let selectedKind = DEFAULT_KIND;
     let customKind = '';
 
-    const backdrop = el('div', {class: 'dsgvo-modal-backdrop'});
-    const box = el('div', {class: 'dsgvo-modal'});
-
-    const heading = el('div', {class: 'dsgvo-modal-heading'},
-        el('span', {class: 'dsgvo-modal-lock', text: '🔒'}),
-        el('span', {text: 'DSGVO-Marker setzen'})
-    );
-
     const preview = el('div', {class: 'dsgvo-modal-preview'});
     const renderPreview = (): void => {
         clear(preview);
@@ -136,7 +129,7 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
 
             group.appendChild(el('label', {class: 'dsgvo-modal-option'},
                 radio,
-                el('span', {class: 'dsgvo-modal-option-icon', text: opt.icon}),
+                el('span', {class: 'dsgvo-modal-option-icon', attrs: {'aria-hidden': 'true'}, text: opt.icon}),
                 el('span', {class: 'dsgvo-modal-option-label', text: opt.label})
             ));
         }
@@ -146,7 +139,7 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
 
     const customField = el('input', {
         class: 'dsgvo-modal-custom-field',
-        attrs: {type: 'text', placeholder: 'z.B. patient-id, vertragsnr, …', maxlength: 32},
+        attrs: {type: 'text', placeholder: 'z.B. patient-id, vertragsnr, …', maxlength: 32, 'aria-label': 'Freies Label'},
         on: {input: (ev) => {
             customKind = (ev.target as HTMLInputElement).value;
             renderPreview();
@@ -169,24 +162,14 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
         el('legend', {text: 'Custom'}),
         el('label', {class: 'dsgvo-modal-option'},
             customRadio,
-            el('span', {class: 'dsgvo-modal-option-icon', text: '✏️'}),
+            el('span', {class: 'dsgvo-modal-option-icon', attrs: {'aria-hidden': 'true'}, text: '✏️'}),
             el('span', {class: 'dsgvo-modal-option-label', text: 'Freies Label'})
         ),
         customField
     );
     categoriesHost.appendChild(customGroup);
 
-    const err = el('div', {class: 'dsgvo-modal-error', style: {display: 'none'}});
-
-    const dismiss = (): void => {
-        document.removeEventListener('keydown', onKey);
-        backdrop.remove();
-        opts.onCancel?.();
-    };
-    const onKey = (ev: KeyboardEvent): void => {
-        if (ev.key === 'Escape') dismiss();
-        else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) confirm();
-    };
+    const err = el('div', {class: 'dsgvo-modal-error', attrs: {'aria-live': 'polite'}});
 
     const confirm = (): void => {
         let kind: string;
@@ -194,7 +177,7 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
             const trimmed = customKind.trim().toLowerCase();
             if (!KIND_RE.test(trimmed)) {
                 err.textContent = 'Custom-Label: nur a-z, 0-9, - und _ (max 32).';
-                err.style.display = 'block';
+                customField.focus();
                 return;
             }
             kind = trimmed;
@@ -202,8 +185,7 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
             kind = selectedKind;
         }
 
-        document.removeEventListener('keydown', onKey);
-        backdrop.remove();
+        modal.close();
         onConfirm(buildDsgvoMarker(kind, selection));
     };
 
@@ -211,30 +193,29 @@ export const openDsgvoDialog = (opts: DsgvoDialogOptions): void => {
         class: 'btn',
         attrs: {type: 'button'},
         text: 'Abbrechen',
-        on: {click: dismiss}
+        on: {click: () => {
+            modal.close();
+            opts.onCancel?.();
+        }}
     });
     const okBtn = el('button', {
         class: 'btn btn-primary',
-        attrs: {type: 'button'},
+        attrs: {type: 'button', title: 'Marker einsetzen (Ctrl+Enter)', 'aria-keyshortcuts': 'Control+Enter'},
         text: 'Marker einsetzen',
         on: {click: confirm}
     });
-    const actions = el('div', {class: 'dsgvo-modal-actions'}, cancelBtn, okBtn);
-
-    document.addEventListener('keydown', onKey);
-    backdrop.addEventListener('click', (ev) => {
-        if (ev.target === backdrop) dismiss();
-    });
-
-    box.appendChild(heading);
-    box.appendChild(selectionBox);
-    box.appendChild(categoriesHost);
-    box.appendChild(preview);
-    box.appendChild(err);
-    box.appendChild(actions);
-    backdrop.appendChild(box);
-    portalHost().appendChild(backdrop);
 
     renderPreview();
-    (radios.find((r) => r.checked) ?? radios[0])?.focus();
+    const modal = openModal({
+        title: 'DSGVO-Marker setzen',
+        icon: '🔒',
+        closeLabel: 'Schließen',
+        size: 'lg',
+        className: 'dsgvo-modal',
+        body: [selectionBox, categoriesHost, preview, err],
+        footer: [cancelBtn, okBtn],
+        initialFocus: radios.find((r) => r.checked) ?? radios[0]!,
+        onSubmitShortcut: confirm,
+        onDismiss: () => opts.onCancel?.()
+    });
 };

@@ -6,7 +6,8 @@ import {
     type ChatgptConversationPreview,
     type ParsedExport
 } from './ChatgptImport.js';
-import {clear, el, portalHost} from './Dom.js';
+import {clear, el} from './Dom.js';
+import {openModal, type ModalHandle} from './Modal.js';
 
 export interface ImportDialogCallbacks {
     onNotesChanged: () => void;
@@ -20,7 +21,7 @@ const formatDate = (unixSeconds: number): string => {
 
 export class ImportDialog {
     public readonly element: HTMLElement;
-    private overlay!: HTMLElement;
+    private modal: ModalHandle | null = null;
     private body!: HTMLElement;
     private parsed: ParsedExport | null = null;
     private previews: ChatgptConversationPreview[] = [];
@@ -46,20 +47,20 @@ export class ImportDialog {
             this.existing = {};
         }
 
-        this.overlay = el('div', {class: 'import-overlay'});
-
-        const close = (): void => {
-            if (this.isImporting) return;
-            this.close();
-        };
-
-        this.overlay.addEventListener('click', (e) => {
-            if (e.target === this.overlay) close();
+        this.modal = openModal({
+            title: 'Import ChatGPT export',
+            closeLabel: 'Close',
+            size: 'xl',
+            layout: 'sections',
+            className: 'import-dialog',
+            // An import in flight finishes first; the footer shows its progress.
+            canDismiss: () => !this.isImporting,
+            onDismiss: () => {
+                this.modal = null;
+                this.close();
+            }
         });
-
-        this.body = el('div', {class: 'import-dialog'});
-        this.overlay.appendChild(this.body);
-        portalHost().appendChild(this.overlay);
+        this.body = this.modal.body;
 
         this.renderDropzone();
     }
@@ -67,7 +68,8 @@ export class ImportDialog {
     public close(): void {
         if (!this.isOpen) return;
         this.isOpen = false;
-        this.overlay.remove();
+        this.modal?.close();
+        this.modal = null;
         this.parsed = null;
         this.previews = [];
         this.selected.clear();
@@ -78,15 +80,8 @@ export class ImportDialog {
     private renderDropzone(): void {
         clear(this.body);
 
-        const head = el('div', {class: 'import-head'},
-            el('h2', {text: 'Import ChatGPT export'}),
-            el('button', {
-                class: 'import-close',
-                attrs: {type: 'button', 'aria-label': 'close'},
-                text: '×',
-                on: {click: () => this.close()}
-            })
-        );
+        this.modal?.setTitle('Import ChatGPT export');
+        this.modal?.setFooter([]);
 
         const fileInput = el('input', {
             attrs: {type: 'file', accept: '.zip,application/zip'},
@@ -97,14 +92,19 @@ export class ImportDialog {
             }}
         }) as HTMLInputElement;
 
-        const dz = el('div', {class: 'import-dropzone'},
-            el('div', {class: 'import-dropzone-icon', text: '⬇'}),
+        const dz = el('div', {class: 'import-dropzone', attrs: {role: 'button', tabindex: '0', 'aria-label': 'Choose a ChatGPT export ZIP'}},
+            el('div', {class: 'import-dropzone-icon', attrs: {'aria-hidden': 'true'}, text: '⬇'}),
             el('p', {class: 'import-dropzone-text', text: 'Drop your ChatGPT export ZIP here'}),
             el('p', {class: 'import-dropzone-hint', text: 'Or click to pick a file'}),
             fileInput
         );
 
         dz.addEventListener('click', () => fileInput.click());
+        dz.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            fileInput.click();
+        });
         dz.addEventListener('dragover', (e) => {
             e.preventDefault();
             dz.classList.add('dragging');
@@ -117,8 +117,8 @@ export class ImportDialog {
             if (file !== undefined) void this.loadFile(file);
         });
 
-        this.body.appendChild(head);
         this.body.appendChild(dz);
+        dz.focus();
     }
 
     private async loadFile(file: File): Promise<void> {
@@ -139,13 +139,13 @@ export class ImportDialog {
 
     private renderLoading(label: string): void {
         clear(this.body);
-        this.body.appendChild(el('div', {class: 'import-loading', text: label}));
+        this.body.appendChild(el('div', {class: 'import-loading', attrs: {role: 'status'}, text: label}));
     }
 
     private renderError(message: string): void {
         clear(this.body);
 
-        this.body.appendChild(el('div', {class: 'import-error'},
+        this.body.appendChild(el('div', {class: 'import-error', attrs: {role: 'alert'}},
             el('h3', {text: 'Import failed'}),
             el('p', {text: message}),
             el('button', {
@@ -160,19 +160,11 @@ export class ImportDialog {
     private renderList(): void {
         clear(this.body);
 
-        const head = el('div', {class: 'import-head'},
-            el('h2', {text: `Import ChatGPT export · ${this.previews.length} conversations`}),
-            el('button', {
-                class: 'import-close',
-                attrs: {type: 'button', 'aria-label': 'close'},
-                text: '×',
-                on: {click: () => this.close()}
-            })
-        );
+        this.modal?.setTitle(`Import ChatGPT export · ${this.previews.length} conversations`);
 
         const filterInput = el('input', {
             class: 'import-filter',
-            attrs: {type: 'text', placeholder: 'Filter by title…'},
+            attrs: {type: 'text', placeholder: 'Filter by title…', 'aria-label': 'Filter by title'},
             on: {input: (e) => {
                 this.filter = (e.target as HTMLInputElement).value;
                 this.renderListBody(listHost, previewHost);
@@ -213,9 +205,9 @@ export class ImportDialog {
             on: {click: () => void this.runImport(importBtn as HTMLButtonElement, statusLine)}
         }) as HTMLButtonElement;
 
-        const statusLine = el('span', {class: 'import-status'});
+        const statusLine = el('span', {class: 'import-status', attrs: {role: 'status'}});
 
-        const footer = el('div', {class: 'import-footer'},
+        this.modal?.setFooter([
             statusLine,
             el('button', {
                 class: 'btn',
@@ -224,14 +216,13 @@ export class ImportDialog {
                 on: {click: () => this.close()}
             }),
             importBtn
-        );
+        ]);
 
-        this.body.appendChild(head);
         this.body.appendChild(toolbar);
         this.body.appendChild(split);
-        this.body.appendChild(footer);
 
         this.renderListBody(listHost, previewHost);
+        filterInput.focus();
     }
 
     private filteredPreviews(): ChatgptConversationPreview[] {
@@ -241,6 +232,12 @@ export class ImportDialog {
     }
 
     private renderListBody(listHost: HTMLElement, previewHost: HTMLElement): void {
+        // Re-rendering drops the focused row or checkbox; put focus back on its twin.
+        const focused = document.activeElement instanceof HTMLElement && listHost.contains(document.activeElement)
+            ? document.activeElement
+            : null;
+        const focusId = focused?.closest<HTMLElement>('.import-row')?.dataset['id'];
+        const focusCheck = focused?.classList.contains('import-row-check') === true;
         clear(listHost);
         const items = this.filteredPreviews();
 
@@ -253,10 +250,13 @@ export class ImportDialog {
             const isExisting = this.existing[p.id] !== undefined;
             const isActive = this.activePreview === p.id;
 
-            const row = el('div', {class: isActive ? 'import-row active' : 'import-row'},
+            const row = el('div', {
+                class: isActive ? 'import-row active' : 'import-row',
+                attrs: {tabindex: '0', 'data-id': p.id, 'aria-current': isActive ? 'true' : 'false'}
+            },
                 el('input', {
                     class: 'import-row-check',
-                    attrs: {type: 'checkbox', ...(isSelected ? {checked: 'checked'} : {})},
+                    attrs: {type: 'checkbox', 'aria-label': `Import “${p.title}”`, ...(isSelected ? {checked: 'checked'} : {})},
                     on: {change: (e) => {
                         const checked = (e.target as HTMLInputElement).checked;
                         if (checked) this.selected.add(p.id);
@@ -283,8 +283,17 @@ export class ImportDialog {
                 this.activePreview = p.id;
                 this.renderListBody(listHost, previewHost);
             });
+            row.addEventListener('keydown', (e) => {
+                if (e.target !== row || (e.key !== 'Enter' && e.key !== ' ')) return;
+                e.preventDefault();
+                this.activePreview = p.id;
+                this.renderListBody(listHost, previewHost);
+            });
 
             listHost.appendChild(row);
+            if (p.id === focusId) {
+                (focusCheck ? row.querySelector<HTMLElement>('.import-row-check') ?? row : row).focus();
+            }
         }
 
         this.renderPreview(previewHost);

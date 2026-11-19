@@ -232,7 +232,7 @@ export class HistoryPanel {
         const crumbs = el('div', {class: 'snapshot-crumbs'},
             el('button', {
                 class: 'snapshot-crumb',
-                attrs: {type: 'button'},
+                attrs: {type: 'button', 'aria-label': 'Snapshot root'},
                 text: '/',
                 on: {click: () => {
                     this.snapshotPath = '';

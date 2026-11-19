@@ -53,3 +53,35 @@ describe('no native dialogs (plan P7 / C2)', () => {
         expect(offenders).toEqual([]);
     });
 });
+
+/** The options object of each `el('button', {...})` call, brace-balanced. */
+const buttonOptions = (source: string): string[] => {
+    const found: string[] = [];
+    const re = /el\(\s*'button'\s*,\s*\{/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) {
+        let depth = 0;
+        let i = m.index + m[0].length - 1;
+        for (; i < source.length; i++) {
+            if (source[i] === '{') depth++;
+            else if (source[i] === '}' && --depth === 0) break;
+        }
+        found.push(source.slice(m.index + m[0].length - 1, i + 1));
+    }
+    return found;
+};
+
+describe('icon buttons have an accessible name (plan P7 / C4)', () => {
+    it('a button whose own text is only a glyph carries aria-label', () => {
+        const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '../src');
+        const offenders: string[] = [];
+        for (const f of readdirSync(src).filter((n) => n.endsWith('.ts'))) {
+            for (const opts of buttonOptions(readFileSync(path.join(src, f), 'utf8'))) {
+                const text = /\btext:\s*'([^']*)'/.exec(opts)?.[1];
+                if (text === undefined || /[\p{L}\p{N}]{2,}/u.test(text)) continue;
+                if (!opts.includes("'aria-label'")) offenders.push(`${f}: ${JSON.stringify(text)}`);
+            }
+        }
+        expect(offenders).toEqual([]);
+    });
+});
