@@ -11,6 +11,8 @@ import {
 } from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
+import {confirmDialog, promptDialog, validProjectName} from './Dialogs.js';
+import {toast} from './Toast.js';
 
 export interface BenchmarksPanelOptions {
     /** Open a linked note in the Notes tab. */
@@ -158,12 +160,14 @@ export class BenchmarksPanel {
     }
 
     private async createProject(): Promise<void> {
-        const name = window.prompt('Projektname (a-z, 0-9, . _ -):', '')?.trim();
+        const name = await promptDialog({
+            title: 'Neues Projekt',
+            label: 'Projektname (a-z, 0-9, . _ -)',
+            confirmLabel: 'Anlegen',
+            cancelLabel: 'Abbrechen',
+            validate: validProjectName
+        });
         if (!name) return;
-        if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
-            window.alert('Ungültiger Projektname.');
-            return;
-        }
         this.project = name;
         this.set = {project: name, updatedAt: '', entries: []};
         try {
@@ -990,7 +994,7 @@ export class BenchmarksPanel {
             const unit = unitInput.value.trim();
 
             if (Object.keys(dimensions).length === 0 || metric.length === 0 || !Number.isFinite(value) || unit.length === 0) {
-                window.alert('Mindestens eine Dimension, Metrik, Wert und Einheit sind Pflichtfelder.');
+                toast('Mindestens eine Dimension, Metrik, Wert und Einheit sind Pflichtfelder.', {kind: 'error'});
                 return;
             }
 
@@ -1055,7 +1059,14 @@ export class BenchmarksPanel {
      * vault so it stays reversible. Entries are never hard-removed.
      */
     private async deleteEntry(id: string): Promise<void> {
-        if (!window.confirm('Eintrag als gelöscht markieren? Er wird ausgeblendet, bleibt aber im Vault erhalten und lässt sich wiederherstellen.')) return;
+        const ok = await confirmDialog({
+            title: 'Eintrag löschen?',
+            message: 'Der Eintrag wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.',
+            confirmLabel: 'Löschen',
+            cancelLabel: 'Abbrechen',
+            danger: true
+        });
+        if (!ok) return;
         await this.mutate((set) => {
             set.entries = setEntryDeleted(set.entries, id, true);
         });

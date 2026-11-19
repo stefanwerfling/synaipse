@@ -6,6 +6,8 @@ import {
     rotateToken,
     type TokenDto
 } from './Auth.js';
+import {confirmDialog} from './Dialogs.js';
+import {toastError} from './Toast.js';
 
 const formatDate = (ms: number | null): string => {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) return '—';
@@ -244,9 +246,12 @@ export class TokensPanel {
 
     private async handleRevoke(token: TokenDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
-        const ok = window.confirm(
-            `Revoke token "${token.label}"? Any client using it will immediately lose access. This cannot be undone.`
-        );
+        const ok = await confirmDialog({
+            title: 'Revoke token?',
+            message: `Any client using "${token.label}" loses access immediately. This cannot be undone.`,
+            confirmLabel: 'Revoke',
+            danger: true
+        });
         if (!ok) return;
 
         this.busy = true;
@@ -257,7 +262,7 @@ export class TokensPanel {
             await revokeToken(token.id);
             await this.refresh();
         } catch (cause) {
-            window.alert(cause instanceof Error ? cause.message : String(cause));
+            toastError('', cause);
             btn.disabled = false;
             btn.textContent = 'Revoke';
         } finally {
@@ -267,9 +272,12 @@ export class TokensPanel {
 
     private async handleRotate(token: TokenDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
-        const ok = window.confirm(
-            `Rotate token "${token.label}"? The old bearer stops working immediately and you'll receive a new one shown only once.`
-        );
+        const ok = await confirmDialog({
+            title: 'Rotate token?',
+            message: `The old bearer of "${token.label}" stops working immediately. You get a new one, shown only once.`,
+            confirmLabel: 'Rotate',
+            danger: true
+        });
         if (!ok) return;
 
         this.busy = true;
@@ -281,7 +289,7 @@ export class TokensPanel {
             showPlainTokenModal(result.plainToken, result.token.label, 'rotated');
             await this.refresh();
         } catch (cause) {
-            window.alert(cause instanceof Error ? cause.message : String(cause));
+            toastError('', cause);
             btn.disabled = false;
             btn.textContent = 'Rotate';
         } finally {

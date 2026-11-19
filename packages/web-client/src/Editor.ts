@@ -3,6 +3,7 @@ import {extractTypedLinks} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {clearDraft, formatDraftAge, readDraft, writeDraft} from './Drafts.js';
+import {confirmDialog} from './Dialogs.js';
 import {EditorToolbar} from './EditorToolbar.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
@@ -116,7 +117,7 @@ export class Editor {
         };
         this.mqMobile.addEventListener('change', this.onMqChange);
 
-        this.maybeOfferDraftRestore();
+        void this.maybeOfferDraftRestore();
     }
 
     public update(note: Note): void {
@@ -150,7 +151,7 @@ export class Editor {
      * Compare draft snapshot against the note as it arrived from the server.
      * A draft that matches the server has nothing to restore.
      */
-    private maybeOfferDraftRestore(): void {
+    private async maybeOfferDraftRestore(): Promise<void> {
         const draft = readDraft(this.note.id);
         if (draft === null) return;
 
@@ -164,9 +165,14 @@ export class Editor {
             return;
         }
 
-        const ok = window.confirm(
-            `Restore your unsaved draft of "${this.note.title}" from ${formatDraftAge(draft.savedAt)}?`
-        );
+        const ok = await confirmDialog({
+            title: 'Restore draft?',
+            message: `You have an unsaved draft of "${this.note.title}" from ${formatDraftAge(draft.savedAt)}.`,
+            confirmLabel: 'Restore',
+            cancelLabel: 'Discard draft'
+        });
+        // The editor may be gone (note switched) or typed into meanwhile.
+        if (!this.element.isConnected || this.isDirty) return;
 
         if (!ok) {
             clearDraft(this.note.id);
@@ -257,21 +263,35 @@ export class Editor {
                 return;
             }
 
-            if (this.isDirty && !window.confirm('You have unsaved changes. Discard and follow the link?')) {
-                return;
-            }
+            void (async () => {
+                if (this.isDirty && !await confirmDialog({
+                    title: 'Unsaved changes',
+                    message: 'Discard your changes and follow the link?',
+                    confirmLabel: 'Discard',
+                    danger: true
+                })) {
+                    return;
+                }
 
-            this.cb.onWikilinkClick?.(noteId);
+                this.cb.onWikilinkClick?.(noteId);
+            })();
         };
     }
 
     private unresolvedClickGuard(): (title: string) => void {
         return (title) => {
-            if (this.isDirty && !window.confirm('You have unsaved changes. Discard and create the new note?')) {
-                return;
-            }
+            void (async () => {
+                if (this.isDirty && !await confirmDialog({
+                    title: 'Unsaved changes',
+                    message: 'Discard your changes and create the new note?',
+                    confirmLabel: 'Discard',
+                    danger: true
+                })) {
+                    return;
+                }
 
-            this.cb.onUnresolvedClick?.(title);
+                this.cb.onUnresolvedClick?.(title);
+            })();
         };
     }
 

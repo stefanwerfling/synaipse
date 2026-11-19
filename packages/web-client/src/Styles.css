@@ -7912,3 +7912,178 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .ib-target { max-width: 280px; }
 .synaipse-root .ib-input { min-width: 200px; flex: 1 1 200px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-0); color: var(--text-0); font: inherit; font-size: 13px; }
 .synaipse-root .ib-error { font-size: 13px; color: var(--red); }
+
+/* === MODAL, DIALOGS, TOASTS (plan P7 / C2, C4) === */
+
+.synaipse-root .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.synaipse-root .modal {
+    width: min(440px, 100%);
+    max-height: calc(100vh - 2 * var(--space-4));
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    background: var(--bg-1);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-3);
+    box-shadow: var(--shadow-lg);
+}
+
+.synaipse-root .modal:focus {
+    outline: none;
+}
+
+.synaipse-root .modal-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-0);
+}
+
+.synaipse-root .modal-text {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-1);
+    white-space: pre-line;
+}
+
+.synaipse-root .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.synaipse-root .modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.synaipse-root .modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.synaipse-root .modal-label {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.synaipse-root .modal-input {
+    appearance: none;
+    background: var(--bg-0);
+    color: var(--text-0);
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 13px;
+}
+
+.synaipse-root .modal-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--accent-glow);
+}
+
+.synaipse-root .modal-error {
+    min-height: 1em;
+    font-size: 12px;
+    color: var(--red);
+}
+
+.synaipse-root .modal-error:empty {
+    min-height: 0;
+}
+
+.synaipse-root .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
+.synaipse-root .toast-stack {
+    position: fixed;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-2);
+    max-width: min(420px, calc(100vw - 2 * var(--space-4)));
+    pointer-events: none;
+}
+
+.synaipse-root .toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+    background: var(--bg-2);
+    color: var(--text-0);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r-2);
+    box-shadow: var(--shadow-md);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: synaipse-toast-in 160ms ease-out;
+}
+
+.synaipse-root .toast-success {
+    border-left-color: var(--green);
+}
+
+.synaipse-root .toast-error {
+    border-left-color: var(--red);
+}
+
+.synaipse-root .toast-text {
+    flex: 1 1 auto;
+    padding-top: 2px;
+    overflow-wrap: anywhere;
+}
+
+.synaipse-root .toast-close {
+    flex: 0 0 auto;
+    background: none;
+    border: 0;
+    color: var(--text-2);
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: var(--r-1);
+    cursor: pointer;
+}
+
+.synaipse-root .toast-close:hover,
+.synaipse-root .toast-close:focus-visible {
+    color: var(--text-0);
+    background: var(--bg-3);
+    outline: none;
+}
+
+@keyframes synaipse-toast-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .synaipse-root .toast { animation: none; }
+}

@@ -11,6 +11,7 @@ import {
     wrap,
     type InsertionResult
 } from './MarkdownInsertion.js';
+import {toast} from './Toast.js';
 
 /**
  * GitHub-style formatting toolbar that sits above the editor textarea.
@@ -344,19 +345,18 @@ export class EditorToolbar {
      * Open the DSGVO dialog for the current selection. Multi-line
      * selections aren't allowed — the `[[dsgvo:kind|text]]` marker must
      * stay on one line for the preview's wikilink walk to match. Empty
-     * selection is rejected with a subtle prompt via `alert` (dialog UX
-     * doesn't need selection because there's nothing to wrap).
+     * or multi-line selections get a hint toast instead of the dialog.
      */
     private openDsgvo(): void {
         const {start, end} = this.sel();
         if (end <= start) {
-            window.alert('Erst Text markieren, den du als DSGVO-relevant kennzeichnen willst.');
+            toast('Erst Text markieren, den du als DSGVO-relevant kennzeichnen willst.');
             this.textarea.focus();
             return;
         }
         const selection = this.textarea.value.slice(start, end);
         if (selection.includes('\n')) {
-            window.alert('DSGVO-Marker unterstützen nur einzeilige Markierungen.');
+            toast('DSGVO-Marker unterstützen nur einzeilige Markierungen.');
             this.textarea.focus();
             return;
         }

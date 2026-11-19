@@ -2,6 +2,7 @@ import {marked} from 'marked';
 import TurndownService from 'turndown';
 import {gfm} from 'turndown-plugin-gfm';
 import {el} from './Dom.js';
+import {promptDialog} from './Dialogs.js';
 
 /**
  * WYSIWYG editor for canvas text cards. Roundtrip goal is lossless for
@@ -452,9 +453,19 @@ const runCommand = (cmd: string, surface: HTMLElement): void => {
             wrapSelection(surface, 'code');
             return;
         case 'link': {
-            const url = window.prompt('URL', 'https://');
-            if (url === null || url.length === 0) return;
-            document.execCommand('createLink', false, url);
+            // The dialog takes focus, so keep the selection to wrap.
+            const sel = window.getSelection();
+            const range = sel !== null && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+            void promptDialog({title: 'Link', label: 'URL', value: 'https://', type: 'url'}).then((url) => {
+                if (url === null || url.length === 0 || url === 'https://') return;
+                surface.focus();
+                if (range !== null) {
+                    const now = window.getSelection();
+                    now?.removeAllRanges();
+                    now?.addRange(range);
+                }
+                document.execCommand('createLink', false, url);
+            });
             return;
         }
     }

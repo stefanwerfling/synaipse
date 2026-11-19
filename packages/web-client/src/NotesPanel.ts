@@ -3,6 +3,7 @@ import {extractTypedLinks} from '@synaipse/core';
 import {api, NoteSummary, SummarizeEvent} from './Api.js';
 import {tagColor} from './Colors.js';
 import {clear, el, portalHost} from './Dom.js';
+import {confirmDialog} from './Dialogs.js';
 import {listDraftIds} from './Drafts.js';
 import {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
@@ -10,6 +11,7 @@ import {LocalGraphPanel} from './LocalGraphPanel.js';
 import {clipSnippet} from './HoverCard.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {exportNoteToPdf} from './PdfExport.js';
+import {toastError} from './Toast.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {extractToc, TocPanel} from './Toc.js';
 import {buildWikilinkResolver, slugify, WikilinkResolver} from './Wikilinks.js';
@@ -1005,12 +1007,17 @@ export class NotesPanel {
         void this.handleSelect(id);
     }
 
-    private confirmDiscardIfDirty(promptMessage: string): boolean {
+    private async confirmDiscardIfDirty(promptMessage: string): Promise<boolean> {
         if (!this.editing || this.currentEditor === null || !this.currentEditor.isDirty) {
             return true;
         }
 
-        return window.confirm(promptMessage);
+        return await confirmDialog({
+            title: 'Unsaved changes',
+            message: promptMessage,
+            confirmLabel: 'Discard',
+            danger: true
+        });
     }
 
     private async handleSelect(id: string, opts: {skipDirtyCheck?: boolean} = {}): Promise<void> {
@@ -1018,7 +1025,7 @@ export class NotesPanel {
             return;
         }
 
-        if (!opts.skipDirtyCheck && !this.confirmDiscardIfDirty('You have unsaved changes. Discard and switch note?')) {
+        if (!opts.skipDirtyCheck && !await this.confirmDiscardIfDirty('Discard your changes and switch to the other note?')) {
             return;
         }
 
@@ -1036,17 +1043,19 @@ export class NotesPanel {
     }
 
     private async handleNew(): Promise<void> {
-        if (!this.confirmDiscardIfDirty('You have unsaved changes. Discard and create a new note?')) {
+        if (!await this.confirmDiscardIfDirty('Discard your changes and create a new note?')) {
             return;
         }
         this.openCreateRow();
     }
 
     private handleNewInFolder = (folder: string): void => {
-        if (!this.confirmDiscardIfDirty('You have unsaved changes. Discard and create a new note?')) {
-            return;
-        }
-        this.openCreateRow({folder});
+        void (async () => {
+            if (!await this.confirmDiscardIfDirty('Discard your changes and create a new note?')) {
+                return;
+            }
+            this.openCreateRow({folder});
+        })();
     };
 
     /**
@@ -1127,7 +1136,14 @@ export class NotesPanel {
             return;
         }
 
-        if (!window.confirm(`Delete ${this.active.id}?`)) {
+        const id = this.active.id;
+        const ok = await confirmDialog({
+            title: 'Delete note?',
+            message: `${id} will be deleted.`,
+            confirmLabel: 'Delete',
+            danger: true
+        });
+        if (!ok || this.active?.id !== id) {
             return;
         }
 
@@ -1139,7 +1155,7 @@ export class NotesPanel {
             this.opts.onNotesChanged();
             this.renderEmpty();
         } catch (e) {
-            window.alert(`Could not delete: ${e instanceof Error ? e.message : String(e)}`);
+            toastError('Could not delete', e);
         }
     }
 

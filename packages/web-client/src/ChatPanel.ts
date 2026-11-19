@@ -5,6 +5,7 @@ import {clear, el} from './Dom.js';
 import {FrameThrottle} from './FrameThrottle.js';
 import {renderMarkdownDraftInto, renderMarkdownInto} from './MarkdownPreview.js';
 import {PreviewDialog, previewSkipFlag} from './PreviewDialog.js';
+import {toastError} from './Toast.js';
 
 export type ChatSource = ChatSourceRef;
 
@@ -712,7 +713,7 @@ export class ChatPanel {
             preview = await api.chatPreview({question});
         } catch (cause) {
             console.error('DSGVO preview failed', cause);
-            window.alert('DSGVO-Vorschau konnte nicht geladen werden — Senden wird abgebrochen. Siehe Browser-Konsole für Details.');
+            toastError('DSGVO-Vorschau konnte nicht geladen werden, Senden abgebrochen', cause);
             return false;
         }
 

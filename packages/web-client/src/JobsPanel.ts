@@ -7,6 +7,8 @@ import {
     type Schedule
 } from './Api.js';
 import {clear, el, portalHost} from './Dom.js';
+import {confirmDialog} from './Dialogs.js';
+import {toastError} from './Toast.js';
 
 /**
  * Jobs tab, redesigned around persistent jobs:
@@ -246,7 +248,7 @@ export class JobsPanel {
             void schedulesApi.update(s.id, {enabled: enabledToggle.checked})
                 .then(() => this.refresh())
                 .catch((cause) => {
-                    window.alert(`Failed to toggle: ${String(cause)}`);
+                    toastError('Could not toggle the job', cause);
                     enabledToggle.checked = s.enabled;
                 });
         });
@@ -258,7 +260,7 @@ export class JobsPanel {
             on: {click: () => {
                 void schedulesApi.runNow(s.id)
                     .then(() => this.refresh())
-                    .catch((cause) => window.alert(`Run-now failed: ${String(cause)}`));
+                    .catch((cause) => toastError('Run now failed', cause));
             }}
         });
 
@@ -274,10 +276,17 @@ export class JobsPanel {
             attrs: {type: 'button'},
             text: 'Delete',
             on: {click: () => {
-                if (!window.confirm(`Delete job "${s.name}"?`)) return;
-                void schedulesApi.delete(s.id)
-                    .then(() => this.refresh())
-                    .catch((cause) => window.alert(`Delete failed: ${String(cause)}`));
+                void confirmDialog({
+                    title: 'Delete job?',
+                    message: `The scheduled job "${s.name}" will be deleted.`,
+                    confirmLabel: 'Delete',
+                    danger: true
+                }).then((ok) => {
+                    if (!ok) return;
+                    void schedulesApi.delete(s.id)
+                        .then(() => this.refresh())
+                        .catch((cause) => toastError('Delete failed', cause));
+                });
             }}
         });
 

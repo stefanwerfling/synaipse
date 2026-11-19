@@ -2,6 +2,7 @@ import type {Roadmap, RoadmapStatus, RoadmapStep, RoadmapSummary} from '@synaips
 import {setStepDeleted, withoutDeleted} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
+import {confirmDialog, formDialog, promptDialog, validProjectName} from './Dialogs.js';
 
 export interface RoadmapPanelOptions {
     /** Open a linked note in the Notes tab. */
@@ -257,12 +258,14 @@ export class RoadmapPanel {
     }
 
     private async createProject(): Promise<void> {
-        const name = window.prompt('Projektname (a-z, 0-9, . _ -):', '')?.trim();
+        const name = await promptDialog({
+            title: 'Neues Projekt',
+            label: 'Projektname (a-z, 0-9, . _ -)',
+            confirmLabel: 'Anlegen',
+            cancelLabel: 'Abbrechen',
+            validate: validProjectName
+        });
         if (!name) return;
-        if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
-            window.alert('Ungültiger Projektname.');
-            return;
-        }
         this.project = name;
         this.roadmap = {project: name, updatedAt: '', active: null, steps: []};
         try {
@@ -717,7 +720,12 @@ export class RoadmapPanel {
     // --- mutations ----------------------------------------------------------
 
     private async addStep(parentId: string | null): Promise<void> {
-        const title = window.prompt(parentId === null ? 'Neuer Schritt — Titel:' : 'Neuer Unterschritt — Titel:', '')?.trim();
+        const title = await promptDialog({
+            title: parentId === null ? 'Neuer Schritt' : 'Neuer Unterschritt',
+            label: 'Titel',
+            confirmLabel: 'Anlegen',
+            cancelLabel: 'Abbrechen'
+        });
         if (!title) return;
         await this.mutate((rm) => {
             const id = nextId(rm.steps, parentId);
@@ -766,10 +774,22 @@ export class RoadmapPanel {
     private async bookTime(id: string): Promise<void> {
         const step = findStepLocal(this.roadmap?.steps ?? [], id);
         if (!step) return;
-        const planned = window.prompt('Geplante Zeit (h):', step.plannedHours !== undefined ? String(step.plannedHours) : '');
-        if (planned === null) return;
-        const actual = window.prompt('Umgesetzte Zeit (h):', step.actualHours !== undefined ? String(step.actualHours) : '');
-        if (actual === null) return;
+        const hours = await formDialog({
+            title: 'Zeit buchen',
+            message: step.title,
+            fields: [
+                {name: 'planned', label: 'Geplant (h)', type: 'number', value: step.plannedHours !== undefined ? String(step.plannedHours) : ''},
+                {name: 'actual', label: 'Umgesetzt (h)', type: 'number', value: step.actualHours !== undefined ? String(step.actualHours) : ''}
+            ],
+            confirmLabel: 'Speichern',
+            cancelLabel: 'Abbrechen',
+            validate: (v) => [v.planned!, v.actual!].some((x) => x !== '' && !Number.isFinite(Number.parseFloat(x)))
+                ? 'Stunden als Zahl angeben (leer lassen für unverändert).'
+                : null
+        });
+        if (hours === null) return;
+        const planned = hours.planned!;
+        const actual = hours.actual!;
         await this.mutate((rm) => {
             const s = findStepLocal(rm.steps, id);
             if (!s) return;
@@ -781,18 +801,21 @@ export class RoadmapPanel {
     }
 
     private async linkNote(id: string): Promise<void> {
-        const raw = window.prompt('Notiz-Titel, Alias oder Pfad verlinken:', '')?.trim();
-        if (!raw) return;
         // Resolve to an existing note before storing, so no dead links are created.
         const resolve = this.opts.resolveNoteLink;
+        const raw = await promptDialog({
+            title: 'Notiz verlinken',
+            label: 'Titel, Alias oder Pfad',
+            placeholder: 'z. B. Memory/projekt/notiz.md',
+            confirmLabel: 'Verlinken',
+            cancelLabel: 'Abbrechen',
+            validate: (v) => v !== '' && resolve !== undefined && resolve(v) === null
+                ? `Keine Notiz gefunden für „${v}“. Exakter Titel, Alias oder Pfad.`
+                : null
+        });
+        if (!raw) return;
         const canonical = resolve ? resolve(raw) : raw;
-        if (canonical === null) {
-            window.alert(
-                `Keine Notiz gefunden für „${raw}". Verlinke sie mit ihrem exakten Titel, einem Alias ` +
-                    'oder ihrem Pfad (z. B. Memory/projekt/notiz.md). Es wurde nichts verlinkt.'
-            );
-            return;
-        }
+        if (canonical === null) return;
         await this.mutate((rm) => {
             const s = findStepLocal(rm.steps, id);
             if (!s) return;
@@ -807,7 +830,14 @@ export class RoadmapPanel {
      * hard-removed from the roadmap.
      */
     private async deleteStep(id: string): Promise<void> {
-        if (!window.confirm('Schritt als gelöscht markieren? Er wird ausgeblendet, bleibt aber im Vault erhalten und lässt sich wiederherstellen.')) return;
+        const ok = await confirmDialog({
+            title: 'Schritt löschen?',
+            message: 'Der Schritt wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.',
+            confirmLabel: 'Löschen',
+            cancelLabel: 'Abbrechen',
+            danger: true
+        });
+        if (!ok) return;
         await this.mutate((rm) => {
             rm.steps = setStepDeleted(rm.steps, id, true);
         });

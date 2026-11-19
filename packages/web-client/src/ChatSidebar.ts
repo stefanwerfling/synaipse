@@ -1,5 +1,6 @@
 import {api, type ChatSummary} from './Api.js';
 import {clear, el} from './Dom.js';
+import {confirmDialog} from './Dialogs.js';
 
 export interface ChatSidebarCallbacks {
     onSelect: (id: string) => void;
@@ -100,7 +101,14 @@ export class ChatSidebar {
     }
 
     private async handleDelete(id: string): Promise<void> {
-        if (!window.confirm('Dieses Gespräch wirklich löschen?')) return;
+        const ok = await confirmDialog({
+            title: 'Gespräch löschen?',
+            message: 'Das Gespräch wird endgültig gelöscht.',
+            confirmLabel: 'Löschen',
+            cancelLabel: 'Abbrechen',
+            danger: true
+        });
+        if (!ok) return;
 
         try {
             await api.deleteChat(id);

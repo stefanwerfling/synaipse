@@ -5,6 +5,8 @@ import {
     patchUser,
     type AdminAccountDto
 } from './Auth.js';
+import {confirmDialog, formDialog} from './Dialogs.js';
+import {toast, toastError} from './Toast.js';
 
 export interface AdminPanelOptions {
     /** Account id of the currently logged-in admin — used to gate self-targeted action buttons. */
@@ -237,11 +239,18 @@ export class AdminPanel {
         if (this.busy) return;
         const willDisable = account.disabledAt === null;
         const verb = willDisable ? 'Disable' : 'Re-enable';
-        const ok = window.confirm(
-            willDisable
-                ? `Disable "${account.email}"? They will be logged out immediately and any active session will stop working.`
-                : `Re-enable "${account.email}"? They will be able to sign in again.`
-        );
+        const ok = await confirmDialog(willDisable
+            ? {
+                title: 'Disable account?',
+                message: `${account.email} is signed out immediately; every active session stops working.`,
+                confirmLabel: 'Disable',
+                danger: true
+            }
+            : {
+                title: 'Re-enable account?',
+                message: `${account.email} can sign in again.`,
+                confirmLabel: 'Re-enable'
+            });
         if (!ok) return;
 
         this.busy = true;
@@ -252,7 +261,7 @@ export class AdminPanel {
             await patchUser(account.id, {disabled: willDisable});
             await this.refresh();
         } catch (cause) {
-            window.alert(cause instanceof Error ? cause.message : String(cause));
+            toastError('', cause);
             btn.disabled = false;
             btn.textContent = willDisable ? 'Disable' : 'Enable';
         } finally {
@@ -263,11 +272,18 @@ export class AdminPanel {
     private async handleToggleAdmin(account: AdminAccountDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
         const willPromote = !account.isAdmin;
-        const ok = window.confirm(
-            willPromote
-                ? `Grant admin to "${account.email}"? They will be able to manage other accounts.`
-                : `Revoke admin from "${account.email}"? They keep their account but lose user-management access.`
-        );
+        const ok = await confirmDialog(willPromote
+            ? {
+                title: 'Grant admin?',
+                message: `${account.email} will be able to manage other accounts.`,
+                confirmLabel: 'Grant admin'
+            }
+            : {
+                title: 'Revoke admin?',
+                message: `${account.email} keeps the account but loses user management.`,
+                confirmLabel: 'Revoke admin',
+                danger: true
+            });
         if (!ok) return;
 
         this.busy = true;
@@ -278,7 +294,7 @@ export class AdminPanel {
             await patchUser(account.id, {isAdmin: willPromote});
             await this.refresh();
         } catch (cause) {
-            window.alert(cause instanceof Error ? cause.message : String(cause));
+            toastError('', cause);
             btn.disabled = false;
             btn.textContent = willPromote ? 'Promote' : 'Demote';
         } finally {
@@ -288,20 +304,22 @@ export class AdminPanel {
 
     private async handleResetPassword(account: AdminAccountDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
-        const newPw = window.prompt(
-            `Reset password for "${account.email}". Enter the new password (min 8 chars). It will be shown only here — copy it before closing.`
-        );
-        if (newPw === null) return;
-        if (newPw.length < 8) {
-            window.alert('Password must be at least 8 characters.');
-            return;
-        }
-        const confirmPw = window.prompt('Confirm the new password by typing it again:');
-        if (confirmPw === null) return;
-        if (confirmPw !== newPw) {
-            window.alert('Passwords did not match — no change applied.');
-            return;
-        }
+        const values = await formDialog({
+            title: 'Reset password',
+            message: `New password for ${account.email}. Pass it on to them yourself; it is not shown again.`,
+            fields: [
+                {name: 'password', label: 'New password (min. 8 characters)', type: 'password', autocomplete: 'new-password'},
+                {name: 'repeat', label: 'Repeat', type: 'password', autocomplete: 'new-password'}
+            ],
+            confirmLabel: 'Reset password',
+            validate: (v) => {
+                if (v.password!.length < 8) return 'Password must be at least 8 characters.';
+                if (v.repeat !== v.password) return 'The passwords do not match.';
+                return null;
+            }
+        });
+        if (values === null) return;
+        const newPw = values.password!;
 
         this.busy = true;
         btn.disabled = true;
@@ -309,10 +327,10 @@ export class AdminPanel {
 
         try {
             await patchUser(account.id, {password: newPw});
-            window.alert(`Password for "${account.email}" has been reset.`);
+            toast(`Password for ${account.email} has been reset.`, {kind: 'success'});
             await this.refresh();
         } catch (cause) {
-            window.alert(cause instanceof Error ? cause.message : String(cause));
+            toastError('', cause);
         } finally {
             this.busy = false;
             btn.disabled = false;

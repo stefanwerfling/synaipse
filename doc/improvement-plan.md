@@ -278,7 +278,7 @@ S8 (`061a09c`): Das Plugin registriert den MCP-Server selbst (`.mcp.json`): URL 
 P8-Bilanz (Eval, ohne Embeddings): veraltete Notiz vor der Antwort 45 % → 0, hit@1 0,75 → 0,83 (bei 35 statt 32 Fragen), MRR 0,84 → 0,89, Duplikat-Erkennung Recall 1 ohne Fehlalarm, Prime 1019 → 824 Tokens. Offen aus P8: Claude Code live prüfen, ob `structuredContent` zusätzlich zum Text beim Modell landet (S5); Graph-Seeds aus kürzlich gelesenen Notizen nach Thema filtern (S1-Befund).
 
 
-### Status P9 (2026-11-18): begonnen
+### Status P9 (2026-11-18): erledigt
 
 | Slice | Inhalt | Stand |
 |---|---|---|
@@ -299,6 +299,18 @@ S4: `pkgstudio.module.json` im Repo-Root, Feldnamen wie `ModuleConfig` in PKG St
 S5: `packages/web` aufgeteilt in `@synaipse/web-client` (`src`, `index.html`, beide Vite-Configs, 20 Client-Tests) und `@synaipse/web-api` (`server`, 16 Tests inkl. Manifest; `graphDeltas.test.ts` prüft den Rundweg Server→Client und importiert den Client-Teil relativ). Alles, was der Browser-Code importiert, wird gebündelt und ist deshalb devDependency von web-client: Produktions-Pakete laut Lockfile 417 → 297 (three, @antv/infographic, 3d-force-graph, jsngraph, marked, highlight.js, jszip, mdfloor raus), rund 230 MB weniger. Dockerfile, Compose, `bench-scale`, `check-bundle-budget`, ESLint, Root-Scripts, Manifest und Doku nachgezogen; die Migration `007_schedules.sql` bewusst nicht angefasst (nur ein Kommentar, aber Migrationen bleiben unverändert). PKG Studio braucht danach neue Pfade (`embedEntry`, `MODULE_ENTRY`, `ModuleLoaders.ts`), Schritt 0 in `doc/embedding.md`. Docker-Image gebaut und geprüft: three, @antv/infographic, 3d-force-graph, jsngraph, marked, highlight.js, jszip, mdfloor fehlen im Image, `node_modules` 104 MB, Image 367 MB; der Server startet und liefert API und UI aus `packages/web-client/dist/web`.
 
 Gegenplan (2026-11-19): `pkgstudio/doc/module-integration-plan.md` mit G0–G7 (Pfade, `startSynaipseEmbed`, Gateway-Registrar, Mount-Handle, `--sh-*`-Set, Manifest-Loader, Aufräumen, Auth-Brücke). G0 umgesetzt (Pfade in `vite.config.ts`, `ModuleLoaders.ts`, `pkgstudio.example.json`, lokale `pkgstudio.json`), im PKG-Studio-Repo nicht committet, weil dort eigene gestagte Änderungen liegen. Mit isolierter Config (Test-Vault, Stub-Module für nppm/vtseditor) im Browser geprüft: Synaipse-Tab lädt. G1 (`startSynaipseEmbed({env})`, `/synaipse/__health`, `close()` beim Vite-Neustart), G2 (Synaipse-Tools an PKG Studios `/mcp`), G3 (`onShow`/`onHide`, `onThemeChange` → `data-shell-theme`) und G4 (volles `--sh-*`-Set; Entscheidung 2026-11-19: Synaipse übernimmt den Shell-Akzent) ebenfalls umgesetzt und geprüft, ebenfalls nicht committet. G5: PKG Studio liest `pkgstudio.module.json` (Frontend gebaut oder `source`, Backend, MCP, Env, Defaults für Label/Farbe/Theme); `vite.config.ts` und `ModuleLoaders.ts` haben keine Synaipse-Sonderfälle mehr. G6: Synaipse scrollt seinen Container selbst und hat die Mount-Option `brand: false`; damit entfallen die Synaipse-Regeln in PKG Studios `main.css`. G7: Server-Modus mit Anmeldung durch den Host: Option `principal` in `startSynaipseEmbed` (E-Mail → Account), Capability `host-principal`; PKG Studio setzt pro Modul einen festen `user` (keine eigene Anmeldung) und mountet mit `authGate: true`. Damit ist der Gegenplan G0–G7 umgesetzt.
+### Status P7 (2026-11-19): begonnen
+
+| Slice | Inhalt | Stand |
+|---|---|---|
+| S1 C2 Dialoge | `Modal` (Rahmen mit Fokusfalle, Escape, Fokus-Rückgabe, `role="dialog"`), `confirmDialog`/`formDialog`/`promptDialog`, `toast`; alle nativen `alert`/`confirm`/`prompt` ersetzt | erledigt |
+| S2 C4 Modal-Umbau | Settings, Preview, DSGVO, Floorplan, Import auf `Modal`; Fokusringe, `aria-label` für Icon-Buttons | offen |
+| S3 C1 Navigation | Hash-Routing (im Embed abschaltbar), Command-Palette mit allen Aktionen | offen |
+| S4 C3 Sprache | `t(key)`, Wörterbücher de/en; braucht Entscheidung §13.5 | offen |
+| S5 D2 God-Files | zuerst `Service.ts` (3970 Zeilen) | offen |
+
+S1: `Modal.ts` ist der eine Rahmen für kleine Dialoge im Portal-Layer: `aria-modal`, Titel als `aria-labelledby`, Tab/Shift+Tab bleiben im Dialog, Escape und Klick auf den Hintergrund brechen ab, danach geht der Fokus an den Auslöser zurück (wenn der noch sichtbar ist; „Delete“ im Überlaufmenü ist es nicht). Escape stoppt mit `stopImmediatePropagation`, damit darunterliegende Panels es nicht auch sehen. `Dialogs.ts`: `confirmDialog` (bei `danger` roter Knopf, Fokus auf Abbrechen), `formDialog` mit Validierung im Dialog statt Folge-`alert` (Projektname, Passwort-Wiederholung, Stunden, unauflösbarer Notiz-Link), `promptDialog` als Ein-Feld-Variante. `Toast.ts`: Stapel unten rechts, höchstens 4, Fehler 8 s mit `role="alert"`, sonst 4 s mit `role="status"`. 42 Aufrufe in 14 Dateien umgestellt; zusammengelegt wurden Passwort und Wiederholung (Admin) sowie geplante und umgesetzte Stunden (Roadmap) zu je einem Dialog. Der Link-Dialog im Canvas-Karteneditor merkt sich die Markierung, weil der Dialog den Fokus nimmt. Ein Test verhindert neue native Dialoge. Beschriftungen folgen der Sprache des jeweiligen Panels, bis S4 sie vereinheitlicht. Geprüft im Browser (isolierte Standalone-Instanz): Löschen mit Abbrechen, Escape und Bestätigen, Fokusfalle, Validierung im Projekt-Dialog mit Fokus-Rückgabe, „ungespeicherte Änderungen“ beim Notizwechsel, Toast.
+
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.

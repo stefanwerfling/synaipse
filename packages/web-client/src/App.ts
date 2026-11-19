@@ -20,6 +20,7 @@ import {getTheme, toggleTheme, onThemeChange, type Theme} from './Theme.js';
 import {Disposables} from './Disposables.js';
 import type {ChatPanel} from './ChatPanel.js';
 import {isLazyTab, PANEL_FACTORIES, TAB_DEFS, TABS, type LazyPanels, type LazyTab, type PanelContext, type PanelView, type Tab} from './Tabs.js';
+import {toast} from './Toast.js';
 
 const STORAGE_SELECTED_TAGS = 'synaipse.graph.selectedTags';
 const STORAGE_HIDE_ISOLATED = 'synaipse.graph.hideIsolated';
@@ -351,7 +352,7 @@ export class App {
             openRef: (ref) => {
                 const id = this.resolveNoteRef(ref);
                 if (id === null) {
-                    window.alert(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`);
+                    toast(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`, {kind: 'error'});
                     return;
                 }
                 this.notesPanel.openNote(id);
