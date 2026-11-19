@@ -4,7 +4,8 @@ import {TokensPanel} from './TokensPanel.js';
 import {AdminPanel} from './AdminPanel.js';
 
 export interface SettingsOptions {
-    account: {id: number; email: string; isAdmin: boolean};
+    /** managedByHost: the embedding host owns sign-in, so no sign-out button here. */
+    account: {id: number; email: string; isAdmin: boolean; managedByHost?: boolean};
     /** After sign-out; the boot code shows the login screen again (no page reload). */
     onSignedOut?: () => void;
 }
@@ -75,10 +76,13 @@ export class Settings {
             }
         });
 
-        const footer = el('div', {class: 'settings-footer'},
-            el('span', {class: 'settings-footer-hint', text: 'You stay signed in across browser sessions until you sign out.'}),
-            logoutBtn
-        );
+        const footer = this.opts.account.managedByHost === true
+            ? el('div', {class: 'settings-footer'},
+                el('span', {class: 'settings-footer-hint', text: 'Signed in through the host application; sign out there.'}))
+            : el('div', {class: 'settings-footer'},
+                el('span', {class: 'settings-footer-hint', text: 'You stay signed in across browser sessions until you sign out.'}),
+                logoutBtn
+            );
 
         dialog.appendChild(head);
         if (tabs !== null) dialog.appendChild(tabs);

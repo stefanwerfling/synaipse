@@ -15,7 +15,21 @@ export interface AuthContext {
     rateLimit: LoginRateLimit;
     /** Set Secure flag on the session cookie. Recommended behind HTTPS, off for localhost. */
     secureCookie: boolean;
+    /**
+     * Host-managed sign-in (plan P9 / PKG Studio G7). When set, the host
+     * owns authentication: Synaipse asks it who the request belongs to and
+     * maps the e-mail to its account, instead of reading its own session
+     * cookie. Login and logout are then the host's business.
+     */
+    principal?: PrincipalResolver;
 }
+
+/** Who the host says a request belongs to; null when nobody is signed in there. */
+export interface HostPrincipal {
+    email: string;
+}
+
+export type PrincipalResolver = (req: IncomingMessage) => HostPrincipal | null | Promise<HostPrincipal | null>;
 
 const json = (res: ServerResponse, status: number, body: unknown, setCookie?: string): void => {
     const headers: Record<string, string | string[]> = {'Content-Type': 'application/json'};
@@ -61,7 +75,11 @@ export interface AuthRouteResult {
 export const resolveCurrentAccount = async (
     req: IncomingMessage,
     auth: AuthContext
-): Promise<{account: AccountRecord; sessionId: string} | null> => {
+): Promise<{account: AccountRecord; sessionId: string | null} | null> => {
+    if (auth.principal !== undefined) {
+        return (await resolveHostAccount(req, auth.principal, auth.accounts)).current;
+    }
+
     const sessionId = parseSessionCookie(req.headers.cookie);
     if (sessionId === null) return null;
 
@@ -85,6 +103,26 @@ export const resolveCurrentAccount = async (
 
     auth.sessions.touch(sessionId);
     return {account, sessionId};
+};
+
+/**
+ * The account behind the host's principal. `hostUser` is set whenever the
+ * host named a user, also when Synaipse has no (enabled) account for it —
+ * so /api/auth/mode can say who is missing. Accounts are not created here:
+ * an admin creates them, the host only says who is signed in.
+ */
+const resolveHostAccount = async (
+    req: IncomingMessage,
+    principal: PrincipalResolver,
+    accounts: AccountStore
+): Promise<{current: {account: AccountRecord; sessionId: null} | null; hostUser: string | null}> => {
+    const who = await principal(req);
+    const email = typeof who?.email === 'string' ? who.email.trim() : '';
+    if (email === '') return {current: null, hostUser: null};
+
+    const account = await accounts.findByEmail(email);
+    if (account === null || account.disabledAt !== null) return {current: null, hostUser: email};
+    return {current: {account, sessionId: null}, hostUser: email};
 };
 
 /**
@@ -118,6 +156,14 @@ export const handleAuthRoute = async (
             return {handled: true};
         }
 
+        if (auth.principal !== undefined) {
+            const {current, hostUser} = await resolveHostAccount(req, auth.principal, auth.accounts);
+            json(res, 200, current === null
+                ? {mode: 'server', authenticated: false, managed: 'host', ...(hostUser !== null ? {hostUser} : {})}
+                : {mode: 'server', authenticated: true, managed: 'host', account: accountForWire(current.account)});
+            return {handled: true};
+        }
+
         const current = await resolveCurrentAccount(req, auth);
         if (current === null) {
             json(res, 200, {mode: 'server', authenticated: false});
@@ -142,6 +188,11 @@ export const handleAuthRoute = async (
             // table. Reply 404 instead of 200 so a misconfigured client
             // surfaces the mismatch immediately.
             json(res, 404, {error: 'login not available in local mode'});
+            return {handled: true};
+        }
+
+        if (auth.principal !== undefined) {
+            json(res, 409, {error: 'sign-in is managed by the host application'});
             return {handled: true};
         }
 
@@ -206,6 +257,12 @@ export const handleAuthRoute = async (
             // Idempotent: even without a session, logout returns 200 so
             // the UI can call it unconditionally.
             json(res, 200, {ok: true}, cookie);
+            return {handled: true};
+        }
+
+        if (auth.principal !== undefined) {
+            // Signing out is the host's business; nothing to revoke here.
+            json(res, 200, {ok: true, managed: 'host'});
             return {handled: true};
         }
 

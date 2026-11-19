@@ -122,5 +122,9 @@ describe('pkgstudio.module.json', () => {
         const embed = readFileSync(path.join(repo, 'packages/web-api/server/embed.ts'), 'utf8');
         if (caps.includes('mcp-registrar')) expect(embed).toContain('mcpRegistrar: SynaipseRegistrar;');
         if (caps.includes('health')) expect(embed).toContain('health(): SynaipseHealth;');
+        if (caps.includes('host-principal')) {
+            expect(embed).toContain('principal?: PrincipalResolver;');
+            expect(mountSource).toContain('authGate?: boolean;');
+        }
     });
 });

@@ -91,7 +91,7 @@ export class App {
     private readonly life = new Disposables();
 
     public constructor(
-        private readonly account: {id: number; email: string; isAdmin: boolean} | null = null,
+        private readonly account: {id: number; email: string; isAdmin: boolean; managedByHost?: boolean} | null = null,
         private readonly appOpts: {onSignedOut?: () => void} = {}
     ) {
         this.selectedTags = new PersistentValue<ReadonlySet<string>>(

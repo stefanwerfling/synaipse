@@ -2,7 +2,7 @@ import './Styles.css';
 import {App} from './App.js';
 import {setApiBase} from './ApiBase.js';
 import {fetchAuthMode} from './Auth.js';
-import {mountLoginScreen} from './Login.js';
+import {mountHostSignInNotice, mountLoginScreen} from './Login.js';
 import {getTheme, initTheme, onThemeChange, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
 
 /**
@@ -24,8 +24,10 @@ export interface SynaipseMountOptions {
     theme?: Theme;
     /**
      * Ask the backend for its auth mode and show the login screen when a
-     * server-mode session is missing. Standalone only — an embedding host
-     * owns authentication (default false).
+     * server-mode session is missing (default false). Standalone sets it.
+     * A host that passes `principal` to the backend sets it too: then the
+     * gate shows the app for the host's user, or a notice when Synaipse has
+     * no account for them, never a login form.
      */
     authGate?: boolean;
     /** Initial route: a tab name ("graph") or a note id. */
@@ -50,7 +52,7 @@ export interface SynaipseMountHandle {
     onHide(): void;
 }
 
-type Account = {id: number; email: string; isAdmin: boolean};
+type Account = {id: number; email: string; isAdmin: boolean; managedByHost?: boolean};
 
 export async function mount(container: HTMLElement, opts: SynaipseMountOptions = {}): Promise<SynaipseMountHandle> {
     setApiBase(opts.apiBase);
@@ -88,11 +90,22 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
                 const mode = await fetchAuthMode();
                 if (mode.mode === 'server') {
                     if (!mode.authenticated) {
-                        showLogin();
+                        if (mode.managed === 'host') {
+                            app?.destroy();
+                            app = null;
+                            mountHostSignInNotice(container, mode.hostUser);
+                        } else {
+                            showLogin();
+                        }
                         return;
                     }
                     app?.destroy();
-                    await showApp({id: mode.account.id, email: mode.account.email, isAdmin: mode.account.isAdmin});
+                    await showApp({
+                        id: mode.account.id,
+                        email: mode.account.email,
+                        isAdmin: mode.account.isAdmin,
+                        ...(mode.managed === 'host' ? {managedByHost: true} : {})
+                    });
                     return;
                 }
             } catch (err) {

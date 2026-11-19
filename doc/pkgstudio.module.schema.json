@@ -58,10 +58,11 @@
           "backend-handle",
           "health",
           "mcp-endpoint",
-          "mcp-registrar"
+          "mcp-registrar",
+          "host-principal"
         ]
       },
-      "description": "mount-handle: mount() returns {unmount, onShow, onHide, navigate, setTheme, getTheme}. api-base: every request goes through the apiBase option. theme-switch: onThemeChange option. shell-tokens: reads --sh-* tokens. backend-handle: start() returns working handlers at once (503 until ready). health: handle.health(). mcp-endpoint: own MCP endpoint at mcpPath. mcp-registrar: handle.mcpRegistrar for the host's MCP gateway."
+      "description": "mount-handle: mount() returns {unmount, onShow, onHide, navigate, setTheme, getTheme}. api-base: every request goes through the apiBase option. theme-switch: onThemeChange option. shell-tokens: reads --sh-* tokens. backend-handle: start() returns working handlers at once (503 until ready). health: handle.health(). mcp-endpoint: own MCP endpoint at mcpPath. mcp-registrar: handle.mcpRegistrar for the host's MCP gateway. host-principal: the backend start takes a principal(req) => {email} | null callback, so the host owns sign-in (with the frontend's authGate option)."
     },
     "config": {
       "type": "object",

@@ -2,7 +2,7 @@ import {describe, it, expect, beforeEach} from 'vitest';
 import {IncomingMessage, ServerResponse} from 'node:http';
 import {Socket} from 'node:net';
 import {InMemoryAccountStore} from '../../mcp-server/test/InMemoryAccountStore.js';
-import {handleAuthRoute, type AuthContext} from '../server/auth-routes.js';
+import {handleAuthRoute, resolveCurrentAccount, type AuthContext} from '../server/auth-routes.js';
 import {InMemorySessionStore, SESSION_COOKIE_NAME} from '../server/sessions.js';
 import {LoginRateLimit} from '../server/login-rate-limit.js';
 
@@ -280,5 +280,69 @@ describe('unknown auth paths fall through', () => {
     it('returns handled=false for non-auth paths', async () => {
         const {result} = await runAuth({path: '/api/notes'});
         expect(result.handled).toBe(false);
+    });
+});
+describe('host-managed sign-in (principal)', () => {
+    /** The host "signs in" whoever the x-host-user header names. */
+    const hostAuth = (): AuthContext => ({
+        ...auth,
+        principal: (req) => {
+            const user = req.headers['x-host-user'];
+            return typeof user === 'string' ? {email: user} : null;
+        }
+    });
+    const asHost = (path: string, user?: string, method = 'GET') => {
+        const req = makeReq({method, path, ...(method === 'POST' ? {body: {email: 'me@example.com', password: 'pw'}} : {})});
+        if (user !== undefined) req.headers['x-host-user'] = user;
+        return req;
+    };
+    const run = async (req: IncomingMessage, path: string) => {
+        const {res, captured} = makeRes();
+        await handleAuthRoute(req, res, new URL(`http://localhost${path}`), 'server', hostAuth());
+        return captured;
+    };
+
+    it('maps the host user to the account of that e-mail', async () => {
+        const a = await accounts.create({email: 'me@example.com', password: 'pw'});
+        const current = await resolveCurrentAccount(asHost('/api/notes', ' me@example.com '), hostAuth());
+        expect(current?.account.id).toBe(a.id);
+        expect(current?.sessionId).toBeNull();
+    });
+
+    it('ignores the session cookie: the host is the only source', async () => {
+        const a = await accounts.create({email: 'me@example.com', password: 'pw'});
+        const s = sessions.create(a.id);
+        const req = makeReq({path: '/api/notes', cookie: `${SESSION_COOKIE_NAME}=${s.id}`});
+        expect(await resolveCurrentAccount(req, hostAuth())).toBeNull();
+    });
+
+    it('refuses unknown and disabled accounts', async () => {
+        const a = await accounts.create({email: 'off@example.com', password: 'pw'});
+        await accounts.setDisabled(a.id, true);
+        expect(await resolveCurrentAccount(asHost('/api/notes', 'nobody@example.com'), hostAuth())).toBeNull();
+        expect(await resolveCurrentAccount(asHost('/api/notes', 'off@example.com'), hostAuth())).toBeNull();
+    });
+
+    it('mode says managed by host, with the account or the missing host user', async () => {
+        await accounts.create({email: 'me@example.com', password: 'pw'});
+        const ok = await run(asHost('/api/auth/mode', 'me@example.com'), '/api/auth/mode');
+        expect(ok.body).toMatchObject({mode: 'server', authenticated: true, managed: 'host', account: {email: 'me@example.com'}});
+
+        const missing = await run(asHost('/api/auth/mode', 'new@example.com'), '/api/auth/mode');
+        expect(missing.body).toEqual({mode: 'server', authenticated: false, managed: 'host', hostUser: 'new@example.com'});
+
+        const nobody = await run(asHost('/api/auth/mode'), '/api/auth/mode');
+        expect(nobody.body).toEqual({mode: 'server', authenticated: false, managed: 'host'});
+    });
+
+    it('turns off Synaipse login and makes logout a no-op', async () => {
+        await accounts.create({email: 'me@example.com', password: 'pw'});
+        const login = await run(asHost('/api/auth/login', undefined, 'POST'), '/api/auth/login');
+        expect(login.status).toBe(409);
+        expect(login.headers['Set-Cookie']).toBeUndefined();
+
+        const logout = await run(asHost('/api/auth/logout', 'me@example.com', 'POST'), '/api/auth/logout');
+        expect(logout.status).toBe(200);
+        expect(logout.headers['Set-Cookie']).toBeUndefined();
     });
 });

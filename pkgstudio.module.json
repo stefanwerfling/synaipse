@@ -31,7 +31,8 @@
     "backend-handle",
     "health",
     "mcp-endpoint",
-    "mcp-registrar"
+    "mcp-registrar",
+    "host-principal"
   ],
   "config": {
     "envFile": ".env",

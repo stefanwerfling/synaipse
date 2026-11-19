@@ -7,6 +7,22 @@ export interface LoginScreenOptions {
 }
 
 /**
+ * Shown instead of the login form when the embedding host owns sign-in
+ * and Synaipse can't map the host's user to an account (or nobody is
+ * signed in at the host). Nothing to do here but explain.
+ */
+export const mountHostSignInNotice = (host: HTMLElement, hostUser: string | undefined): void => {
+    host.innerHTML = '';
+    const card = el('div', {class: 'login-card'},
+        el('h1', {class: 'login-title', text: 'Synaipse'}),
+        el('p', {class: 'login-subtitle', text: hostUser === undefined
+            ? 'Sign in through the host application to use Synaipse.'
+            : `No Synaipse account for ${hostUser}. Ask a Synaipse admin to create one with this e-mail.`})
+    );
+    host.appendChild(el('div', {class: 'login-screen'}, card));
+};
+
+/**
  * Pre-mount login screen for server-mode. Standalone module so the
  * main App doesn't need to know about authentication state — Main.ts
  * checks /api/auth/mode and either mounts this screen OR mounts App.

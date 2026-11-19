@@ -13,10 +13,15 @@ export interface AccountDto {
     lastLoginAt: number | null;
 }
 
+/**
+ * `managed: 'host'`: an embedding host owns sign-in (PKG Studio G7) — no
+ * login form, no sign-out here. `hostUser`: who the host says is signed
+ * in when Synaipse has no account for them.
+ */
 export type AuthMode =
     | {mode: 'local'; authenticated: true}
-    | {mode: 'server'; authenticated: false}
-    | {mode: 'server'; authenticated: true; account: AccountDto};
+    | {mode: 'server'; authenticated: false; managed?: 'host'; hostUser?: string}
+    | {mode: 'server'; authenticated: true; account: AccountDto; managed?: 'host'};
 
 export const fetchAuthMode = async (): Promise<AuthMode> => {
     const res = await fetch(apiUrl('/api/auth/mode'), {credentials: 'same-origin'});

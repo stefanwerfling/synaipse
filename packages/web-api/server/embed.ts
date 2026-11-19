@@ -4,7 +4,9 @@ import type {URL} from 'node:url';
 import type {AccountStore, Config, ScheduleStore, UserStore} from '@synaipse/core';
 import type {ServiceOverrides} from '@synaipse/service';
 import type {SynaipseService as SynaipseServiceType} from '@synaipse/service';
-import type {AuthContext} from './auth-routes.js';
+import type {AuthContext, PrincipalResolver} from './auth-routes.js';
+
+export type {HostPrincipal, PrincipalResolver} from './auth-routes.js';
 import type {SynaipseRegistrar} from '@synaipse/mcp-server';
 
 const DEFAULT_AUTH_CACHE_TTL_MS = 60_000;
@@ -108,6 +110,15 @@ export interface CreateSynaipseEmbedOptions {
      * auth-cache TTL, crawler API keys). Default: `process.env`.
      */
     env?: NodeJS.ProcessEnv;
+    /**
+     * Server mode only: the host owns sign-in (PKG Studio G7). Called per
+     * API request, it returns the signed-in host user's e-mail (or null);
+     * Synaipse maps it to its account of that e-mail — accounts are still
+     * created by a Synaipse admin. Synaipse's own login and session cookie
+     * are off then. Ignored in local mode (no accounts). The MCP endpoint
+     * keeps its bearer tokens either way.
+     */
+    principal?: PrincipalResolver;
 }
 
 /**
@@ -185,8 +196,11 @@ export const createSynaipseEmbed = async (
             sessions: new InMemorySessionStore(),
             accounts: accountStore,
             rateLimit: new LoginRateLimit(),
-            secureCookie: resolveSecureCookie(env)
+            secureCookie: resolveSecureCookie(env),
+            ...(options.principal !== undefined ? {principal: options.principal} : {})
         };
+    } else if (options.principal !== undefined) {
+        console.warn('[synaipse] principal option ignored: local mode has no accounts');
     }
 
     const service = new SynaipseService(config, overrides);

@@ -128,6 +128,32 @@ await synaipse.close();      // on shutdown / hot reload
 
 `createSynaipseEmbed(options)` still exists. It waits for the start and returns the started embed; the standalone server uses it.
 
+### Host-managed sign-in (server mode)
+
+In server mode (MariaDB, accounts) Synaipse normally shows its own login and keeps a session cookie. A host that has its own sign-in passes `principal` instead:
+
+```ts
+startSynaipseEmbed({
+    env,
+    principal: (req) => {
+        const user = hostSession(req);       // the host's own session lookup
+        return user ? {email: user.email} : null;
+    }
+});
+// frontend: mount(container, {apiBase: '/synaipse', authGate: true})
+```
+
+| Topic | Contract |
+|---|---|
+| Mapping | Called per API request. The e-mail is mapped to the Synaipse account with that e-mail. Accounts are not created on the fly: a Synaipse admin creates them (admin CLI or Admin tab). An unknown or disabled account is not signed in (`401` on the API). |
+| Synaipse login | Off: `POST /api/auth/login` answers `409`, `POST /api/auth/logout` is a no-op. The session cookie is ignored, the host is the only source. |
+| `/api/auth/mode` | Adds `managed: "host"`. Not signed in: `hostUser` names the host's user when there is one, so the UI can say whose account is missing. |
+| Frontend | With `authGate: true` the app opens for the host's user, the account settings have no "Sign out" (the host signs out). Without an account the tab shows a notice instead of the login form. |
+| MCP | Unchanged: the MCP endpoint keeps its bearer tokens, and in server mode Synaipse still registers nothing on a host gateway. |
+| Local mode | `principal` is ignored with a warning (no accounts). |
+
+The manifest declares this as capability `host-principal`.
+
 ## MCP on the host gateway
 
 A host with its own MCP endpoint can carry the Synaipse tools there, next to
