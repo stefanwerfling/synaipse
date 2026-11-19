@@ -877,7 +877,13 @@ export class CanvasRenderer {
     private onDoubleClick = (event: MouseEvent): void => {
         if (!this.editable) return;
 
-        const target = event.target as HTMLElement | SVGElement;
+        // pointerdown on a card or group captures the pointer on the
+        // viewport, so the browser retargets the following dblclick to the
+        // viewport itself. Hit-test the position instead of trusting
+        // event.target, or every card/group double-click would land on
+        // "empty stage" and spawn a new card.
+        const hit = document.elementFromPoint(event.clientX, event.clientY);
+        const target = (hit !== null && this.element.contains(hit) ? hit : event.target) as HTMLElement | SVGElement;
 
         // Edge → inline label editor at the midpoint.
         if (target instanceof SVGElement) {
