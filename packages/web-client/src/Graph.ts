@@ -4,6 +4,7 @@ import {colorForNode, tagColor} from './Colors.js';
 import {communityColor, detectCommunities, type CommunityResult} from './Communities.js';
 import {el} from './Dom.js';
 import {tg} from './GraphMessages.js';
+import {HUGE_GRAPH_FORCE_2D} from './GraphPrefs.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
 import {CONCENTRATE_COLOR, PULSE_COLORS, filterGraph} from './GraphRenderer.js';
@@ -311,6 +312,9 @@ export class GraphView implements GraphRenderer {
             detailPanel: false,
             grid: false,
             lasso: false,
+            // J11: from the huge-graph tier on, plain dots and edges are drawn by WebGL2 (falls back to 2D).
+            renderer: 'auto',
+            webglMinNodes: HUGE_GRAPH_FORCE_2D,
             tooltip: (node) => {
                 const tags = this.notes.get(node.id)?.tags.slice(0, 3).join(', ') ?? '';
                 return tags === '' ? node.label : `${node.label} · ${tags}`;
