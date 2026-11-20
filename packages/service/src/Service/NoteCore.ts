@@ -280,6 +280,26 @@ export class NoteCore {
         log.info('indexed', {reindexed: stats.reindexed, unchanged: stats.unchanged, removed: stats.removed, pending: stats.pending, total: stats.total});
     }
 
+    /**
+     * Notes another process changed in a shared store (server mode, plan
+     * A6). That process already embedded them into the shared vector
+     * store, so only the in-memory fulltext index and the topology follow.
+     */
+    public applyRemote(changed: readonly Note[], removed: readonly NoteId[]): void {
+        for (const note of changed) {
+            this.fulltext.addNote(note);
+            this.pendingEmbeds.delete(note.id);
+        }
+        for (const id of removed) {
+            this.fulltext.removeNote(id);
+            this.pendingEmbeds.delete(id);
+        }
+        if (changed.length + removed.length > 0) {
+            this.setPending();
+            this.invalidateTopology();
+        }
+    }
+
     /** A file was deleted outside Synaipse (watcher). */
     public async forgetExternal(id: NoteId): Promise<void> {
         await this.removeIndexed(id);

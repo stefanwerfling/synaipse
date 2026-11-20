@@ -22,3 +22,12 @@ export const connectAndMigrate = async () => {
     await applyMigrations(pool);
     return {pool, cfg};
 };
+/**
+ * Empty one vault's notes and change log. Per vault (not TRUNCATE), so
+ * test files sharing the database can run in parallel on distinct vault ids.
+ */
+export const resetVault = async (pool: import('mariadb').Pool, vaultId: number): Promise<void> => {
+    await pool.query('DELETE FROM notes WHERE vault_id = ?', [vaultId]);
+    await pool.query('DELETE FROM note_changes WHERE vault_id = ?', [vaultId]);
+    await pool.query('DELETE FROM vault_versions WHERE vault_id = ?', [vaultId]);
+};

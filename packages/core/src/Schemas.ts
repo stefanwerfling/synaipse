@@ -201,7 +201,8 @@ export const ConfigSchema = Vts.object({
         password: Vts.string(),
         database: Vts.string(),
         vaultId: Vts.optional(Vts.number()),
-        accessFlushMs: Vts.optional(Vts.number())
+        accessFlushMs: Vts.optional(Vts.number()),
+        changePollMs: Vts.optional(Vts.number())
     }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;

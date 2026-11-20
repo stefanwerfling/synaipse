@@ -54,6 +54,16 @@ export interface NoteEntry {
 }
 
 /**
+ * A change another process made to a shared note store (server mode,
+ * plan A6). `reset` means the adapter reloaded everything because it
+ * could not follow the change log (fell too far behind).
+ */
+export type ExternalNoteChange =
+    | {kind: 'changed'; note: Note}
+    | {kind: 'removed'; id: NoteId}
+    | {kind: 'reset'};
+
+/**
  * Storage port for notes. Two implementations:
  * - FilesystemNoteAdapter (@synaipse/vault) — markdown files + ngit + sidecar HashCache
  * - MariaDBNoteAdapter (@synaipse/server-storage, planned) — DB-backed Hot-Tier
@@ -100,6 +110,13 @@ export interface NoteAdapter {
     flushEntries(): Promise<void>;
     /** Re-read entries from disk if a parallel process touched them. Returns true if anything changed. */
     syncEntries(): Promise<boolean>;
+    /**
+     * Shared stores only: subscribe to changes other processes made. The
+     * adapter has already updated its own snapshot when the listener runs;
+     * the vector store is shared too, so nothing needs re-embedding.
+     * Returns the unsubscribe function.
+     */
+    onExternalChange?(listener: (changes: readonly ExternalNoteChange[]) => void): () => void;
 }
 
 /**

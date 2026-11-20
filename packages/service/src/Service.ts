@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, ChatAdapter, Config, Frontmatter, Graph, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, SearchScope, VaultEvent} from '@synaipse/core';
+import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, ChatAdapter, Config, ExternalNoteChange, Frontmatter, Graph, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, SearchScope, VaultEvent} from '@synaipse/core';
 import {createLogger, parseRoadmap, ProjectScopeError} from '@synaipse/core';
 import matter from 'gray-matter';
 import {EntryStore, FilesystemNoteAdapter, MATTER_NO_CACHE, QueryVectorCache, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
@@ -190,6 +190,9 @@ export class SynaipseService {
     private queryVectors: QueryVectorCache | null = null;
     private readonly watcher: VaultWatcher;
     private readonly skipWatcher: boolean;
+    private stopExternalChanges: (() => void) | null = null;
+    /** Serialises applying changes from other processes (a reset reindexes asynchronously). */
+    private externalQueue: Promise<void> = Promise.resolve();
     private readonly consentStore = new ConsentStore();
     private readonly vaultChangeListeners = new Set<VaultChangeListener>();
 
@@ -321,6 +324,9 @@ export class SynaipseService {
     public async stop(): Promise<void> {
         await this.graphService.close();
         await this.watcher.stop();
+        this.stopExternalChanges?.();
+        this.stopExternalChanges = null;
+        await this.externalQueue;
         await this.notes.flushEntries();
         this.notes.closeLocal?.();
         this.queryVectors?.close();
@@ -880,10 +886,19 @@ export class SynaipseService {
 
     private attachWatcher(): void {
         if (this.skipWatcher) {
-            // Server-Mode: no filesystem vault to watch. Notes arrive
-            // via DB writes from the Service itself, not via external
-            // file edits, so the chokidar layer would have nothing to
-            // do — and might tail an empty / non-existent path.
+            // Server-Mode: no filesystem vault to watch. Other processes
+            // on the same database are followed through the adapter's
+            // change log instead (plan A6).
+            const subscribe = this.notes.onExternalChange?.bind(this.notes);
+            if (subscribe !== undefined) {
+                this.stopExternalChanges = subscribe((changes) => {
+                    this.externalQueue = this.externalQueue
+                        .then(() => this.applyExternalChanges(changes))
+                        .catch((error: unknown) => {
+                            log.error('applying changes from another process failed', {error});
+                        });
+                });
+            }
             return;
         }
 
@@ -914,6 +929,30 @@ export class SynaipseService {
 
         if (await this.core.absorbExternal(note)) {
             this.notifyVaultChange({kind, path, noteId: id});
+        }
+    }
+
+    private async applyExternalChanges(changes: readonly ExternalNoteChange[]): Promise<void> {
+        if (changes.some((c) => c.kind === 'reset')) {
+            // The adapter reloaded everything; rebuild the indexes from it.
+            await this.core.indexAll();
+            this.core.invalidateTopology();
+            return;
+        }
+
+        const changed: Note[] = [];
+        const removed: NoteId[] = [];
+        for (const change of changes) {
+            if (change.kind === 'changed') changed.push(change.note);
+            else if (change.kind === 'removed') removed.push(change.id);
+        }
+        this.core.applyRemote(changed, removed);
+
+        for (const note of changed) {
+            this.notifyVaultChange({kind: 'updated', path: note.path, noteId: note.id});
+        }
+        for (const id of removed) {
+            this.notifyVaultChange({kind: 'deleted', path: id, noteId: id});
         }
     }
 

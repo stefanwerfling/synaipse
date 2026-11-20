@@ -2,7 +2,7 @@ import {describe, it, expect, beforeAll, afterAll, beforeEach} from 'vitest';
 import type {Pool} from 'mariadb';
 import {MariaDBNoteAdapter} from '../src/MariaDBNoteAdapter.js';
 import type {ResolvedMariaDBConfig} from '../src/Pool.js';
-import {connectAndMigrate, integrationEnabled} from './helpers.js';
+import {connectAndMigrate, integrationEnabled, resetVault} from './helpers.js';
 
 describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
     let pool: Pool;
@@ -17,7 +17,7 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
     });
 
     beforeEach(async () => {
-        await pool.query('TRUNCATE TABLE notes');
+        await resetVault(pool, cfg.vaultId);
     });
 
     it('load() warms an empty snapshot when the table is empty', async () => {
@@ -167,7 +167,7 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
         expect(adapter.tags().get('tagged')).toBeUndefined();
         expect(adapter.backlinksOf('Epsilon')).toEqual([]);
 
-        const [{n}] = await pool.query<{n: number}[]>('SELECT COUNT(*) AS n FROM notes');
+        const [{n}] = await pool.query<{n: number}[]>('SELECT COUNT(*) AS n FROM notes WHERE vault_id = ?', [cfg.vaultId]);
         expect(n).toBe(0);
     });
 
@@ -190,7 +190,7 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter access journal (A6)', (
     });
 
     beforeEach(async () => {
-        await pool.query('TRUNCATE TABLE notes');
+        await resetVault(pool, cfg.vaultId);
     });
 
     const counts = async (id: string) => {
@@ -244,7 +244,7 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter access journal (A6)', (
         expect((await counts('Bulk/n0.md'))?.access_count).toBe(2);
         expect((await counts('Bulk/n1099.md'))?.access_count).toBe(1);
         expect(await counts('Bulk/n5.md')).toBeUndefined();
-        const total = await pool.query<{c: number}[]>('SELECT COUNT(*) AS c FROM notes');
+        const total = await pool.query<{c: number}[]>('SELECT COUNT(*) AS c FROM notes WHERE vault_id = ?', [cfg.vaultId]);
         expect(Number(total[0]?.c)).toBe(1099);
     });
 

@@ -16,13 +16,15 @@ export interface MariaDBConfig {
      */
     vaultId?: number;
     /** Interval of the access-journal flush in ms; 0 disables it (flush only on index runs and stop). Default 30 000. */
-    accessFlushMs?: number;
+    accessFlushMs?: number;    /** How often (ms) to check for writes by other processes on the same vault; 0 disables it. Default 2000. */
+    changePollMs?: number;
 }
 
 export interface ResolvedMariaDBConfig extends MariaDBConfig {
     connectionLimit: number;
     vaultId: number;
     accessFlushMs: number;
+    changePollMs: number;
 }
 
 // `dist/Pool.js` lives one level below the package root; migrations
@@ -39,7 +41,10 @@ const MIGRATION_FILES = [
     '007_schedules.sql',
     '008_notes_referenced.sql',
     '009_notes_embedded.sql',
-    '010_drop_fulltext.sql'
+    '010_drop_fulltext.sql',
+    '011_vault_versions.sql',
+    '012_note_changes.sql',
+    '013_notes_version.sql'
 ] as const;
 
 export const createPool = (cfg: MariaDBConfig): Pool => {
@@ -85,7 +90,8 @@ export const resolveConfig = (cfg: MariaDBConfig): ResolvedMariaDBConfig => ({
     ...cfg,
     connectionLimit: cfg.connectionLimit ?? 10,
     vaultId: cfg.vaultId ?? 1,
-    accessFlushMs: cfg.accessFlushMs ?? 30_000
+    accessFlushMs: cfg.accessFlushMs ?? 30_000,
+    changePollMs: cfg.changePollMs ?? 2000
 });
 
 /**

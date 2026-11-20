@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {buildFlushStatement, mergeDirty} from '../src/MariaDBNoteAdapter.js';
+import {buildFlushStatement, MAX_CHANGES_PER_POLL, mergeDirty, planChanges} from '../src/MariaDBNoteAdapter.js';
 
 describe('access-journal flush (A6)', () => {
     it('builds one UPDATE … JOIN with nine parameters per row plus the vault id', () => {
@@ -16,5 +16,21 @@ describe('access-journal flush (A6)', () => {
         expect(mergeDirty({accessDelta: 2, lastAccessed: 5, hash: 'old'}, {accessDelta: 1, lastAccessed: 9})).toEqual(
             {accessDelta: 3, lastAccessed: 9, hash: 'old'});
         expect(mergeDirty({referencedDelta: 1}, {hash: 'new'})).toEqual({referencedDelta: 1, hash: 'new'});
+    });
+});
+
+describe('change-log planning (A6)', () => {
+    const row = (version: number, note_path: string, op: 'write' | 'delete' = 'write') => ({version, note_path, op});
+    const never = () => false;
+
+    it('re-reads each foreign path once, newest change wins, own changes skipped', () => {
+        const plan = planChanges(10, 14, [row(11, 'a'), row(12, 'b'), row(13, 'a', 'delete'), row(14, 'c')],
+            (path, version) => path === 'c' && version === 14);
+        expect(plan).toEqual({reset: false, paths: ['a', 'b']});
+    });
+
+    it('resets on a gap in the log (pruned) or when too far behind', () => {
+        expect(planChanges(10, 14, [row(13, 'a'), row(14, 'b')], never)).toEqual({reset: true});
+        expect(planChanges(0, MAX_CHANGES_PER_POLL + 1, [], never)).toEqual({reset: true});
     });
 });

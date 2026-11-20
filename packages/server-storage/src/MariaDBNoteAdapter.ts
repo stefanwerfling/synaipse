@@ -1,10 +1,11 @@
 import {createHash} from 'node:crypto';
-import type {Pool} from 'mariadb';
+import type {Pool, PoolConnection} from 'mariadb';
 import {
     createLogger,
     extractTags,
     extractWikilinks,
     LinkIndex,
+    type ExternalNoteChange,
     type Frontmatter,
     type Note,
     type NoteAdapter,
@@ -28,7 +29,61 @@ interface NoteRow {
     last_referenced: number | null;
     embedded_hash?: string | null;
     embed_model?: string | null;
+    version?: number;
 }
+
+interface ChangeRow {
+    version: number;
+    note_path: string;
+    op: 'write' | 'delete';
+}
+
+const NOTE_COLUMNS = 'note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed, referenced_count, last_referenced, embedded_hash, embed_model, version';
+
+/** More foreign changes than this in one poll: reload everything instead of note by note. */
+export const MAX_CHANGES_PER_POLL = 5000;
+
+/** Change-log rows older than this are pruned; a process further behind reloads fully. */
+const CHANGE_RETENTION_S = 86_400;
+const PRUNE_EVERY_MS = 10 * 60_000;
+
+const entryFromRow = (row: NoteRow): NoteEntry => ({
+    hash: row.hash,
+    mtime: row.mtime_ms,
+    ...(row.access_count > 0 ? {accessCount: row.access_count} : {}),
+    ...(row.last_accessed !== null ? {lastAccessed: row.last_accessed} : {}),
+    ...(row.referenced_count > 0 ? {referencedCount: row.referenced_count} : {}),
+    ...(row.last_referenced !== null ? {lastReferenced: row.last_referenced} : {}),
+    ...(typeof row.embedded_hash === 'string' ? {embeddedHash: row.embedded_hash} : {}),
+    ...(typeof row.embed_model === 'string' ? {embedModel: row.embed_model} : {})
+});
+
+/**
+ * What a poll has to do with the change log since `seen`: the paths to
+ * re-read (newest change per path, own writes left out), or `reset` when
+ * the log has a gap (pruned) or is too long to follow note by note.
+ * Pure; exported for tests.
+ */
+export const planChanges = (
+    seen: number,
+    current: number,
+    rows: readonly ChangeRow[],
+    isOwn: (path: string, version: number, op: 'write' | 'delete') => boolean
+): {reset: true} | {reset: false; paths: string[]} => {
+    if (current - seen > MAX_CHANGES_PER_POLL || rows.length < current - seen) {
+        return {reset: true};
+    }
+    const newest = new Map<string, ChangeRow>();
+    for (const row of rows) {
+        const prev = newest.get(row.note_path);
+        if (prev === undefined || row.version > prev.version) newest.set(row.note_path, row);
+    }
+    const paths: string[] = [];
+    for (const row of newest.values()) {
+        if (!isOwn(row.note_path, row.version, row.op)) paths.push(row.note_path);
+    }
+    return {reset: false, paths};
+};
 
 const sha1 = (input: string): string => createHash('sha1').update(input).digest('hex');
 
@@ -168,6 +223,14 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     /** Serialises flushes: the timer and explicit flushEntries() calls never interleave. */
     private flushing: Promise<void> = Promise.resolve();
     private flushTimer: ReturnType<typeof setInterval> | null = null;
+    /** Vault version this snapshot reflects; the poller applies everything above it. */
+    private seenVersion = 0;
+    /** Vault version of each note's last write (own or applied), to recognise own changes in the log. */
+    private noteVersions = new Map<NoteId, number>();
+    private readonly changeListeners = new Set<(changes: readonly ExternalNoteChange[]) => void>();
+    private pollTimer: ReturnType<typeof setInterval> | null = null;
+    private polling: Promise<void> | null = null;
+    private lastPrune = 0;
 
     public constructor(
         private readonly pool: Pool,
@@ -175,8 +238,21 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     ) {}
 
     public async load(): Promise<void> {
+        await this.reload();
+        this.loaded = true;
+        this.startFlushTimer();
+        this.startPollTimer();
+    }
+
+    /**
+     * Read the whole vault into the snapshot. The version is read first:
+     * a write landing in between is in the snapshot AND re-applied by the
+     * next poll, which is harmless (re-reading a note is idempotent).
+     */
+    private async reload(): Promise<void> {
+        this.seenVersion = await this.currentVersion();
         const rows = await this.pool.query<NoteRow[]>(
-            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed, referenced_count, last_referenced, embedded_hash, embed_model FROM notes WHERE vault_id = ?',
+            `SELECT ${NOTE_COLUMNS} FROM notes WHERE vault_id = ?`,
             [this.cfg.vaultId]
         );
 
@@ -185,20 +261,13 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         this.links.clear();
         this.tagIndex.clear();
         this.dirtyEntries.clear();
+        this.noteVersions.clear();
 
         for (const row of rows) {
             const note = rowToNote(row);
             this.notes.set(note.id, note);
-            this.entries.set(note.id, {
-                hash: row.hash,
-                mtime: row.mtime_ms,
-                ...(row.access_count > 0 ? {accessCount: row.access_count} : {}),
-                ...(row.last_accessed !== null ? {lastAccessed: row.last_accessed} : {}),
-                ...(row.referenced_count > 0 ? {referencedCount: row.referenced_count} : {}),
-                ...(row.last_referenced !== null ? {lastReferenced: row.last_referenced} : {}),
-                ...(typeof row.embedded_hash === 'string' ? {embeddedHash: row.embedded_hash} : {}),
-                ...(typeof row.embed_model === 'string' ? {embedModel: row.embed_model} : {})
-            });
+            this.entries.set(note.id, entryFromRow(row));
+            this.noteVersions.set(note.id, row.version ?? 0);
             for (const tag of note.tags) {
                 let bucket = this.tagIndex.get(tag);
                 if (!bucket) {
@@ -209,9 +278,14 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             }
             this.links.upsert(note);
         }
+    }
 
-        this.loaded = true;
-        this.startFlushTimer();
+    private async currentVersion(conn: Pool | PoolConnection = this.pool): Promise<number> {
+        const rows = await conn.query<{version: number}[]>(
+            'SELECT version FROM vault_versions WHERE vault_id = ?',
+            [this.cfg.vaultId]
+        );
+        return rows[0]?.version ?? 0;
     }
 
     /**
@@ -233,6 +307,141 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         if (this.flushTimer !== null) {
             clearInterval(this.flushTimer);
             this.flushTimer = null;
+        }
+        if (this.pollTimer !== null) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
+        }
+    }
+
+    public onExternalChange(listener: (changes: readonly ExternalNoteChange[]) => void): () => void {
+        this.changeListeners.add(listener);
+        return () => {
+            this.changeListeners.delete(listener);
+        };
+    }
+
+    private startPollTimer(): void {
+        if (this.pollTimer !== null || this.cfg.changePollMs <= 0) return;
+        this.pollTimer = setInterval(() => {
+            this.pollChanges().catch((error: unknown) => {
+                log.warn('polling for changes by other processes failed; retried on the next tick', {error});
+            });
+        }, this.cfg.changePollMs);
+        this.pollTimer.unref();
+    }
+
+    /**
+     * Apply what other processes wrote since the last poll (plan A6).
+     * One cheap single-row read when nothing changed. Overlapping calls
+     * share one run.
+     */
+    public pollChanges(): Promise<void> {
+        if (this.polling === null) {
+            this.polling = this.pollOnce().finally(() => {
+                this.polling = null;
+            });
+        }
+        return this.polling;
+    }
+
+    private async pollOnce(): Promise<void> {
+        await this.pruneChanges();
+        const current = await this.currentVersion();
+        if (current <= this.seenVersion) return;
+
+        const rows = await this.pool.query<ChangeRow[]>(
+            'SELECT version, note_path, op FROM note_changes WHERE vault_id = ? AND version > ? AND version <= ? ORDER BY version LIMIT ?',
+            [this.cfg.vaultId, this.seenVersion, current, MAX_CHANGES_PER_POLL + 1]
+        );
+        const plan = planChanges(this.seenVersion, current, rows, (path, version, op) =>
+            op === 'delete' ? !this.notes.has(path) : this.noteVersions.get(path) === version);
+
+        if (plan.reset) {
+            log.info('change log not followable (gap or too many changes); reloading the vault', {seen: this.seenVersion, current});
+            await this.reload();
+            this.emitChanges([{kind: 'reset'}]);
+            return;
+        }
+
+        const changes: ExternalNoteChange[] = [];
+        if (plan.paths.length > 0) {
+            const fresh = await this.pool.query<NoteRow[]>(
+                `SELECT ${NOTE_COLUMNS} FROM notes WHERE vault_id = ? AND note_path IN (?)`,
+                [this.cfg.vaultId, plan.paths]
+            );
+            const found = new Set<string>();
+            for (const row of fresh) {
+                found.add(row.note_path);
+                const note = rowToNote(row);
+                this.indexNote(note);
+                // Counts as stored; this process's unflushed deltas stay in dirtyEntries.
+                this.entries.set(note.id, entryFromRow(row));
+                this.noteVersions.set(note.id, row.version ?? 0);
+                changes.push({kind: 'changed', note: this.withBacklinks(note)});
+            }
+            for (const path of plan.paths) {
+                if (found.has(path) || !this.notes.has(path)) continue;
+                this.unindexNote(path);
+                this.entries.delete(path);
+                this.dirtyEntries.delete(path);
+                this.noteVersions.delete(path);
+                changes.push({kind: 'removed', id: path});
+            }
+        }
+
+        // No gap (planChanges checked): the log covered every version up to `current`.
+        this.seenVersion = current;
+        if (changes.length > 0) this.emitChanges(changes);
+    }
+
+    private emitChanges(changes: readonly ExternalNoteChange[]): void {
+        for (const listener of this.changeListeners) {
+            try {
+                listener(changes);
+            } catch (error) {
+                log.error('external-change listener failed', {error});
+            }
+        }
+    }
+
+    private async pruneChanges(): Promise<void> {
+        const now = Date.now();
+        if (now - this.lastPrune < PRUNE_EVERY_MS) return;
+        this.lastPrune = now;
+        await this.pool.query(
+            'DELETE FROM note_changes WHERE vault_id = ? AND changed_at < NOW() - INTERVAL ? SECOND',
+            [this.cfg.vaultId, CHANGE_RETENTION_S]
+        );
+    }
+
+    /**
+     * Run `fn` in a transaction that bumps the vault version and logs the
+     * change. The vault_versions row lock orders writers across processes.
+     */
+    private async versioned(path: string, op: 'write' | 'delete', fn: (conn: PoolConnection, version: number) => Promise<void>): Promise<number> {
+        const conn = await this.pool.getConnection();
+        try {
+            await conn.beginTransaction();
+            await conn.query(
+                `INSERT INTO vault_versions (vault_id, version) VALUES (?, LAST_INSERT_ID(1))
+                 ON DUPLICATE KEY UPDATE version = LAST_INSERT_ID(version + 1)`,
+                [this.cfg.vaultId]
+            );
+            const idRows = await conn.query<{v: number}[]>('SELECT LAST_INSERT_ID() AS v');
+            const version = Number(idRows[0]?.v ?? 0);
+            await fn(conn, version);
+            await conn.query(
+                'INSERT INTO note_changes (vault_id, version, note_path, op) VALUES (?, ?, ?, ?)',
+                [this.cfg.vaultId, version, path, op]
+            );
+            await conn.commit();
+            return version;
+        } catch (err) {
+            await conn.rollback().catch(() => undefined);
+            throw err;
+        } finally {
+            await conn.release();
         }
     }
 
@@ -259,7 +468,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
 
     public async read(id: NoteId): Promise<Note> {
         const rows = await this.pool.query<NoteRow[]>(
-            'SELECT note_path, title, frontmatter, body, hash, mtime_ms, access_count, last_accessed FROM notes WHERE vault_id = ? AND note_path = ?',
+            `SELECT ${NOTE_COLUMNS} FROM notes WHERE vault_id = ? AND note_path = ?`,
             [this.cfg.vaultId, id]
         );
         const row = rows[0];
@@ -277,25 +486,36 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         const hash = sha1(input.content);
         const mtime = Date.now();
 
-        await this.pool.query(
-            `INSERT INTO notes (vault_id, note_path, title, frontmatter, body, hash, mtime_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                 title = VALUES(title),
-                 frontmatter = VALUES(frontmatter),
-                 body = VALUES(body),
-                 hash = VALUES(hash),
-                 mtime_ms = VALUES(mtime_ms)`,
-            [
-                this.cfg.vaultId,
-                input.path,
-                title,
-                JSON.stringify(frontmatter),
-                input.content,
-                hash,
-                mtime
-            ]
-        );
+        const previousVersion = this.noteVersions.get(input.path);
+        await this.versioned(input.path, 'write', async (conn, v) => {
+            // Known before the commit, so a concurrent poll never takes this write for a foreign one.
+            this.noteVersions.set(input.path, v);
+            await conn.query(
+                `INSERT INTO notes (vault_id, note_path, title, frontmatter, body, hash, mtime_ms, version)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                     title = VALUES(title),
+                     frontmatter = VALUES(frontmatter),
+                     body = VALUES(body),
+                     hash = VALUES(hash),
+                     mtime_ms = VALUES(mtime_ms),
+                     version = VALUES(version)`,
+                [
+                    this.cfg.vaultId,
+                    input.path,
+                    title,
+                    JSON.stringify(frontmatter),
+                    input.content,
+                    hash,
+                    mtime,
+                    v
+                ]
+            );
+        }).catch((err: unknown) => {
+            if (previousVersion === undefined) this.noteVersions.delete(input.path);
+            else this.noteVersions.set(input.path, previousVersion);
+            throw err;
+        });
 
         const note: Note = {
             id: input.path,
@@ -321,10 +541,13 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     }
 
     public async delete(id: NoteId, _ctx: NoteWriteContext = {}): Promise<void> {
-        await this.pool.query(
-            'DELETE FROM notes WHERE vault_id = ? AND note_path = ?',
-            [this.cfg.vaultId, id]
-        );
+        await this.versioned(id, 'delete', async (conn) => {
+            await conn.query(
+                'DELETE FROM notes WHERE vault_id = ? AND note_path = ?',
+                [this.cfg.vaultId, id]
+            );
+        });
+        this.noteVersions.delete(id);
         this.unindexNote(id);
         this.entries.delete(id);
         this.dirtyEntries.delete(id);
