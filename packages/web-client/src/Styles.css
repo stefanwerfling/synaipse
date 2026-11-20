@@ -6508,6 +6508,13 @@ body.synaipse-sidebar-resizing {
     pointer-events: auto;
 }
 
+.synaipse-root .canvas-groups {
+    /* Own stacking context: a selected group's z-index lifts it above
+       sibling groups only, never above the edge and card layers painted
+       after it — otherwise its child cards became unclickable. */
+    isolation: isolate;
+}
+
 .synaipse-root .canvas-edges {
     /* SVG ROOT MUST STAY pointer-events:none. It is sized to cover the
        whole diagram and painted on top of the group layer, so if the root
@@ -7048,7 +7055,8 @@ body.synaipse-sidebar-resizing {
     border-color: rgba(239, 68, 68, 0.4);
 }
 
-/* Group selected outline — mirrors .canvas-card.selected. */
+/* Group selected outline — mirrors .canvas-card.selected. The z-index
+   only orders it among groups (.canvas-groups isolates). */
 .synaipse-root .canvas-group.selected {
     border-style: solid;
     box-shadow: 0 0 0 2px var(--accent);
