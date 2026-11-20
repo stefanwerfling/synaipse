@@ -170,7 +170,9 @@ export const ConfigSchema = Vts.object({
         author: Vts.object({
             name: Vts.string(),
             email: Vts.string()
-        })
+        }),
+        /** Server mode: directory of the history repository (notes live in MariaDB, so there is no vault .ngit). */
+        serverDir: Vts.optional(Vts.string())
     })),
     chat: Vts.optional(Vts.object({
         provider: Vts.or([

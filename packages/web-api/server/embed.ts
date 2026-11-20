@@ -133,7 +133,7 @@ export const createSynaipseEmbed = async (
     const {loadConfigFromEnv} = await import('@synaipse/core');
     const {SynaipseService, NoopAssetStore} = await import('@synaipse/service');
     const {CachedUserStore, buildMcpHttpHandler, createSynaipseRegistrar} = await import('@synaipse/mcp-server');
-    const {NoopHistory} = await import('@synaipse/vault');
+    const {NoopHistory, withServerHistory} = await import('@synaipse/vault');
     const {routes} = await import('./routes.js');
     const {EventBroadcaster} = await import('./events.js');
     const {GraphDeltaPublisher} = await import('./graph-deltas.js');
@@ -166,6 +166,11 @@ export const createSynaipseEmbed = async (
 
         const {createServerAdapters} = await import('@synaipse/server-storage');
         const bundle = await createServerAdapters(config.mariadb);
+        const versioned = withServerHistory(
+            bundle.notes,
+            config.git?.autoCommit === false ? undefined : config.git?.serverDir,
+            config.git?.author
+        );
 
         const cacheTtl = resolveAuthCacheTtlMs(env);
         const userStore: UserStore = cacheTtl > 0
@@ -174,9 +179,9 @@ export const createSynaipseEmbed = async (
 
         return {
             overrides: {
-                notes: bundle.notes,
+                notes: versioned.notes,
                 chats: bundle.chats,
-                history: new NoopHistory(),
+                history: versioned.history ?? new NoopHistory(),
                 assetStore: new NoopAssetStore(),
                 skipWatcher: true
             },

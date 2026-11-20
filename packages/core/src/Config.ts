@@ -320,7 +320,13 @@ export const loadConfigFromEnv = (env: NodeJS.ProcessEnv = process.env): Config 
             : {}),
         mode,
         ...(mode === 'server' ? {mariadb: buildMariaDbConfig(env)} : {}),
-        git: {autoCommit: gitEnabled, author: gitAuthor},
+        git: {
+            autoCommit: gitEnabled,
+            author: gitAuthor,
+            ...(mode === 'server' && env.SYNAIPSE_HISTORY_DIR !== undefined && env.SYNAIPSE_HISTORY_DIR.trim() !== ''
+                ? {serverDir: env.SYNAIPSE_HISTORY_DIR.trim()}
+                : {})
+        },
         chat: buildChatConfig(env),
         ...(buildResearchConfig(env) !== null ? {research: buildResearchConfig(env)!} : {}),
         ...(parseExcludePrefixes(env.SYNAIPSE_EMBED_EXCLUDE_PREFIXES).length > 0

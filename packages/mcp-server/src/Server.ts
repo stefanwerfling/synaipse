@@ -8,7 +8,7 @@ import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotoc
 import {createLogger} from '@synaipse/core';
 import type {Config, UserStore} from '@synaipse/core';
 import {NoopAssetStore, SynaipseService, type ServiceOverrides} from '@synaipse/service';
-import {NoopHistory} from '@synaipse/vault';
+import {NoopHistory, withServerHistory} from '@synaipse/vault';
 import {EventPublisher} from './EventPublisher.js';
 import {buildTools, type ToolHandler, type ToolContext, type ToolResponse} from './Tools.js';
 import {buildInstructions} from './Instructions.js';
@@ -318,6 +318,11 @@ const buildOverrides = async (config: Config): Promise<OverridesResult> => {
 
     const {createServerAdapters} = await import('@synaipse/server-storage');
     const bundle = await createServerAdapters(config.mariadb);
+    const versioned = withServerHistory(
+        bundle.notes,
+        config.git?.autoCommit === false ? undefined : config.git?.serverDir,
+        config.git?.author
+    );
 
     const cacheTtl = resolveAuthCacheTtlMs();
     const userStore: UserStore = cacheTtl > 0
@@ -326,9 +331,9 @@ const buildOverrides = async (config: Config): Promise<OverridesResult> => {
 
     return {
         overrides: {
-            notes: bundle.notes,
+            notes: versioned.notes,
             chats: bundle.chats,
-            history: new NoopHistory(),
+            history: versioned.history ?? new NoopHistory(),
             assetStore: new NoopAssetStore(),
             skipWatcher: true
         },
