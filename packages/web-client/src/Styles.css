@@ -781,6 +781,28 @@ body.synaipse-sidebar-resizing {
     background: var(--bg-2);
 }
 
+/* The toggle fills the row; it looks like the row, not like a button. */
+.synaipse-root .note-group-toggle {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.synaipse-root .note-group-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
 .synaipse-root .note-group-caret {
     color: var(--text-3);
     font-size: 10px;

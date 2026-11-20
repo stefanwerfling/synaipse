@@ -31,6 +31,7 @@ const t = defineMessages('notesSidebar', {
     noMatchTitle: 'No matches',
     noMatchHint: 'No notes match “{filter}”.',
     newIn: 'New note in {folder}',
+    toggleGroup: 'Expand or collapse {folder}',
     private: 'GDPR: private, never sent to external LLMs',
     draft: 'Unsaved draft'
 });
@@ -162,6 +163,8 @@ export class NotesSidebar {
         this.unsubscribeCollapsed();
         this.detachResize();
         this.sidebarWidth.destroy();
+        this.groupMode.destroy();
+        this.collapsedGroups.destroy();
     }
 
     // --- create row --------------------------------------------------------
@@ -432,10 +435,23 @@ export class NotesSidebar {
             // parent path, so a "new here" button would misroute.
             const showAdd = this.groupMode.get() === 'folder' && row.group.key.length > 0;
 
+            // A real button toggles the group (keyboard, aria-expanded); the
+            // row stays a list item and the + button sits next to it, not
+            // inside (no nested interactive controls).
             const children: HTMLElement[] = [
-                el('span', {class: 'note-group-caret', text: '▾'}),
-                el('span', {class: 'note-group-label', text: row.group.label}),
-                el('span', {class: 'note-group-count', text: String(row.totalCount)})
+                el('button', {
+                    class: 'note-group-toggle',
+                    attrs: {
+                        type: 'button',
+                        'aria-expanded': row.isCollapsed ? 'false' : 'true',
+                        title: t('toggleGroup', {folder: row.group.label})
+                    },
+                    on: {click: () => this.toggleGroup(row.key)}
+                },
+                    el('span', {class: 'note-group-caret', text: '▾', attrs: {'aria-hidden': 'true'}}),
+                    el('span', {class: 'note-group-label', text: row.group.label}),
+                    el('span', {class: 'note-group-count', text: String(row.totalCount)})
+                )
             ];
 
             if (showAdd) {
@@ -448,23 +464,17 @@ export class NotesSidebar {
                         'aria-label': t('newIn', {folder: folderKey})
                     },
                     text: '+',
-                    on: {click: (ev) => {
-                        // Prevent the header click from collapsing the group.
-                        ev.stopPropagation();
-                        this.opts.onNewInFolder(folderKey);
-                    }}
+                    on: {click: () => this.opts.onNewInFolder(folderKey)}
                 }));
             }
 
             return el('li', {
                 class: row.isCollapsed ? 'note-group-header collapsed' : 'note-group-header',
-                attrs: {role: 'button', tabindex: '0'},
                 style: {
                     top: `${top}px`,
                     height: `${GROUP_ROW_H}px`,
                     paddingLeft: `${8 + row.depth * 14}px`
-                },
-                on: {click: () => this.toggleGroup(row.key)}
+                }
             }, ...children);
         }
 

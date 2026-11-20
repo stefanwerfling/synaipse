@@ -108,6 +108,7 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     search: {
         placeholder: 'Suchen…  (/)',
         label: 'Notizen durchsuchen',
+        mode: 'Suchmodus',
         fulltext: 'Volltext',
         semantic: 'semantisch',
         hybrid: 'hybrid',
@@ -244,6 +245,7 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         noMatchTitle: 'Keine Treffer',
         noMatchHint: 'Keine Notiz passt zu „{filter}“.',
         newIn: 'Neue Notiz in {folder}',
+        toggleGroup: '{folder} ein- oder ausklappen',
         private: 'DSGVO: privat, wird nicht an externe LLMs gesendet',
         draft: 'Ungespeicherter Entwurf'
     },

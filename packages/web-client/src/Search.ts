@@ -6,6 +6,7 @@ import {defineMessages} from './I18n.js';
 const t = defineMessages('search', {
     placeholder: 'Search…  (/)',
     label: 'Search notes',
+    mode: 'Search mode',
     fulltext: 'fulltext',
     semantic: 'semantic',
     hybrid: 'hybrid',
@@ -83,6 +84,7 @@ export class Search {
 
         this.modeSelect = el('select', {
             class: 'search-mode',
+            attrs: {'aria-label': t('mode')},
             on: {change: (e) => {
                 this.mode = (e.target as HTMLSelectElement).value as SearchMode;
 
