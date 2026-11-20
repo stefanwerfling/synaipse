@@ -360,6 +360,25 @@ S6 (`CanvasRenderer.ts` 925 → 464 Zeilen): Kamera, Drag, Resize, Anker, Verbin
 
 J11 (jsNGraph `38bc3c1`, nur lokal): Option `renderer: 'canvas' | 'webgl' | 'auto'` (Default `canvas`, `auto` ab `webglMinNodes`, Default 50 000). Eine WebGL2-Zeichenfläche liegt unter der 2D-Fläche; einfache gerade Kanten, Pfeilspitzen und einfache Punkte gehen als drei instanzierte Draw-Calls dorthin (`BulkBuffers` rein und getestet, `WebGLLayer`). Alles mit Details bleibt 2D: Labels, Karten, Ringe, Hover/Auswahl/Highlight, Kurven, gestrichelte Kanten, Hüllen, Overlays, Cluster, Lasso. Bewusste Abweichung: Die GL-Masse liegt immer unter allem 2D-Inhalt (Punktraster und Hüllen über GL-Kanten). Ohne WebGL2 oder nach Kontextverlust zurück auf 2D; `activeRenderer` sagt, wer gezeichnet hat. Gemessen im Atlas-Beispiel (100 000 Knoten, inkl. GPU per `gl.finish`): Gesamtansicht nur Knoten 69 → 14 ms pro Frame, mit allen 100 000 Kanten 193 → 38 ms; eingezoomt gleich schnell (dort kosten die Labels). Der Rest ist die CPU-Schleife pro Knoten. Synaipse: Der Vault-Graph nutzt `renderer: 'auto'` ab der Huge-Graph-Schwelle (`HUGE_GRAPH_FORCE_2D`, 20 000), nicht erst ab 50 000, weil der Gewinn dort schon groß ist und der Rückfall sicher. Geprüft im Browser: Atlas-Beispiel Canvas und WebGL pixelgleich (Punkte, Kanten, Labels, Highlight-Ringe, Abdunkeln, Tooltip), helles Theme, `auto` unter und über der Schwelle, Kontextverlust per `WEBGL_lose_context` fällt auf 2D zurück; Synaipse mit synthetischem Vault (25 000 Notizen, 50 000 Links): Community-Übersicht, Klick in eine Community, Zoom bis zu den Labels, keine Konsolenfehler.
 
+### Status P11 (2026-11-20): erledigt
+
+| Punkt aus A6 | Stand |
+|---|---|
+| Access-Journal periodisch, mehrzeilig flushen | erledigt (`79cf9a6`) |
+| Versions-Spalte und Änderungsmeldung für mehrere Prozesse | erledigt (`da36bda`) |
+| FULLTEXT nutzen oder entfernen | entfernt (`602dcc2`) |
+| History und Snapshots im Server-Mode | erledigt (`05a5c87`) |
+
+Access-Journal (`79cf9a6`): Suchtreffer erreichten MariaDB bisher nur bei Index-Läufen oder sauberem Stop, ein `UPDATE` pro Zeile, als absolute Zähler. Jetzt flusht ein Timer (`SYNAIPSE_MARIADB_ACCESS_FLUSH_MS`, Default 30 s) mit `UPDATE … JOIN` über eine abgeleitete Tabelle, 500 Zeilen pro Anweisung, eine Transaktion. Bewusste Abweichung vom Plan: kein `INSERT … ON DUPLICATE KEY`, denn das würde eine inzwischen gelöschte Notiz als leere Zeile wiederbeleben. Zähler gehen als Deltas raus und Zeitstempel nur vorwärts (`GREATEST`), damit sich Prozesse auf einem Vault nicht überschreiben. Ein fehlgeschlagener Flush behält seinen Stapel und verschmilzt ihn mit neuen Zugriffen.
+
+FULLTEXT (`602dcc2`): Nichts hat `ft_title_body` abgefragt; die Suche läuft in beiden Modi über den eigenen BM25-Index im Speicher (gleicher Tokenizer, Scores und Scope-Filter wie lokal, was MariaDB-FULLTEXT nicht kann). Neue Installationen legen ihn nicht mehr an, Migration 010 entfernt ihn.
+
+Mehrere Prozesse (`da36bda`): Jeder Write und Delete erhöht in derselben Transaktion einen Zähler pro Vault (`vault_versions`, Zeilensperre, daher committen Versionen in Reihenfolge ohne Lücken) und schreibt den Pfad ins Änderungslog (`note_changes`, nach einem Tag aufgeräumt); `notes.version` hält die Version des letzten Writes. Jeder Prozess fragt die eine Zählerzeile ab (`SYNAIPSE_MARIADB_CHANGE_POLL_MS`, Default 2 s) und liest nur die Notizen nach, die andere geändert haben; eigene Writes erkennt er an der Version. Eine Lücke im Log oder über 5000 Änderungen führen zum vollen Neuladen. Neuer optionaler Port `NoteAdapter.onExternalChange`: Der Service übernimmt fremde Änderungen in Volltext und Topologie, ohne neu einzubetten (Qdrant ist geteilt), daraus folgen Graph-Deltas und Activity auch in diesem Prozess. Gegen eine echte MariaDB getestet (zwei Adapter, gleichzeitige Writes ohne doppelte oder fehlende Versionen, Lücke, Timer) sowie mit zwei laufenden Web-Servern: Write auf A, nach höchstens 2 s auf B in Liste, Suche und Graph, B schickt `graph-delta` an seine Browser; Delete ebenso.
+
+History (`05a5c87`): Mit `SYNAIPSE_HISTORY_DIR` umhüllt `VersionedNoteAdapter` den MariaDB-Adapter und committet jeden Write und Delete (pro Write-Batch einen Commit) in ein eigenständiges ngit-Repo (`RepoHistory`), aus dem Speicher, als die Markdown-Datei, die lokal auf der Platte läge. Damit funktionieren History, Versionen, Diffs, Snapshots, Activity und Roadmap-Rollback unverändert über den bestehenden `HistoryService`. Statt des früher angedachten Commit-Workers mit `pending_commits`-Tabelle: ngit aktualisiert den Branch unter Lock und nur, wenn HEAD noch der gelesene Parent ist; bei Konflikt baut `RepoHistory` den Commit auf dem neuen HEAD neu (Test: zwei Prozesse, 13 Commits, keiner verloren). Voraussetzung: Prozesse auf einer Datenbank teilen das Verzeichnis. Ohne Verzeichnis oder mit `SYNAIPSE_GIT_AUTOCOMMIT=false` bleibt die History aus wie bisher. Ende-zu-Ende geprüft mit zwei Web-Servern: zwei Writes auf A, B liefert History, alte Version mit Frontmatter, Diff und Activity.
+
+Integrationstests mit `SYNAIPSE_TEST_MARIADB=1` (39 grün); die Testdateien trennen sich jetzt über die `vault_id` und laufen parallel.
+
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.
@@ -678,7 +697,7 @@ Jede Phase besteht aus einzeln committbaren Slices und endet grün (Tests, Lint,
 | **P8 Gedächtnis-Qualität** | B4 Dedupe/supersedes/Konsolidierung/temporal, B5 Resources/Prompts/Elicitation, B7 Eval-Harness, C5 Inbox-UI | P2 | 1,5 Wochen |
 | **P9 PKG-Studio-Integration** | E3 Tokens, E4 Paket-Split und Lib-Build und Manifest, MCP-Registrierung beim Host. Danach der Gegenplan im PKG-Studio-Repo | P3, P5 | 1 Woche |
 | **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | erledigt |
-| **P11 Server-Mode** | A6 Skalierung Server-Mode | P0, P1 | 1 Woche |
+| **P11 Server-Mode** | A6 Skalierung Server-Mode | P0, P1 | erledigt |
 
 **Empfohlene Reihenfolge, wenn nur ein Strang läuft:** P0 → P2 → P1 → P3 → P5 → P4 → P7 → P6 → P8 → P9 → Rest.
 Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größten Nutzen pro Aufwand für die tägliche Claude-Code-Nutzung. P3 ist die Voraussetzung für einen sauberen PKG-Studio-Baustein.

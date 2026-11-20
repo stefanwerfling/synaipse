@@ -3,17 +3,14 @@ import type {Vault} from './Vault.js';
 
 /**
  * Port for git-style history queries (log, show, diff, snapshot walk).
- * Two implementations come into play:
- * - VaultHistory wraps the Vault's ngit repo (Local-Mode default,
- *   synchronous read-path through the filesystem .ngit/ directory).
- * - NoopHistory (planned, @synaipse/server-storage) returns null from
- *   getRepo() so Service falls into the "history disabled" branches —
- *   used while Server-Mode boots without the async commit worker.
- *
- * Phase-3 of the server-mode refactor replaces NoopHistory with a
- * commit-worker-backed implementation that reads from MariaDB +
- * pending_commits and surfaces snapshots through the same port.
- * See Memory/synaipse/decisions/2026-06-23-server-mode-architecture.md.
+ * Three implementations:
+ * - VaultHistory wraps the Vault's ngit repo (local mode, the
+ *   filesystem .ngit/ directory next to the notes).
+ * - RepoHistory (RepoHistory.ts): server mode with SYNAIPSE_HISTORY_DIR.
+ *   A standalone ngit repo that VersionedNoteAdapter commits MariaDB
+ *   writes into (plan A6).
+ * - NoopHistory: server mode without a history directory; getRepo()
+ *   returns null so the Service takes its "history disabled" branches.
  */
 export interface History {
     /**
@@ -45,9 +42,8 @@ export class VaultHistory implements History {
 }
 
 /**
- * History impl that returns null/false everywhere — used by Server-Mode
- * boot until the Phase-3 commit-worker-backed implementation lands.
- * Lives here (rather than in @synaipse/server-storage) so the noop
+ * History impl that returns null/false everywhere — used by server mode
+ * when no history directory is configured. Lives here (rather than in @synaipse/server-storage) so the noop
  * doesn't drag the ngit type dependency into the server-storage
  * package: the Repo return type stays internal to @synaipse/vault.
  */
