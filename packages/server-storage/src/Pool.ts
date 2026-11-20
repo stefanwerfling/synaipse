@@ -38,7 +38,8 @@ const MIGRATION_FILES = [
     '006_tokens_account_fk.sql',
     '007_schedules.sql',
     '008_notes_referenced.sql',
-    '009_notes_embedded.sql'
+    '009_notes_embedded.sql',
+    '010_drop_fulltext.sql'
 ] as const;
 
 export const createPool = (cfg: MariaDBConfig): Pool => {

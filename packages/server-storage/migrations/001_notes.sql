@@ -22,10 +22,7 @@ CREATE TABLE IF NOT EXISTS notes (
     last_accessed BIGINT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_vault_path (vault_id, note_path(700)),
-    -- MariaDB's built-in FULLTEXT works for whitespace-separated languages.
-    -- Multilingual / CJK support comes later: either Mroonga storage engine
-    -- (ALTER TABLE ENGINE=Mroonga) or an external FTS layer. MySQL's
-    -- `WITH PARSER ngram` is not portable to MariaDB.
-    FULLTEXT KEY ft_title_body (title, body)
+    UNIQUE KEY uk_vault_path (vault_id, note_path(700))
+    -- No FULLTEXT index: search runs on the service's in-memory BM25
+    -- index in both storage modes (see 010_drop_fulltext.sql).
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
