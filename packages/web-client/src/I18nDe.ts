@@ -463,7 +463,10 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         link: 'Verlinken',
         noteNotFound: 'Keine Notiz gefunden für „{ref}“. Exakter Titel, Alias oder Pfad.',
         deleteStepTitle: 'Schritt löschen?',
-        deleteStepMessage: 'Der Schritt wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.'
+        deleteStepMessage: 'Der Schritt wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.',
+        viewLabel: 'Ansicht',
+        viewTable: 'Tabelle',
+        viewGraph: 'Abhängigkeiten'
     },
     jobsPanel: {
         relinkLabel: 'Notizen neu verlinken',
@@ -985,5 +988,17 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     },
     chatgptImport: {
         noConversations: 'Keine conversations.json oder conversations-NNN.json im ZIP gefunden'
+    },
+    roadmapGraph: {
+        hint: 'Doppelklick auf eine Phase klappt sie auf oder zu · Klick auf einen Schritt zeigt Details · Ziehen verschiebt, Mausrad zoomt',
+        openAll: 'Alle Phasen aufklappen',
+        closeAll: 'Alle Phasen zuklappen',
+        fit: 'Einpassen',
+        fitTitle: 'Ansicht einpassen',
+        hidden: '▸ {count} Schritt|▸ {count} Schritte',
+        progress: '{status} · {progress} %',
+        noDeps: 'Auf dieser Ebene gibt es noch keine Abhängigkeiten: Schritte bekommen sie über dependsOn (MCP-Roadmap-Tools).',
+        loading: 'Graph wird geladen…',
+        failed: 'Graph nicht verfügbar: {message}'
     }
 };

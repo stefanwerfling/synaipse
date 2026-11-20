@@ -75,7 +75,9 @@ const MIGRATED = [
     'CardEditor', 'ChatPanel', 'ChatSidebar', 'InboxPanel', 'JobsPanel', 'RoadmapPanel',
     // S4d account and dialogs
     'AdminPanel', 'Auth', 'ChatgptImport', 'DsgvoDialog', 'FloorplanDialog', 'ImportDialog', 'LocalGraphPanel', 'SelectionAsk',
-    'TokensPanel'
+    'TokensPanel',
+    // P10
+    'RoadmapGraph'
 ];
 
 const placeholders = (message: string): string[] => [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort();

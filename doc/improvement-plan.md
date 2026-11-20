@@ -333,6 +333,22 @@ S5 (`Graph3D.ts`, 1702 → 471 Zeilen): `GraphView3D` hält die force-graph-Inst
 
 S5 (`App.ts`, 1053 → 471 Zeilen): `App` ist nur noch die Shell: aktueller Tab, `go()`/Navigation, Lazy-Panels und die Verdrahtung des Event-Streams. Die Tab-Registry gab es schon (`Tabs.ts`, S3). Ausgelagert: `Topbar` (Marke, Tab-Knöpfe, Badges, Import, Theme, Activity, Konto), `RouteSync` (Hash und Host-Route, im Plan als `Navigation` geführt), `AppCommands` (Palette-Befehle als reine Funktion über die Aktionen der App), `VaultStore` (Notizliste, Graph, Versionen und die Delta-Anwendung mit Ergebnis `notesChanged`/`graphChanged`/`reload`; die Datenquelle wird injiziert), `GraphPrefs` (die neun gespeicherten Graph-Einstellungen sowie reine Regeln für effektiven Modus, Größenhinweis und Tag-Liste) und `GraphTab` (Ansicht 2D/3D, TagBar, Heat, Puls/Spur/Fokus aus MCP-Events; im Plan als `GlobalEvents` gedacht). Neu getestet in `test/appParts.test.ts` (Deltas in Reihenfolge, Versionslücke, leeres Delta, Graph-Versionsabweichung, `dropGraph`, Modus-Schwellen, Tag-Liste, Palette-Befehle). Initial-Bundle 253,0 KB (+0,3 KB). Geprüft im Browser (isolierte Instanz, 60 Notizen): Deep-Link auf eine Notiz, Tab-Wechsel mit `aria-current`, 2D-Graph mit TagBar, neue Notiz per API kommt als Delta ohne neuen Graph-Abruf an (auch wenn der Graph-Tab gerade nicht sichtbar ist), Activity-Badge bei geschlossenem Log, Theme-Toggle, `?`-Übersicht, Palette „switch to 3D“, Zurück/Vorwärts, Tag-Filter, `#/graph?focus=` bleibt in der URL; keine Konsolenfehler. Nicht im Browser geprüft: der Vollabgleich nach `graph-reset` bzw. Reconnect (Code unverändert übernommen) und der eingebettete Modus ohne Hash-Routing.
 
+### Status P10 (2026-11-20): begonnen
+
+| Slice | Inhalt | Stand |
+|---|---|---|
+| S4 Roadmap-DAG | Abhängigkeiten als Graph, Phasen auf- und zuklappbar | erledigt |
+| S5 RectCharts | Benchmarks und Aktivität mit Sparkline/BarStrip/Timeline/Heatmap | offen |
+| S6 Canvas auf RectBoard | braucht J12 (editierbare Karten, Undo-Hooks) | offen |
+| S7 Infographic-Light | einfache `:::infographic`-Blöcke über RectCharts | offen |
+| J11 WebGL | Instanced-Renderer für über 50k Knoten | offen |
+
+S4: Die Roadmap hat einen Umschalter „Tabelle | Abhängigkeiten“ (pro Browser gemerkt). `RoadmapDag.ts` (rein, getestet) schneidet den Schrittbaum an den zugeklappten Phasen: Ein Schritt ist ein Knoten, wenn alle Vorfahren offen sind und er ein Blatt oder selbst zu ist (dann steht er für seinen Teilbaum, „▸ 133 Schritte“). Offene Phasen sind Hüllen um ihre Schritte. `dependsOn` wird auf die sichtbaren Knoten umgehängt; eine Abhängigkeit auf eine offene Phase hängt an deren Ausgangsschritten (worauf in der Phase nichts mehr wartet), eine Abhängigkeit einer offenen Phase an ihren Eingangsschritten. Mehrfache Abhängigkeiten zwischen denselben Knoten werden eine Kante mit „×n“ und dickerem Strich. Spalte = längste Abhängigkeitskette (Zyklen werden toleriert). `RoadmapGraph.ts` zeichnet mit jsNGraph (`layoutMode: 'layered'`, Karten mit Titel, Status und Fortschritt; Rand in der Status-Farbe, Statuspunkt grün/gelb/rot/grau, aktiver KI-Schritt pulsiert). Startansicht: alle Phasen zu, weil die meisten Schritte keine Abhängigkeiten haben und sonst eine Spalte mit Hunderten Karten entsteht; welche Phasen offen sind, merkt sich der Browser pro Projekt, getrennt von den eingeklappten Zeilen der Tabelle. Doppelklick klappt eine Phase, Klick zeigt unter dem Graphen dieselben Details samt Bearbeiten wie die Tabellenzeile, Hover hebt die Nachbarn hervor. Graph-Code und jsNGraph laden erst beim Umschalten.
+
+jsNGraph (`9fd9543`, nur lokal): `LayeredLayout` drückte jede Spalte in die Canvas-Höhe und die Spalten in die Breite, bei vielen Karten überlappten sie. Neu `minSpacing` und `minColumnGap` (Default 0, bisheriges Verhalten): Das Layout wächst über den Canvas hinaus, `fit()` zoomt heraus. Test dazu, 91 grün.
+
+Geprüft im Browser (isolierte Instanz mit Kopien der echten Roadmaps mimirmind und loki): Phasenansicht mit Kante 5 → 8, Statusfarben, Einpassen; Phase 8 (133 Schritte) per Doppelklick geöffnet, als Hülle, lesbar beim Hineinzoomen; Klick auf 8.18 zeigt Details; Ansicht übersteht Reload; Wechsel Tabelle ↔ Graph ohne Konsolenfehler. Beobachtet, nicht verfolgt: Nach vielen Navigationen im selben Test-Tab blieben neue Seitenladungen auf „pending“ stehen, obwohl der Server antwortete; in einem frischen Tab war alles normal (vermutlich offene SSE-Verbindungen des Tabs oder die Browser-Erweiterung).
+
 ## 3. Säule A: Performance und Skalierung (Backend)
 
 Ziel-KPIs: **Write p95 < 30 ms** bei 50k Notes (ohne Embedding). **Kein Event-Loop-Stall > 50 ms**. Kaltstart mit warmem Cache bei 50k Notes **< 5 s**.
@@ -650,7 +666,7 @@ Jede Phase besteht aus einzeln committbaren Slices und endet grün (Tests, Lint,
 | **P7 UX** | C1 Routing und Palette, C2 Toast/Confirm/States, C3 i18n, C4 a11y, D2 God-Files zerlegen | P3 | 1,5 Wochen |
 | **P8 Gedächtnis-Qualität** | B4 Dedupe/supersedes/Konsolidierung/temporal, B5 Resources/Prompts/Elicitation, B7 Eval-Harness, C5 Inbox-UI | P2 | 1,5 Wochen |
 | **P9 PKG-Studio-Integration** | E3 Tokens, E4 Paket-Split und Lib-Build und Manifest, MCP-Registrierung beim Host. Danach der Gegenplan im PKG-Studio-Repo | P3, P5 | 1 Woche |
-| **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | offen |
+| **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | begonnen: S4 erledigt |
 | **P11 Server-Mode** | A6 Skalierung Server-Mode | P0, P1 | 1 Woche |
 
 **Empfohlene Reihenfolge, wenn nur ein Strang läuft:** P0 → P2 → P1 → P3 → P5 → P4 → P7 → P6 → P8 → P9 → Rest.

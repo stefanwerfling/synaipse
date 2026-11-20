@@ -4,6 +4,7 @@ import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog, formDialog, promptDialog, validProjectName} from './Dialogs.js';
 import {defineMessages, formatDateTime, formatNumber, tc} from './I18n.js';
+import type {RoadmapGraph} from './RoadmapGraph.js';
 import {toast} from './Toast.js';
 
 const t = defineMessages('roadmapPanel', {
@@ -87,7 +88,10 @@ const t = defineMessages('roadmapPanel', {
     link: 'Link',
     noteNotFound: 'No note found for “{ref}”. Use the exact title, alias or path.',
     deleteStepTitle: 'Delete step?',
-    deleteStepMessage: 'The step is marked as deleted and hidden. It stays in the vault and can be restored.'
+    deleteStepMessage: 'The step is marked as deleted and hidden. It stays in the vault and can be restored.',
+    viewLabel: 'View',
+    viewTable: 'Table',
+    viewGraph: 'Dependencies'
 });
 
 export interface RoadmapPanelOptions {
@@ -107,6 +111,24 @@ const STATUS_ORDER: RoadmapStatus[] = [
     'backlog', 'planned', 'in_progress', 'ai_active', // i18n: id
     'review', 'blocked', 'done', 'cancelled' // i18n: id
 ];
+
+const VIEW_KEY = 'synaipse.rm.view';
+
+const readView = (): 'table' | 'graph' => {
+    try {
+        return window.localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'table';
+    } catch {
+        return 'table';
+    }
+};
+
+const writeView = (view: 'table' | 'graph'): void => {
+    try {
+        window.localStorage.setItem(VIEW_KEY, view);
+    } catch {
+        // private mode: the view just is not remembered
+    }
+};
 
 const STATUS_LABEL_KEY = {
     backlog: 'statusBacklog',
@@ -246,6 +268,11 @@ export class RoadmapPanel {
     private saving = false;
     /** When false (default), soft-deleted steps are hidden from the table. */
     private showDeleted = false;
+    /** Table or dependency graph (plan P10 / S4), remembered in this browser. */
+    private view: 'table' | 'graph' = readView();
+    private graphView: RoadmapGraph | null = null;
+    private graphSelected: string | null = null;
+    private readonly graphDetail = el('div', {class: 'rm-graph-detail'});
 
     public constructor(opts: RoadmapPanelOptions = {}) {
         this.opts = opts;
@@ -563,11 +590,12 @@ export class RoadmapPanel {
         const deletedCount = flatten(rm.steps).length - flatten(withoutDeleted(rm.steps)).length;
         const headChildren: (HTMLElement | null)[] = [
             el('h2', {text: t('stepsHeading')}),
-            el('span', {class: 'rm-table-hint', text: t('tableHint')})
+            this.renderViewSwitch(),
+            this.view === 'table' ? el('span', {class: 'rm-table-hint', text: t('tableHint')}) : null
         ];
 
         // Fold controls — only worth showing once there is nesting to fold.
-        if (parentIds(rm.steps).length > 0) {
+        if (this.view === 'table' && parentIds(rm.steps).length > 0) {
             const fold = el('div', {class: 'rm-fold-ctl'},
                 el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: t('collapseAllTitle')}, text: t('collapseAll'), on: {click: () => this.collapseAll(true)}}),
                 el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: t('expandAllTitle')}, text: t('expandAll'), on: {click: () => this.collapseAll(false)}})
@@ -577,7 +605,7 @@ export class RoadmapPanel {
             }
             headChildren.push(fold);
         }
-        if (deletedCount > 0) {
+        if (this.view === 'table' && deletedCount > 0) {
             const toggle = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
             toggle.checked = this.showDeleted;
             toggle.addEventListener('change', () => {
@@ -591,6 +619,11 @@ export class RoadmapPanel {
         }
         headChildren.push(addRootBtn);
         this.tableWrap.appendChild(el('div', {class: 'rm-table-head'}, ...headChildren));
+
+        if (this.view === 'graph') {
+            void this.renderGraph(rm);
+            return;
+        }
 
         const visibleSteps = this.showDeleted ? rm.steps : withoutDeleted(rm.steps);
         if (visibleSteps.length === 0) {
@@ -625,6 +658,60 @@ export class RoadmapPanel {
         table.appendChild(tbody);
         const scroll = el('div', {class: 'rm-scroll'}, table);
         this.tableWrap.appendChild(scroll);
+    }
+
+    private renderViewSwitch(): HTMLElement {
+        const option = (view: 'table' | 'graph', label: string): HTMLElement => el('button', {
+            class: this.view === view ? 'rm-view-btn active' : 'rm-view-btn',
+            attrs: {type: 'button', 'aria-pressed': this.view === view ? 'true' : 'false'},
+            text: label,
+            on: {click: () => {
+                if (this.view === view) return;
+                this.view = view;
+                writeView(view);
+                if (view === 'table') this.graphView?.detach();
+                this.render();
+            }}
+        });
+        return el('div', {class: 'rm-view-switch', attrs: {role: 'group', 'aria-label': t('viewLabel')}},
+            option('table', t('viewTable')),
+            option('graph', t('viewGraph'))
+        );
+    }
+
+    /** Dependency graph of the visible steps; the graph chunk loads on first use. */
+    private async renderGraph(rm: Roadmap): Promise<void> {
+        const steps = withoutDeleted(rm.steps);
+        if (steps.length === 0) {
+            this.tableWrap.appendChild(el('p', {class: 'rm-empty-inline', text: rm.steps.length === 0 ? t('noSteps') : t('allDeleted')}));
+            return;
+        }
+        if (this.graphView === null) {
+            const {RoadmapGraph} = await import('./RoadmapGraph.js');
+            this.graphView ??= new RoadmapGraph({
+                statusLabel: (status) => t(STATUS_LABEL_KEY[status]),
+                onSelect: (id) => {
+                    this.graphSelected = this.graphSelected === id ? null : id;
+                    this.renderGraphDetail();
+                }
+            });
+        }
+        // The table may have taken over while the chunk loaded.
+        if (this.view !== 'graph' || this.roadmap !== rm) return;
+        this.tableWrap.append(this.graphView.element, this.graphDetail);
+        this.graphView.update(rm.project, steps, rm.active?.stepId ?? null);
+        this.renderGraphDetail();
+    }
+
+    /** Detail of the step clicked in the graph: the same view and editor as the table row. */
+    private renderGraphDetail(): void {
+        clear(this.graphDetail);
+        const step = this.graphSelected === null || this.roadmap === null
+            ? undefined
+            : flatten(this.roadmap.steps).find((row) => row.step.id === this.graphSelected)?.step;
+        if (step === undefined) return;
+        const body = this.editing.has(step.id) ? this.renderDetailEdit(step) : this.renderDetailView(step);
+        this.graphDetail.appendChild(el('div', {class: 'rm-detail-wrap'}, ...body));
     }
 
     private renderRow(step: RoadmapStep, depth: number, rm: Roadmap, hiddenCount = 0): HTMLElement {

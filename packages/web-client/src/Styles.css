@@ -7406,6 +7406,25 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .rm-fold-ctl + .rm-btn { margin-left: 8px; }
 .synaipse-root .rm-btn.sm { padding: 4px 9px; font-size: 12px; }
 
+/* Table / dependency-graph switch and the graph view (plan P10 / S4). */
+.synaipse-root .rm-view-switch { display: inline-flex; border: 1px solid var(--border-soft); border-radius: var(--r-pill); padding: 2px; gap: 2px; }
+.synaipse-root .rm-view-btn {
+    border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px;
+    padding: 3px 10px; border-radius: var(--r-pill); cursor: pointer;
+}
+.synaipse-root .rm-view-btn:hover { color: var(--text-0); }
+.synaipse-root .rm-view-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.synaipse-root .rm-view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.synaipse-root .rm-graph { display: flex; flex-direction: column; gap: 8px; }
+.synaipse-root .rm-graph-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.synaipse-root .rm-graph-stage {
+    position: relative; height: min(68vh, 640px); min-height: 360px;
+    border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; background: var(--bg-1);
+}
+.synaipse-root .rm-graph-note { margin: 0; font-size: 12px; color: var(--text-2); }
+.synaipse-root .rm-graph-note:empty { display: none; }
+.synaipse-root .rm-graph-detail:not(:empty) { border: 1px solid var(--border-soft); border-radius: 10px; padding: 12px 14px; margin-top: 4px; }
+
 .synaipse-root .rm-status-select {
     font-size: 12px; font-weight: 600; border: 1px solid transparent; border-radius: var(--r-pill);
     padding: 3px 8px; cursor: pointer; background: var(--bg-2); color: var(--text-1);
