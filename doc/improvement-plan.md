@@ -338,7 +338,7 @@ S5 (`App.ts`, 1053 → 471 Zeilen): `App` ist nur noch die Shell: aktueller Tab,
 | Slice | Inhalt | Stand |
 |---|---|---|
 | S4 Roadmap-DAG | Abhängigkeiten als Graph, Phasen auf- und zuklappbar | erledigt |
-| S5 RectCharts | Benchmarks und Aktivität mit Sparkline/BarStrip/Timeline/Heatmap | offen |
+| S5 RectCharts | Benchmarks und Aktivität mit Sparkline/BarStrip/Timeline | erledigt |
 | S6 Canvas auf RectBoard | braucht J12 (editierbare Karten, Undo-Hooks) | offen |
 | S7 Infographic-Light | einfache `:::infographic`-Blöcke über RectCharts | offen |
 | J11 WebGL | Instanced-Renderer für über 50k Knoten | offen |
@@ -348,6 +348,8 @@ S4: Die Roadmap hat einen Umschalter „Tabelle | Abhängigkeiten“ (pro Browse
 jsNGraph (`9fd9543`, nur lokal): `LayeredLayout` drückte jede Spalte in die Canvas-Höhe und die Spalten in die Breite, bei vielen Karten überlappten sie. Neu `minSpacing` und `minColumnGap` (Default 0, bisheriges Verhalten): Das Layout wächst über den Canvas hinaus, `fit()` zoomt heraus. Test dazu, 91 grün.
 
 Geprüft im Browser (isolierte Instanz mit Kopien der echten Roadmaps mimirmind und loki): Phasenansicht mit Kante 5 → 8, Statusfarben, Einpassen; Phase 8 (133 Schritte) per Doppelklick geöffnet, als Hülle, lesbar beim Hineinzoomen; Klick auf 8.18 zeigt Details; Ansicht übersteht Reload; Wechsel Tabelle ↔ Graph ohne Konsolenfehler. Beobachtet, nicht verfolgt: Nach vielen Navigationen im selben Test-Tab blieben neue Seitenladungen auf „pending“ stehen, obwohl der Server antwortete; in einem frischen Tab war alles normal (vermutlich offene SSE-Verbindungen des Tabs oder die Browser-Erweiterung).
+
+S5: Die RectCharts in jsNGraph waren reine Deko (Zufallswerte). jsNGraph `4d2982b` (nur lokal) gibt `BarStrip`, `Sparkline` und `Timeline` einen Datenmodus: echte Werte (`values`, bei der Sparkline auch mehrere Serien mit x), Tooltip und Farbe pro Balken/Punkt, feste Skala (`max`, `yMin`/`yMax`), `fluid`, Farben als beliebige CSS-Farbe inkl. `var(--x)` (folgt also dem Theme). Die Geometrie steckt im reinen, getesteten `RectChartData`. Ohne `values` bleibt alles wie bisher. Synaipse: Aktivität „Commits pro Tag“ als `BarStrip`, neu darunter „Berührte Notizen pro Tag“ als `Timeline`-Streifen (Intensität), Mini-`Sparkline` in der Commits-Kachel. Benchmarks „Balken“ als `BarStrip` (Gewinner in Akzentfarbe), „Verlauf“ als `Sparkline` mit einer Serie pro Vergleichs-Label über der Zeitachse. Die horizontalen Ranglisten (Tools, Projekte, „Balken horizontal“, Übersicht) bleiben HTML-Zeilen: RectCharts hat keine horizontale Form, und die Zeilen tragen Text, den SVG schlechter umbricht. Heatmap nicht genutzt: Es gibt keine zweidimensionalen Aktivitätsdaten (Tag × Stunde liefert die API nicht). Geprüft im Browser mit Kopie des echten mimirmind-`_benchmarks.md`: 14 Balken mit Tooltips, Verlauf, 91-Tage-Aktivität; Mehrserien-Verlauf direkt am geladenen Modul gegengeprüft (Testdaten haben nur einen Punkt pro Serie).
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 
@@ -666,7 +668,7 @@ Jede Phase besteht aus einzeln committbaren Slices und endet grün (Tests, Lint,
 | **P7 UX** | C1 Routing und Palette, C2 Toast/Confirm/States, C3 i18n, C4 a11y, D2 God-Files zerlegen | P3 | 1,5 Wochen |
 | **P8 Gedächtnis-Qualität** | B4 Dedupe/supersedes/Konsolidierung/temporal, B5 Resources/Prompts/Elicitation, B7 Eval-Harness, C5 Inbox-UI | P2 | 1,5 Wochen |
 | **P9 PKG-Studio-Integration** | E3 Tokens, E4 Paket-Split und Lib-Build und Manifest, MCP-Registrierung beim Host. Danach der Gegenplan im PKG-Studio-Repo | P3, P5 | 1 Woche |
-| **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | begonnen: S4 erledigt |
+| **P10 Visual-Rest** | S4 Roadmap-DAG, S5 RectCharts, S6 Canvas auf RectBoard, S7 Infographic-Light, J11 WebGL, J12 | P6 | begonnen: S4, S5 erledigt |
 | **P11 Server-Mode** | A6 Skalierung Server-Mode | P0, P1 | 1 Woche |
 
 **Empfohlene Reihenfolge, wenn nur ein Strang läuft:** P0 → P2 → P1 → P3 → P5 → P4 → P7 → P6 → P8 → P9 → Rest.

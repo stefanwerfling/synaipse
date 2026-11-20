@@ -9,6 +9,7 @@ import {
     upsertEntry,
     withoutDeletedEntries
 } from '@synaipse/core';
+import {BarStrip, Sparkline, type SparklineSeries} from 'jsngraph';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog, promptDialog, validProjectName} from './Dialogs.js';
@@ -85,7 +86,6 @@ interface EntryFormFields {
     noteLinks: string[];
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export class BenchmarksPanel {
     public readonly element: HTMLElement;
@@ -592,37 +592,19 @@ export class BenchmarksPanel {
     private renderBarChart(sorted: BenchmarkEntry[], labelFor: (e: BenchmarkEntry) => string): HTMLElement {
         const wrap = el('div', {});
         const chartHost = el('div', {class: 'activity-chart'});
-        const max = Math.max(...sorted.map((e) => Math.abs(e.value)), 1);
-        const width = Math.max(sorted.length * 60, 320);
-        const height = 180;
-        const padding = 24;
-
-        const svg = document.createElementNS(SVG_NS, 'svg');
-        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        // jsNGraph BarStrip in data mode; the winner gets the accent.
+        const svg = new BarStrip({
+            values: sorted.map((e) => e.value),
+            width: Math.max(sorted.length * 60, 320),
+            height: 180,
+            gap: 12,
+            accent: 'var(--text-2)',
+            axisColor: 'var(--border)',
+            colors: sorted.map((_, i) => (i === 0 ? 'var(--accent)' : undefined)),
+            titles: sorted.map((e) => `${labelFor(e)}: ${formatNumber(e.value)} ${e.unit}`)
+        }).render();
         svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('class', 'activity-svg');
-
-        const barWidth = Math.max(16, (width - padding * 2) / sorted.length - 8);
-
-        sorted.forEach((entry, i) => {
-            const h = ((height - padding * 2) * Math.abs(entry.value)) / max;
-            const x = padding + i * ((width - padding * 2) / sorted.length);
-            const y = height - padding - h;
-
-            const rect = document.createElementNS(SVG_NS, 'rect');
-            rect.setAttribute('x', String(x));
-            rect.setAttribute('y', String(y));
-            rect.setAttribute('width', String(barWidth));
-            rect.setAttribute('height', String(h));
-            rect.setAttribute('fill', i === 0 ? 'var(--accent)' : 'var(--text-2)');
-            rect.setAttribute('rx', '2');
-
-            const title = document.createElementNS(SVG_NS, 'title');
-            title.textContent = `${labelFor(entry)}: ${formatNumber(entry.value)} ${entry.unit}`;
-            rect.appendChild(title);
-
-            svg.appendChild(rect);
-        });
 
         chartHost.appendChild(svg);
         wrap.appendChild(chartHost);
@@ -676,61 +658,31 @@ export class BenchmarksPanel {
         }
 
         const timeOf = (e: BenchmarkEntry): number => new Date(e.recordedAt as string).getTime();
-        const times = dated.map(timeOf);
-        const minT = Math.min(...times);
-        const maxT = Math.max(...times);
-        const values = dated.map((e) => e.value);
-        const minV = Math.min(0, ...values);
-        const maxV = Math.max(...values, 1);
-
-        const width = 560;
-        const height = 200;
-        const padding = 28;
-        const xFor = (t: number): number =>
-            maxT === minT ? width / 2 : padding + ((t - minT) / (maxT - minT)) * (width - padding * 2);
-        const yFor = (v: number): number =>
-            maxV === minV ? height / 2 : height - padding - ((v - minV) / (maxV - minV)) * (height - padding * 2);
-
-        const svg = document.createElementNS(SVG_NS, 'svg');
-        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-        svg.setAttribute('preserveAspectRatio', 'none');
-        svg.setAttribute('class', 'activity-svg');
-
         const colors = ['var(--accent)', '#0DCE74', '#EF2CC1', '#3D99F5', '#FEA595', '#A373ED'];
         const legend = el('div', {class: 'bm-trend-legend'});
+        const lines: SparklineSeries[] = [];
         let colorIdx = 0;
         for (const [label, list] of series) {
             const color = colors[colorIdx % colors.length] as string;
             colorIdx += 1;
-
-            if (list.length > 1) {
-                const points = list.map((e) => `${xFor(timeOf(e))},${yFor(e.value)}`).join(' ');
-                const polyline = document.createElementNS(SVG_NS, 'polyline');
-                polyline.setAttribute('points', points);
-                polyline.setAttribute('fill', 'none');
-                polyline.setAttribute('stroke', color);
-                polyline.setAttribute('stroke-width', '2');
-                svg.appendChild(polyline);
-            }
-
-            for (const entry of list) {
-                const circle = document.createElementNS(SVG_NS, 'circle');
-                circle.setAttribute('cx', String(xFor(timeOf(entry))));
-                circle.setAttribute('cy', String(yFor(entry.value)));
-                circle.setAttribute('r', '4');
-                circle.setAttribute('fill', color);
-                const title = document.createElementNS(SVG_NS, 'title');
-                title.textContent =
-                    `${label}: ${formatNumber(entry.value)} ${entry.unit} — ${formatDateTime(entry.recordedAt as string)}`;
-                circle.appendChild(title);
-                svg.appendChild(circle);
-            }
-
+            lines.push({
+                color,
+                dots: true,
+                points: list.map((e) => ({
+                    x: timeOf(e),
+                    y: e.value,
+                    title: `${label}: ${formatNumber(e.value)} ${e.unit} — ${formatDateTime(e.recordedAt as string)}`
+                }))
+            });
             legend.appendChild(el('span', {class: 'bm-trend-legend-item'},
                 el('span', {class: 'bm-trend-swatch', style: {background: color}}),
                 label
             ));
         }
+
+        // jsNGraph Sparkline in data mode: all series on one time axis, y from 0.
+        const svg = new Sparkline({series: lines, width: 900, height: 240, dot: 5, yMin: Math.min(0, ...dated.map((e) => e.value)), fluid: true}).render();
+        svg.setAttribute('class', 'bm-trend-svg');
 
         wrap.appendChild(el('div', {class: 'activity-chart'}, svg));
         wrap.appendChild(legend);

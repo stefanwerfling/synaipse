@@ -3380,6 +3380,23 @@ body.synaipse-sidebar-resizing {
     width: 100%;
 }
 
+.synaipse-root .activity-strip {
+    display: block;
+    width: 100%;
+    height: 14px;
+}
+
+.synaipse-root .activity-subtitle {
+    margin-top: var(--space-3);
+}
+
+.synaipse-root .activity-stat-spark {
+    display: block;
+    width: 100%;
+    height: 28px;
+    margin-top: 6px;
+}
+
 .synaipse-root .activity-chart-labels {
     display: flex;
     justify-content: space-between;
@@ -7577,6 +7594,9 @@ body.synaipse-sidebar-resizing {
 .synaipse-root .bm-chart-tab.active { background: var(--accent); border-color: var(--accent-press); color: #fff; }
 
 /* Trend-chart legend (one swatch per series/label). */
+.synaipse-root .bm-trend-svg { display: block; width: 100%; height: auto; max-height: 320px; }
+.synaipse-root .activity-svg path,
+.synaipse-root .activity-stat-spark path { vector-effect: non-scaling-stroke; }
 .synaipse-root .bm-trend-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
 .synaipse-root .bm-trend-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-1); }
 .synaipse-root .bm-trend-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

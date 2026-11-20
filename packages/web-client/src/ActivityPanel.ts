@@ -1,4 +1,5 @@
 import {activityApi, type ActivityBucket, type ActivityCommit, type ActivityCount, type ActivityReport} from './Api.js';
+import {BarStrip, Sparkline, Timeline} from 'jsngraph';
 import {clear, el} from './Dom.js';
 import {defineMessages, tc} from './I18n.js';
 
@@ -26,6 +27,8 @@ const t = defineMessages('activityPanel', {
     tools: 'Tools',
     projects: 'Projects',
     perDay: 'Commits per day',
+    notesPerDay: 'Notes touched per day',
+    notesCellTitle: '{date}: {notes}',
     noData: 'no data',
     barTitle: '{date}: {commits}, {notes}',
     commits: '{count} commit|{count} commits',
@@ -163,7 +166,7 @@ export class ActivityPanel {
         }
 
         const totalNotes = new Set(report.commits.filter((c) => c.noteId !== null).map((c) => c.noteId)).size;
-        this.statsHost.appendChild(this.statTile(t('statCommits'), String(report.total)));
+        this.statsHost.appendChild(this.statTile(t('statCommits'), String(report.total), report.timeline.map((b) => b.commits)));
         this.statsHost.appendChild(this.statTile(t('statNotes'), String(totalNotes)));
         this.statsHost.appendChild(this.statTile(t('statTools'), String(report.byTool.length)));
         this.statsHost.appendChild(this.statTile(t('statProjects'), String(report.byProject.length)));
@@ -179,11 +182,22 @@ export class ActivityPanel {
         this.bodyHost.appendChild(this.renderRecent(report.commits.slice(0, 30)));
     }
 
-    private statTile(label: string, value: string): HTMLElement {
-        return el('div', {class: 'activity-stat-tile'},
+    private statTile(label: string, value: string, trend?: number[]): HTMLElement {
+        const tile = el('div', {class: 'activity-stat-tile'},
             el('div', {class: 'activity-stat-value', text: value}),
             el('div', {class: 'activity-stat-label', text: label})
         );
+        if (trend !== undefined && trend.length > 1) {
+            const spark = new Sparkline({
+                series: [{points: trend.map((y) => ({y})), dots: false}],
+                width: 120, height: 28, yMin: 0, accent: 'var(--accent)'
+            }).render();
+            spark.setAttribute('preserveAspectRatio', 'none');
+            spark.setAttribute('class', 'activity-stat-spark');
+            spark.setAttribute('aria-hidden', 'true');
+            tile.appendChild(spark);
+        }
+        return tile;
     }
 
     private renderTimeline(buckets: ActivityBucket[]): HTMLElement {
@@ -198,37 +212,18 @@ export class ActivityPanel {
             return section;
         }
 
-        const max = Math.max(1, ...buckets.map((b) => b.commits));
-        const width = Math.max(buckets.length * 18, 600);
-        const height = 180;
-        const padding = 24;
-
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        // jsNGraph BarStrip in data mode, stretched to the panel width.
+        const svg = new BarStrip({
+            values: buckets.map((b) => b.commits),
+            width: Math.max(buckets.length * 18, 600),
+            height: 180,
+            gap: 4,
+            accent: 'var(--accent)',
+            axisColor: 'var(--border)',
+            titles: buckets.map((b) => t('barTitle', {date: b.date, commits: t('commits', {count: b.commits}), notes: t('notes', {count: b.notes})}))
+        }).render();
         svg.setAttribute('preserveAspectRatio', 'none');
         svg.setAttribute('class', 'activity-svg');
-
-        const barWidth = Math.max(8, (width - padding * 2) / buckets.length - 2);
-
-        buckets.forEach((b, i) => {
-            const h = ((height - padding * 2) * b.commits) / max;
-            const x = padding + i * ((width - padding * 2) / buckets.length);
-            const y = height - padding - h;
-
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', String(x));
-            rect.setAttribute('y', String(y));
-            rect.setAttribute('width', String(barWidth));
-            rect.setAttribute('height', String(h));
-            rect.setAttribute('fill', 'var(--accent)');
-            rect.setAttribute('rx', '2');
-
-            const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            title.textContent = t('barTitle', {date: b.date, commits: t('commits', {count: b.commits}), notes: t('notes', {count: b.notes})});
-            rect.appendChild(title);
-
-            svg.appendChild(rect);
-        });
 
         chartHost.appendChild(svg);
         section.appendChild(chartHost);
@@ -239,6 +234,20 @@ export class ActivityPanel {
         labels.appendChild(el('span', {text: firstDate}));
         labels.appendChild(el('span', {text: lastDate}));
         section.appendChild(labels);
+
+        // Notes per day as an intensity strip: busy days glow, quiet ones fade.
+        const strip = new Timeline({
+            values: buckets.map((b) => b.notes),
+            cell: 14,
+            gap: 3,
+            height: 14,
+            accent: 'var(--accent)',
+            titles: buckets.map((b) => t('notesCellTitle', {date: b.date, notes: t('notes', {count: b.notes})}))
+        }).render();
+        strip.setAttribute('preserveAspectRatio', 'none');
+        strip.setAttribute('class', 'activity-strip');
+        section.appendChild(el('h3', {class: 'activity-section-title activity-subtitle', text: t('notesPerDay')}));
+        section.appendChild(el('div', {class: 'activity-chart'}, strip));
 
         return section;
     }

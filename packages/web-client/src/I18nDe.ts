@@ -761,6 +761,8 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         tools: 'Tools',
         projects: 'Projekte',
         perDay: 'Commits pro Tag',
+        notesPerDay: 'Berührte Notizen pro Tag',
+        notesCellTitle: '{date}: {notes}',
         noData: 'keine Daten',
         barTitle: '{date}: {commits}, {notes}',
         commits: '{count} Commit|{count} Commits',
