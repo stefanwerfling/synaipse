@@ -1,6 +1,28 @@
 import type {CanvasDocument, CanvasNode} from '@synaipse/core';
 import {clear, el} from './Dom.js';
 import {arrowStyleOf, COLOR_PRESET_ORDER, COLOR_PRESETS, type ArrowStyle} from './CanvasGeometry.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('canvasBottomBar', {
+    color: 'Color {preset}',
+    noColor: 'No color',
+    deleteTitle: 'Delete (Del)',
+    selected: '{count} selected',
+    edge: 'Edge',
+    arrowTo: 'Arrow at target only',
+    arrowBoth: 'Arrows at both ends',
+    arrowNone: 'No arrows',
+    group: 'Group',
+    textCard: 'Text card',
+    noteCard: 'Note card',
+    linkCard: 'Link card',
+    editTextTitle: 'Edit text (dblclick)',
+    editText: 'Edit text',
+    editButton: '✎ Edit',
+    openNoteTitle: 'Open note (dblclick)',
+    openNote: 'Open note',
+    openButton: '↗ Open'
+});
 
 /**
  * Contextual bottom bar of the canvas (plan P7 / D2): actions for
@@ -45,8 +67,8 @@ const colorSwatches = (current: string | undefined, onPick: (preset: string | un
     for (const preset of COLOR_PRESET_ORDER) {
         const swatch = barButton(
             current === preset ? 'canvas-bottom-bar-swatch active' : 'canvas-bottom-bar-swatch',
-            `Color ${preset}`,
-            `Color ${preset}`,
+            t('color', {preset}),
+            t('color', {preset}),
             () => onPick(preset)
         );
         swatch.style.background = COLOR_PRESETS[preset] ?? '#888';
@@ -57,8 +79,8 @@ const colorSwatches = (current: string | undefined, onPick: (preset: string | un
         current === undefined
             ? 'canvas-bottom-bar-swatch canvas-bottom-bar-swatch-clear active'
             : 'canvas-bottom-bar-swatch canvas-bottom-bar-swatch-clear',
-        'No color',
-        'No color',
+        t('noColor'),
+        t('noColor'),
         () => onPick(undefined)
     ));
     return wrap;
@@ -66,7 +88,7 @@ const colorSwatches = (current: string | undefined, onPick: (preset: string | un
 
 const deleteButton = (onDelete: () => void): HTMLElement[] => [
     sep(),
-    barButton('canvas-bottom-bar-btn canvas-bottom-bar-btn-danger', 'Delete (Del)', 'Delete', onDelete, '🗑')
+    barButton('canvas-bottom-bar-btn canvas-bottom-bar-btn-danger', t('deleteTitle'), tc('delete'), onDelete, '🗑')
 ];
 
 const multiControls = (doc: CanvasDocument, ids: string[], actions: BottomBarActions): HTMLElement[] => {
@@ -76,7 +98,7 @@ const multiControls = (doc: CanvasDocument, ids: string[], actions: BottomBarAct
     const colors = ids.map((id) => doc.nodes.find((n) => n.id === id)?.color);
     const uniform = colors.every((c) => c === colors[0]);
     return [
-        kind(`${ids.length} selected`),
+        kind(t('selected', {count: ids.length})),
         colorSwatches(uniform ? colors[0] : undefined, (preset) => actions.setNodesColor(ids, preset)),
         ...deleteButton(() => actions.removeNodes(ids))
     ];
@@ -92,31 +114,31 @@ const edgeControls = (edge: CanvasDocument['edges'][number], actions: BottomBarA
         label
     );
     return [
-        kind('Edge'),
+        kind(t('edge')),
         colorSwatches(edge.color, (preset) => actions.setEdgeColor(edge.id, preset)),
         sep(),
-        arrowBtn('to', '→', 'Arrow at target only'),
-        arrowBtn('both', '↔', 'Arrows at both ends'),
-        arrowBtn('none', '—', 'No arrows'),
+        arrowBtn('to', '→', t('arrowTo')),
+        arrowBtn('both', '↔', t('arrowBoth')),
+        arrowBtn('none', '—', t('arrowNone')),
         ...deleteButton(() => actions.removeEdge(edge.id))
     ];
 };
 
 const nodeControls = (node: CanvasNode, actions: BottomBarActions): HTMLElement[] => {
-    const label = node.type === 'group' ? 'Group'
-        : node.type === 'text' ? 'Text card'
-        : node.type === 'file' ? 'Note card'
-        : 'Link card';
+    const label = node.type === 'group' ? t('group')
+        : node.type === 'text' ? t('textCard')
+        : node.type === 'file' ? t('noteCard')
+        : t('linkCard');
     const out = [kind(label)];
 
     // Text cards edit inline (dblclick works too, but a bar action is
     // more discoverable). File/link cards have their own semantics.
     if (node.type === 'text') {
-        out.push(barButton('canvas-bottom-bar-btn', 'Edit text (dblclick)', 'Edit text', () => actions.editText(node.id), '✎ Edit'), sep());
+        out.push(barButton('canvas-bottom-bar-btn', t('editTextTitle'), t('editText'), () => actions.editText(node.id), t('editButton')), sep());
     }
     if (node.type === 'file') {
         const fileId = node.file;
-        out.push(barButton('canvas-bottom-bar-btn', 'Open note (dblclick)', 'Open note', () => actions.openNote(fileId), '↗ Open'), sep());
+        out.push(barButton('canvas-bottom-bar-btn', t('openNoteTitle'), t('openNote'), () => actions.openNote(fileId), t('openButton')), sep());
     }
 
     out.push(

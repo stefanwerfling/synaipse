@@ -1,5 +1,41 @@
 import {api, type AuditEntry, type AuditKind} from './Api.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('auditPanel', {
+    kindChat: 'Chat',
+    kindSummarize: 'Summarize',
+    kindCompile: 'Compile',
+    kindRelink: 'Relink',
+    kindResearch: 'Research',
+    kindEmbed: 'Embedder',
+    sourceSearch: 'Search',
+    sourceRelated: 'Related notes',
+    sourceSuggestLinks: 'Link suggestions',
+    title: 'Audit Log',
+    subtitle: 'GDPR layer 4 — every external LLM call (local providers are not logged).',
+    allProviders: 'All providers',
+    allKinds: 'All calls',
+    showEmbed: 'Show embedder calls',
+    loadOlder: 'Load older',
+    empty: 'No external LLM calls logged yet. If your chat provider is local (Ollama), this page stays empty — on purpose: nothing leaves the host, nothing to audit.',
+    loadFailed: 'Loading the audit log failed: {error}',
+    loadMoreFailed: 'Loading failed: {error}',
+    stats: '{shown} shown / {total} total',
+    calls: '{count} call|{count} calls',
+    sources: '{count} source|{count} sources',
+    redacted: '{count} redacted',
+    blocked: '{count} blocked',
+    question: 'Question',
+    noteIds: 'Note IDs',
+    redactions: 'Redactions',
+    blockedLayer2: 'Blocked (layer 2)',
+    privateNotes: '{count} private note|{count} private notes',
+    tokensInput: 'Input {count}',
+    tokensOutput: 'Output {count}',
+    tokensTotal: 'Total {count}',
+    tokens: 'Tokens'
+});
 
 /**
  * DSGVO Layer 4 panel: shows the persistent audit log of every external
@@ -21,20 +57,20 @@ import {clear, el} from './Dom.js';
 /** Entries per request; older ones come via "Ältere laden" (cursor pagination). */
 const PAGE_SIZE = 200;
 
-const KIND_LABELS: Record<AuditKind, string> = {
-    chat: 'Chat',
-    summarize: 'Summarize',
-    compile: 'Compile',
-    relink: 'Relink',
-    research: 'Research',
-    embed: 'Embedder'
-};
+const KIND_LABELS = (): Record<AuditKind, string> => ({
+    chat: t('kindChat'),
+    summarize: t('kindSummarize'),
+    compile: t('kindCompile'),
+    relink: t('kindRelink'),
+    research: t('kindResearch'),
+    embed: t('kindEmbed')
+});
 
-const EMBED_SOURCE_LABELS: Record<NonNullable<AuditEntry['embedSource']>, string> = {
-    'search': 'Suche',
-    'related': 'Verwandte Notes',
-    'suggest-links': 'Link-Vorschläge'
-};
+const EMBED_SOURCE_LABELS = (): Record<NonNullable<AuditEntry['embedSource']>, string> => ({
+    'search': t('sourceSearch'),
+    'related': t('sourceRelated'),
+    'suggest-links': t('sourceSuggestLinks')
+});
 
 const formatTs = (ms: number): string => {
     const d = new Date(ms);
@@ -68,8 +104,8 @@ export class AuditPanel {
         this.element = el('div', {class: 'audit-panel'});
 
         const heading = el('div', {class: 'audit-head'},
-            el('h2', {text: 'Audit Log'}),
-            el('p', {class: 'audit-subtitle', text: 'DSGVO Layer 4 — alle externen LLM-Aufrufe (lokale Provider bleiben ungeloggt).'})
+            el('h2', {text: t('title')}),
+            el('p', {class: 'audit-subtitle', text: t('subtitle')})
         );
 
         this.headStats = el('div', {class: 'audit-stats', text: ''});
@@ -78,21 +114,21 @@ export class AuditPanel {
             class: 'audit-filter',
             on: {change: () => void this.refresh()}
         }) as HTMLSelectElement;
-        this.providerFilter.appendChild(el('option', {attrs: {value: ''}, text: 'Alle Provider'}));
+        this.providerFilter.appendChild(el('option', {attrs: {value: ''}, text: t('allProviders')}));
 
         this.kindFilter = el('select', {
             class: 'audit-filter',
             on: {change: () => void this.refresh()}
         }) as HTMLSelectElement;
-        this.kindFilter.appendChild(el('option', {attrs: {value: ''}, text: 'Alle Aufrufe'}));
-        for (const [k, label] of Object.entries(KIND_LABELS)) {
+        this.kindFilter.appendChild(el('option', {attrs: {value: ''}, text: t('allKinds')}));
+        for (const [k, label] of Object.entries(KIND_LABELS())) {
             this.kindFilter.appendChild(el('option', {attrs: {value: k}, text: label}));
         }
 
         const refreshBtn = el('button', {
             class: 'btn audit-refresh',
             attrs: {type: 'button'},
-            text: 'Refresh',
+            text: tc('refresh'),
             on: {click: () => void this.refresh()}
         });
 
@@ -106,7 +142,7 @@ export class AuditPanel {
         const embedLabel = el('label', {
             class: 'audit-toggle',
             attrs: {for: 'audit-include-embed'},
-            text: ' Embedder-Calls anzeigen'
+            text: ` ${t('showEmbed')}`
         });
         embedLabel.insertBefore(this.includeEmbedToggle, embedLabel.firstChild);
 
@@ -122,13 +158,13 @@ export class AuditPanel {
         this.moreBtn = el('button', {
             class: 'btn audit-more',
             attrs: {type: 'button'},
-            text: 'Ältere laden',
+            text: t('loadOlder'),
             style: {display: 'none'},
             on: {click: () => void this.loadMore()}
         }) as HTMLButtonElement;
         this.emptyHost = el('div', {
             class: 'audit-empty',
-            text: 'Noch keine externen LLM-Aufrufe geloggt. Wenn dein Chat-Provider lokal ist (Ollama), bleibt diese Seite leer — gewollt: nichts verlässt den Host, nichts zu auditieren.'
+            text: t('empty')
         });
 
         this.element.appendChild(heading);
@@ -162,7 +198,7 @@ export class AuditPanel {
             this.moreBtn.style.display = 'none';
             this.listHost.appendChild(el('div', {
                 class: 'audit-error',
-                text: `Audit-Log laden fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`
+                text: t('loadFailed', {error: e instanceof Error ? e.message : String(e)})
             }));
             return;
         }
@@ -187,7 +223,7 @@ export class AuditPanel {
             this.shown += result.entries.length;
             this.applyPage(result.total, result.nextCursor);
         } catch (e) {
-            this.moreBtn.textContent = `Laden fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`;
+            this.moreBtn.textContent = t('loadMoreFailed', {error: e instanceof Error ? e.message : String(e)});
         } finally {
             this.moreBtn.disabled = false;
         }
@@ -196,11 +232,11 @@ export class AuditPanel {
     private applyPage(total: number, nextCursor: string | null): void {
         this.total = total;
         this.nextCursor = nextCursor;
-        this.moreBtn.textContent = 'Ältere laden';
+        this.moreBtn.textContent = t('loadOlder');
         this.moreBtn.style.display = nextCursor === null ? 'none' : '';
         this.headStats.textContent = this.total === 0
             ? ''
-            : `${this.shown} angezeigt / ${this.total} gesamt`;
+            : t('stats', {shown: this.shown, total: this.total});
     }
 
     private refreshProviderOptions(entries: readonly AuditEntry[]): void {
@@ -234,9 +270,10 @@ export class AuditPanel {
         const redactTotal = sumRedactions(e);
         const noteCount = e.noteIds.length;
         const isEmbed = e.kind === 'embed';
+        const kindLabels = KIND_LABELS();
         const kindLabelText = isEmbed && e.embedSource !== undefined
-            ? `${KIND_LABELS[e.kind]} · ${EMBED_SOURCE_LABELS[e.embedSource]}`
-            : KIND_LABELS[e.kind];
+            ? `${kindLabels[e.kind]} · ${EMBED_SOURCE_LABELS()[e.embedSource]}`
+            : kindLabels[e.kind];
 
         const head = el('div', {class: 'audit-entry-head'},
             el('span', {class: 'audit-entry-ts', text: formatTs(e.ts)}),
@@ -247,13 +284,13 @@ export class AuditPanel {
                 : el('span', {style: {display: 'none'}}),
             el('span', {class: 'audit-entry-counts'},
                 isEmbed && e.embedCalls !== undefined && e.embedCalls > 1
-                    ? el('span', {class: 'audit-pill', text: `${e.embedCalls} Calls`})
-                    : el('span', {class: 'audit-pill', text: `${noteCount} ${noteCount === 1 ? 'Quelle' : 'Quellen'}`}),
+                    ? el('span', {class: 'audit-pill', text: t('calls', {count: e.embedCalls})})
+                    : el('span', {class: 'audit-pill', text: t('sources', {count: noteCount})}),
                 redactTotal > 0
-                    ? el('span', {class: 'audit-pill audit-pill-redact', text: `${redactTotal} redacted`})
+                    ? el('span', {class: 'audit-pill audit-pill-redact', text: t('redacted', {count: redactTotal})})
                     : el('span', {style: {display: 'none'}}),
                 e.filteredPrivate !== undefined && e.filteredPrivate > 0
-                    ? el('span', {class: 'audit-pill audit-pill-blocked', text: `${e.filteredPrivate} geblockt`})
+                    ? el('span', {class: 'audit-pill audit-pill-blocked', text: t('blocked', {count: e.filteredPrivate})})
                     : el('span', {style: {display: 'none'}}),
                 el('span', {class: 'audit-entry-duration', text: formatDuration(e.durationMs)})
             )
@@ -286,7 +323,7 @@ export class AuditPanel {
 
         if (e.question !== undefined && e.question.length > 0) {
             host.appendChild(el('div', {class: 'audit-detail-row'},
-                el('span', {class: 'audit-detail-label', text: 'Frage'}),
+                el('span', {class: 'audit-detail-label', text: t('question')}),
                 el('span', {class: 'audit-detail-value audit-detail-question', text: e.question})
             ));
         }
@@ -298,7 +335,7 @@ export class AuditPanel {
                 list.appendChild(el('code', {text: e.noteIds[i] ?? ''}));
             }
             host.appendChild(el('div', {class: 'audit-detail-row'},
-                el('span', {class: 'audit-detail-label', text: 'Note-IDs'}),
+                el('span', {class: 'audit-detail-label', text: t('noteIds')}),
                 list
             ));
         }
@@ -308,26 +345,26 @@ export class AuditPanel {
                 .map((r) => `${r.count} ${r.kind}`)
                 .join(', ');
             host.appendChild(el('div', {class: 'audit-detail-row'},
-                el('span', {class: 'audit-detail-label', text: 'Redaktionen'}),
+                el('span', {class: 'audit-detail-label', text: t('redactions')}),
                 el('span', {class: 'audit-detail-value', text: breakdown})
             ));
         }
 
         if (e.filteredPrivate !== undefined && e.filteredPrivate > 0) {
             host.appendChild(el('div', {class: 'audit-detail-row'},
-                el('span', {class: 'audit-detail-label', text: 'Geblockt (Layer 2)'}),
-                el('span', {class: 'audit-detail-value', text: `${e.filteredPrivate} private Note${e.filteredPrivate === 1 ? '' : 's'}`})
+                el('span', {class: 'audit-detail-label', text: t('blockedLayer2')}),
+                el('span', {class: 'audit-detail-value', text: t('privateNotes', {count: e.filteredPrivate})})
             ));
         }
 
         if (e.tokens !== undefined) {
             const parts: string[] = [];
-            if (e.tokens.input !== undefined) parts.push(`Input ${e.tokens.input}`);
-            if (e.tokens.output !== undefined) parts.push(`Output ${e.tokens.output}`);
-            if (e.tokens.total !== undefined) parts.push(`Total ${e.tokens.total}`);
+            if (e.tokens.input !== undefined) parts.push(t('tokensInput', {count: e.tokens.input}));
+            if (e.tokens.output !== undefined) parts.push(t('tokensOutput', {count: e.tokens.output}));
+            if (e.tokens.total !== undefined) parts.push(t('tokensTotal', {count: e.tokens.total}));
             if (parts.length > 0) {
                 host.appendChild(el('div', {class: 'audit-detail-row'},
-                    el('span', {class: 'audit-detail-label', text: 'Tokens'}),
+                    el('span', {class: 'audit-detail-label', text: t('tokens')}),
                     el('span', {class: 'audit-detail-value', text: parts.join(' · ')})
                 ));
             }

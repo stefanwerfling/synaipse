@@ -3,7 +3,92 @@ import {setStepDeleted, withoutDeleted} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog, formDialog, promptDialog, validProjectName} from './Dialogs.js';
+import {defineMessages, formatDateTime, formatNumber, tc} from './I18n.js';
 import {toast} from './Toast.js';
+
+const t = defineMessages('roadmapPanel', {
+    statusBacklog: 'Backlog',
+    statusPlanned: 'Planned',
+    statusInProgress: 'In progress',
+    statusAiActive: 'AI active',
+    statusReview: 'Review',
+    statusBlocked: 'Blocked',
+    statusDone: 'Done',
+    statusCancelled: 'Cancelled',
+    hours: '{hours} h',
+    newProjectTitle: 'Create a roadmap for a new project',
+    newProjectBtn: '＋ Project',
+    title: 'Roadmap',
+    subtitle: 'AI-planned implementation steps per project — status, time planned/spent, linked notes.',
+    project: 'Project',
+    pickProjectFirst: 'Create or select a project first.',
+    noRoadmapOption: '— no roadmap —',
+    noRoadmapYet: 'No roadmap yet. Create one for a project — or let the AI plan it via MCP (synaipse_roadmap_plan).',
+    newProject: 'New project',
+    projectName: 'Project name (a-z, 0-9, . _ -)',
+    kpiSteps: 'Steps',
+    kpiProgress: 'Progress',
+    kpiPlanned: 'Time planned',
+    kpiActual: 'Time spent',
+    kpiBlocked: 'Blocked',
+    aiWorking: 'AI is working',
+    activeStep: 'Step {id}',
+    activeStepTitled: 'Step {id} — {title}',
+    token: 'Token {token}',
+    noRoadmapLoaded: 'No roadmap loaded.',
+    addStepBtn: '＋ Step',
+    stepsHeading: 'Implementation steps',
+    tableHint: 'nestable · times roll up into phases',
+    collapseAllTitle: 'Collapse all sub-steps',
+    collapseAll: '⊟ Collapse',
+    expandAllTitle: 'Expand all sub-steps',
+    expandAll: '⊞ Expand',
+    focusActiveTitle: 'Open only the path to the AI cursor and scroll to it',
+    focusActive: '◉ To AI cursor',
+    deletedToggleTitle: 'Deleted steps stay in the vault and can be restored.',
+    showDeleted: '🗑 Show deleted ({count})',
+    noSteps: 'No steps yet. “＋ Step” above — or the AI plans via MCP.',
+    allDeleted: 'All steps are deleted (hidden). Turn on “Show deleted”.',
+    colStep: 'Step',
+    colStatus: 'Status',
+    colOwner: 'Owner',
+    colPlanned: 'Planned',
+    colActual: 'Spent',
+    colProgress: 'Progress',
+    colNotes: 'Notes',
+    expandHidden: 'Expand ({count} hidden)',
+    collapse: 'Collapse',
+    ownerAiAvatar: 'AI',
+    ownerHuman: 'Human',
+    restore: 'Restore',
+    setCursor: 'Set the AI cursor here',
+    bookTime: 'Book time',
+    linkNote: 'Link note',
+    addSubStep: 'Add sub-step',
+    markDeleted: 'Mark as deleted (hidden, restorable)',
+    clickForDetails: '{title} — click for details',
+    detailsEdit: 'Details / Edit',
+    editBtn: '✎ Edit',
+    evaluation: 'AI evaluation',
+    acceptanceLabel: 'Acceptance: ',
+    activity: 'Activity',
+    noEvaluation: 'No evaluation/acceptance yet. “✎ Edit” adds them.',
+    titleLabel: 'Title',
+    evaluationPlaceholder: 'AI evaluation / rationale …',
+    acceptancePlaceholder: 'Acceptance criteria (definition of done) …',
+    acceptance: 'Acceptance',
+    newStep: 'New step',
+    newSubStep: 'New sub-step',
+    plannedHours: 'Planned (h)',
+    actualHours: 'Spent (h)',
+    hoursInvalid: 'Enter hours as a number (leave empty to keep unchanged).',
+    noteRef: 'Title, alias or path',
+    noteRefPlaceholder: 'e.g. Memory/project/note.md',
+    link: 'Link',
+    noteNotFound: 'No note found for “{ref}”. Use the exact title, alias or path.',
+    deleteStepTitle: 'Delete step?',
+    deleteStepMessage: 'The step is marked as deleted and hidden. It stays in the vault and can be restored.'
+});
 
 export interface RoadmapPanelOptions {
     /** Open a linked note in the Notes tab. */
@@ -19,26 +104,20 @@ export interface RoadmapPanelOptions {
 }
 
 const STATUS_ORDER: RoadmapStatus[] = [
-    'backlog',
-    'planned',
-    'in_progress',
-    'ai_active',
-    'review',
-    'blocked',
-    'done',
-    'cancelled'
+    'backlog', 'planned', 'in_progress', 'ai_active', // i18n: id
+    'review', 'blocked', 'done', 'cancelled' // i18n: id
 ];
 
-const STATUS_LABEL: Record<RoadmapStatus, string> = {
-    backlog: 'Backlog',
-    planned: 'Geplant',
-    in_progress: 'In Arbeit',
-    ai_active: 'KI aktiv',
-    review: 'Review',
-    blocked: 'Blockiert',
-    done: 'Fertig',
-    cancelled: 'Abgebrochen'
-};
+const STATUS_LABEL_KEY = {
+    backlog: 'statusBacklog',
+    planned: 'statusPlanned',
+    in_progress: 'statusInProgress',
+    ai_active: 'statusAiActive',
+    review: 'statusReview',
+    blocked: 'statusBlocked',
+    done: 'statusDone',
+    cancelled: 'statusCancelled'
+} as const satisfies Record<RoadmapStatus, string>;
 
 const STATUS_CLASS: Record<RoadmapStatus, string> = {
     backlog: 'rm-backlog',
@@ -52,7 +131,7 @@ const STATUS_CLASS: Record<RoadmapStatus, string> = {
 };
 
 const fmtHours = (n: number | undefined): string =>
-    n === undefined ? '—' : `${n.toLocaleString('de-DE')} h`;
+    n === undefined ? '—' : t('hours', {hours: formatNumber(n)});
 
 /** Delta between planned and actual, as a signed string plus a CSS class. */
 const variance = (step: RoadmapStep): {text: string; cls: string} => {
@@ -62,8 +141,8 @@ const variance = (step: RoadmapStep): {text: string; cls: string} => {
     const d = Math.round((step.actualHours - step.plannedHours) * 10) / 10;
     if (d === 0) return {text: '0', cls: 'rm-var-none'};
     return d > 0
-        ? {text: `+${d.toLocaleString('de-DE')}`, cls: 'rm-var-over'}
-        : {text: d.toLocaleString('de-DE'), cls: 'rm-var-under'};
+        ? {text: `+${formatNumber(d)}`, cls: 'rm-var-over'}
+        : {text: formatNumber(d), cls: 'rm-var-under'};
 };
 
 const flatten = (steps: RoadmapStep[], depth = 0, out: Array<{step: RoadmapStep; depth: number}> = []): Array<{step: RoadmapStep; depth: number}> => {
@@ -175,8 +254,8 @@ export class RoadmapPanel {
 
         const newBtn = el('button', {
             class: 'rm-btn ghost',
-            attrs: {type: 'button', title: 'Roadmap für ein neues Projekt anlegen'},
-            text: '＋ Projekt',
+            attrs: {type: 'button', title: t('newProjectTitle')},
+            text: t('newProjectBtn'),
             on: {click: () => void this.createProject()}
         });
 
@@ -187,10 +266,10 @@ export class RoadmapPanel {
 
         const header = el('div', {class: 'rm-head'},
             el('div', {class: 'rm-head-left'},
-                el('h1', {class: 'rm-title', text: 'Roadmap'}),
-                el('p', {class: 'rm-sub', text: 'KI-geplante Umsetzungsschritte pro Projekt — Status, Zeit geplant/umgesetzt, verlinkte Notizen.'}),
+                el('h1', {class: 'rm-title', text: t('title')}),
+                el('p', {class: 'rm-sub', text: t('subtitle')}),
                 el('div', {class: 'rm-picker'},
-                    el('span', {class: 'rm-picker-label', text: 'Projekt'}),
+                    el('span', {class: 'rm-picker-label', text: t('project')}),
                     this.picker,
                     newBtn
                 )
@@ -228,7 +307,7 @@ export class RoadmapPanel {
     /** Palette: add a top-level step to the shown project. */
     public async newStep(): Promise<void> {
         if (this.project === null || this.roadmap === null) {
-            toast('Erst ein Projekt anlegen oder auswählen.', {kind: 'info'});
+            toast(t('pickProjectFirst'), {kind: 'info'});
             return;
         }
         await this.addStep(null);
@@ -268,7 +347,7 @@ export class RoadmapPanel {
 
         clear(this.picker);
         if (this.projects.length === 0) {
-            this.picker.appendChild(el('option', {text: '— keine Roadmap —', attrs: {value: ''}}));
+            this.picker.appendChild(el('option', {text: t('noRoadmapOption'), attrs: {value: ''}}));
         }
         for (const p of this.projects) {
             this.picker.appendChild(el('option', {text: p, attrs: {value: p}}));
@@ -285,7 +364,7 @@ export class RoadmapPanel {
         if (this.project === null) {
             this.roadmap = null;
             this.notifyProject();
-            this.renderEmpty('Noch keine Roadmap. Lege eine für ein Projekt an — oder lass die KI per MCP (synaipse_roadmap_plan) planen.');
+            this.renderEmpty(t('noRoadmapYet'));
             this.renderKpis(null);
             return;
         }
@@ -300,10 +379,10 @@ export class RoadmapPanel {
 
     private async createProject(): Promise<void> {
         const name = await promptDialog({
-            title: 'Neues Projekt',
-            label: 'Projektname (a-z, 0-9, . _ -)',
-            confirmLabel: 'Anlegen',
-            cancelLabel: 'Abbrechen',
+            title: t('newProject'),
+            label: t('projectName'),
+            confirmLabel: tc('create'),
+            cancelLabel: tc('cancel'),
             validate: validProjectName
         });
         if (!name) return;
@@ -436,11 +515,11 @@ export class RoadmapPanel {
                     : null
             );
 
-        this.kpis.appendChild(kpi('Schritte', String(total)));
-        this.kpis.appendChild(kpi('Fortschritt', `${prog}%`, prog));
-        this.kpis.appendChild(kpi('Zeit geplant', fmtHours(Math.round(planned * 10) / 10)));
-        this.kpis.appendChild(kpi('Zeit umgesetzt', fmtHours(Math.round(actual * 10) / 10), planned > 0 ? Math.min(100, Math.round((actual / planned) * 100)) : 0, actual > planned));
-        this.kpis.appendChild(kpi('Blockiert', String(blocked), undefined, blocked > 0));
+        this.kpis.appendChild(kpi(t('kpiSteps'), String(total)));
+        this.kpis.appendChild(kpi(t('kpiProgress'), `${prog}%`, prog));
+        this.kpis.appendChild(kpi(t('kpiPlanned'), fmtHours(Math.round(planned * 10) / 10)));
+        this.kpis.appendChild(kpi(t('kpiActual'), fmtHours(Math.round(actual * 10) / 10), planned > 0 ? Math.min(100, Math.round((actual / planned) * 100)) : 0, actual > planned));
+        this.kpis.appendChild(kpi(t('kpiBlocked'), String(blocked), undefined, blocked > 0));
     }
 
     private renderBanner(rm: Roadmap): void {
@@ -453,19 +532,19 @@ export class RoadmapPanel {
         this.banner.style.display = '';
         this.banner.appendChild(el('div', {class: 'rm-banner-row'},
             el('span', {class: 'rm-pulse'}),
-            el('span', {class: 'rm-banner-lbl', text: 'KI arbeitet gerade'})
+            el('span', {class: 'rm-banner-lbl', text: t('aiWorking')})
         ));
         this.banner.appendChild(el('div', {class: 'rm-banner-what'},
-            `Schritt ${rm.active.stepId}${step ? ` — ${step.title}` : ''}`
+            step ? t('activeStepTitled', {id: rm.active.stepId, title: step.title}) : t('activeStep', {id: rm.active.stepId})
         ));
         if (rm.active.token) {
-            this.banner.appendChild(el('div', {class: 'rm-banner-meta', text: `Token ${rm.active.token}`}));
+            this.banner.appendChild(el('div', {class: 'rm-banner-meta', text: t('token', {token: rm.active.token})}));
         }
     }
 
     private render(): void {
         if (this.roadmap === null) {
-            this.renderEmpty('Keine Roadmap geladen.');
+            this.renderEmpty(t('noRoadmapLoaded'));
             this.renderKpis(null);
             return;
         }
@@ -478,23 +557,23 @@ export class RoadmapPanel {
         const addRootBtn = el('button', {
             class: 'rm-btn',
             attrs: {type: 'button'},
-            text: '＋ Schritt',
+            text: t('addStepBtn'),
             on: {click: () => void this.addStep(null)}
         });
         const deletedCount = flatten(rm.steps).length - flatten(withoutDeleted(rm.steps)).length;
         const headChildren: (HTMLElement | null)[] = [
-            el('h2', {text: 'Umsetzungsschritte'}),
-            el('span', {class: 'rm-table-hint', text: 'verschachtelbar · Zeiten rollen auf Phasen auf'})
+            el('h2', {text: t('stepsHeading')}),
+            el('span', {class: 'rm-table-hint', text: t('tableHint')})
         ];
 
         // Fold controls — only worth showing once there is nesting to fold.
         if (parentIds(rm.steps).length > 0) {
             const fold = el('div', {class: 'rm-fold-ctl'},
-                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Alle Unterschritte einklappen'}, text: '⊟ Einklappen', on: {click: () => this.collapseAll(true)}}),
-                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Alle Unterschritte ausklappen'}, text: '⊞ Ausklappen', on: {click: () => this.collapseAll(false)}})
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: t('collapseAllTitle')}, text: t('collapseAll'), on: {click: () => this.collapseAll(true)}}),
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: t('expandAllTitle')}, text: t('expandAll'), on: {click: () => this.collapseAll(false)}})
             );
             if (rm.active?.stepId) {
-                fold.appendChild(el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: 'Nur den Pfad zum KI-Cursor öffnen und hinscrollen'}, text: '◉ Zum KI-Cursor', on: {click: () => this.focusActive()}}));
+                fold.appendChild(el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button', title: t('focusActiveTitle')}, text: t('focusActive'), on: {click: () => this.focusActive()}}));
             }
             headChildren.push(fold);
         }
@@ -505,9 +584,9 @@ export class RoadmapPanel {
                 this.showDeleted = toggle.checked;
                 this.render();
             });
-            headChildren.push(el('label', {class: 'rm-deleted-toggle', attrs: {title: 'Gelöschte Schritte bleiben im Vault erhalten und lassen sich wiederherstellen.'}},
+            headChildren.push(el('label', {class: 'rm-deleted-toggle', attrs: {title: t('deletedToggleTitle')}},
                 toggle,
-                el('span', {text: `🗑 Gelöschte anzeigen (${deletedCount})`})
+                el('span', {text: t('showDeleted', {count: deletedCount})})
             ));
         }
         headChildren.push(addRootBtn);
@@ -516,8 +595,8 @@ export class RoadmapPanel {
         const visibleSteps = this.showDeleted ? rm.steps : withoutDeleted(rm.steps);
         if (visibleSteps.length === 0) {
             const msg = rm.steps.length === 0
-                ? 'Noch keine Schritte. „＋ Schritt" oben — oder die KI plant per MCP.'
-                : 'Alle Schritte sind gelöscht (ausgeblendet). Schalte „Gelöschte anzeigen" ein.';
+                ? t('noSteps')
+                : t('allDeleted');
             this.tableWrap.appendChild(el('p', {class: 'rm-empty-inline', text: msg}));
             return;
         }
@@ -525,14 +604,14 @@ export class RoadmapPanel {
         const table = el('table', {class: 'rm-table'});
         table.appendChild(el('thead', {},
             el('tr', {},
-                el('th', {text: 'Schritt'}),
-                el('th', {text: 'Status'}),
-                el('th', {text: 'Owner'}),
-                el('th', {class: 'r', text: 'Geplant'}),
-                el('th', {class: 'r', text: 'Umgesetzt'}),
+                el('th', {text: t('colStep')}),
+                el('th', {text: t('colStatus')}),
+                el('th', {text: t('colOwner')}),
+                el('th', {class: 'r', text: t('colPlanned')}),
+                el('th', {class: 'r', text: t('colActual')}),
                 el('th', {class: 'r', text: 'Δ'}),
-                el('th', {text: 'Fortschritt'}),
-                el('th', {text: 'Notizen'}),
+                el('th', {text: t('colProgress')}),
+                el('th', {text: t('colNotes')}),
                 el('th', {text: ''})
             )
         ));
@@ -561,7 +640,7 @@ export class RoadmapPanel {
         // roadmaps). Detail (evaluation/activity) is reached via the name/ⓘ.
         const caret = el('span', {
             class: `rm-caret${hasChildren ? (isCollapsed ? ' collapsed' : ' open') : ' empty'}`,
-            attrs: hasChildren ? {title: isCollapsed ? `Ausklappen (${hiddenCount} verborgen)` : 'Einklappen'} : {},
+            attrs: hasChildren ? {title: isCollapsed ? t('expandHidden', {count: hiddenCount}) : t('collapse')} : {},
             on: hasChildren ? {click: () => this.toggleCollapse(step.id)} : {}
         },
             hasChildren ? el('span', {class: 'rm-caret-tw', text: isCollapsed ? '▸' : '▾'}) : null,
@@ -573,13 +652,13 @@ export class RoadmapPanel {
             on: {change: (e) => void this.changeStatus(step.id, (e.target as HTMLSelectElement).value as RoadmapStatus)}
         }) as HTMLSelectElement;
         for (const st of STATUS_ORDER) {
-            const opt = el('option', {text: STATUS_LABEL[st], attrs: {value: st}}) as HTMLOptionElement;
+            const opt = el('option', {text: t(STATUS_LABEL_KEY[st]), attrs: {value: st}}) as HTMLOptionElement;
             if (st === step.status) opt.selected = true;
             statusSel.appendChild(opt);
         }
 
-        const owner = step.owner === 'ai' ? el('span', {class: 'rm-owner'}, el('span', {class: 'rm-av ai', text: 'KI'}), 'Claude')
-            : step.owner === 'human' ? el('span', {class: 'rm-owner'}, el('span', {class: 'rm-av hu', text: '👤'}), 'Mensch')
+        const owner = step.owner === 'ai' ? el('span', {class: 'rm-owner'}, el('span', {class: 'rm-av ai', text: t('ownerAiAvatar')}), 'Claude')
+            : step.owner === 'human' ? el('span', {class: 'rm-owner'}, el('span', {class: 'rm-av hu', text: '👤'}), t('ownerHuman'))
                 : el('span', {class: 'rm-owner muted', text: '—'});
 
         const prog = step.progress ?? (step.status === 'done' ? 100 : 0);
@@ -599,14 +678,14 @@ export class RoadmapPanel {
 
         const actions = step.deleted
             ? el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen', 'aria-label': 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreStep(step.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('restore'), 'aria-label': t('restore')}, text: '♻', on: {click: () => void this.restoreStep(step.id)}})
             )
             : el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'KI-Cursor hier setzen', 'aria-label': 'KI-Cursor hier setzen'}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Zeit buchen', 'aria-label': 'Zeit buchen'}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Notiz verlinken', 'aria-label': 'Notiz verlinken'}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Unterschritt hinzufügen', 'aria-label': 'Unterschritt hinzufügen'}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
-                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)', 'aria-label': 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('setCursor'), 'aria-label': t('setCursor')}, text: '◉', on: {click: () => void this.setActive(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('bookTime'), 'aria-label': t('bookTime')}, text: '⏱', on: {click: () => void this.bookTime(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('linkNote'), 'aria-label': t('linkNote')}, text: '🔗', on: {click: () => void this.linkNote(step.id)}}),
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('addSubStep'), 'aria-label': t('addSubStep')}, text: '＋', on: {click: () => void this.addStep(step.id)}}),
+                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: t('markDeleted'), 'aria-label': t('markDeleted')}, text: '🗑', on: {click: () => void this.deleteStep(step.id)}})
             );
 
         const indent = el('span', {class: 'rm-indent', style: {width: `${depth * 20}px`}});
@@ -618,12 +697,12 @@ export class RoadmapPanel {
                 el('code', {class: 'rm-id', text: step.id}),
                 el('span', {
                     class: nameCls,
-                    attrs: {title: expandable ? `${step.title} — klicken für Details` : step.title},
+                    attrs: {title: expandable ? t('clickForDetails', {title: step.title}) : step.title},
                     text: step.title,
                     on: expandable ? {click: () => this.toggleExpand(step.id)} : {}
                 }),
                 expandable
-                    ? el('span', {class: `rm-detail-dot${this.expanded.has(step.id) ? ' open' : ''}`, attrs: {title: 'Details / Bearbeiten'}, text: 'ⓘ', on: {click: () => this.toggleExpand(step.id)}})
+                    ? el('span', {class: `rm-detail-dot${this.expanded.has(step.id) ? ' open' : ''}`, attrs: {title: t('detailsEdit')}, text: 'ⓘ', on: {click: () => this.toggleExpand(step.id)}})
                     : null
             )
         );
@@ -663,21 +742,21 @@ export class RoadmapPanel {
             el('span', {class: 'rm-detail-title', text: step.title}),
             step.deleted
                 ? null
-                : el('button', {class: 'rm-btn ghost sm rm-detail-edit-btn', attrs: {type: 'button'}, text: '✎ Bearbeiten', on: {click: () => this.startEdit(step.id)}})
+                : el('button', {class: 'rm-btn ghost sm rm-detail-edit-btn', attrs: {type: 'button'}, text: t('editBtn'), on: {click: () => this.startEdit(step.id)}})
         );
 
         const boxes: HTMLElement[] = [];
         if (step.evaluation || step.acceptance) {
-            const box = el('div', {class: 'rm-detail-box'}, el('h4', {text: 'KI-Auswertung'}));
+            const box = el('div', {class: 'rm-detail-box'}, el('h4', {text: t('evaluation')}));
             if (step.evaluation) box.appendChild(el('p', {class: 'rm-quote', text: step.evaluation}));
-            if (step.acceptance) box.appendChild(el('p', {}, el('b', {text: 'Akzeptanz: '}), step.acceptance));
+            if (step.acceptance) box.appendChild(el('p', {}, el('b', {text: t('acceptanceLabel')}), step.acceptance));
             boxes.push(box);
         }
         if (step.activity && step.activity.length > 0) {
-            const box = el('div', {class: 'rm-detail-box'}, el('h4', {text: 'Aktivität'}));
+            const box = el('div', {class: 'rm-detail-box'}, el('h4', {text: t('activity')}));
             const log = el('ul', {class: 'rm-log'});
             for (const ev of [...step.activity].reverse()) {
-                const when = ev.at ? new Date(ev.at).toLocaleString('de-DE', {hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'}) : '';
+                const when = ev.at ? formatDateTime(ev.at, {hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'}) : '';
                 log.appendChild(el('li', {},
                     el('span', {class: 'rm-log-t', text: when}),
                     el('span', {}, el('span', {class: 'rm-log-who', text: ev.who}), ` ${ev.what}`)
@@ -687,17 +766,17 @@ export class RoadmapPanel {
             boxes.push(box);
         }
         if (boxes.length === 0) {
-            boxes.push(el('div', {class: 'rm-detail-box'}, el('p', {class: 'rm-detail-empty', text: 'Noch keine Auswertung/Akzeptanz. „✎ Bearbeiten" fügt sie hinzu.'})));
+            boxes.push(el('div', {class: 'rm-detail-box'}, el('p', {class: 'rm-detail-empty', text: t('noEvaluation')})));
         }
         return [head, el('div', {class: 'rm-detail-inner'}, ...boxes)];
     }
 
     /** Edit form: title, evaluation, acceptance — persisted via mutate(). */
     private renderDetailEdit(step: RoadmapStep): HTMLElement[] {
-        const titleInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', value: step.title, placeholder: 'Titel'}}) as HTMLInputElement;
-        const evalArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '4', placeholder: 'KI-Auswertung / Rationale …'}}) as HTMLTextAreaElement;
+        const titleInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', value: step.title, placeholder: t('titleLabel')}}) as HTMLInputElement;
+        const evalArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '4', placeholder: t('evaluationPlaceholder')}}) as HTMLTextAreaElement;
         evalArea.value = step.evaluation ?? '';
-        const accArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '2', placeholder: 'Akzeptanzkriterien (Definition of Done) …'}}) as HTMLTextAreaElement;
+        const accArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '2', placeholder: t('acceptancePlaceholder')}}) as HTMLTextAreaElement;
         accArea.value = step.acceptance ?? '';
 
         const save = (): void => void this.saveEdit(step.id, {
@@ -711,15 +790,15 @@ export class RoadmapPanel {
 
         const head = el('div', {class: 'rm-detail-head'},
             el('code', {class: 'rm-id', text: step.id}),
-            el('span', {class: 'rm-detail-title muted', text: 'Bearbeiten'})
+            el('span', {class: 'rm-detail-title muted', text: tc('edit')})
         );
         const form = el('div', {class: 'rm-detail-editform'},
-            field('Titel', titleInput),
-            field('KI-Auswertung', evalArea),
-            field('Akzeptanz', accArea),
+            field(t('titleLabel'), titleInput),
+            field(t('evaluation'), evalArea),
+            field(t('acceptance'), accArea),
             el('div', {class: 'rm-edit-actions'},
-                el('button', {class: 'rm-btn sm', attrs: {type: 'button'}, text: 'Speichern', on: {click: save}}),
-                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button'}, text: 'Abbrechen', on: {click: () => this.cancelEdit(step.id)}})
+                el('button', {class: 'rm-btn sm', attrs: {type: 'button'}, text: tc('save'), on: {click: save}}),
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button'}, text: tc('cancel'), on: {click: () => this.cancelEdit(step.id)}})
             )
         );
         return [head, form];
@@ -763,10 +842,10 @@ export class RoadmapPanel {
 
     private async addStep(parentId: string | null): Promise<void> {
         const title = await promptDialog({
-            title: parentId === null ? 'Neuer Schritt' : 'Neuer Unterschritt',
-            label: 'Titel',
-            confirmLabel: 'Anlegen',
-            cancelLabel: 'Abbrechen'
+            title: parentId === null ? t('newStep') : t('newSubStep'),
+            label: t('titleLabel'),
+            confirmLabel: tc('create'),
+            cancelLabel: tc('cancel')
         });
         if (!title) return;
         await this.mutate((rm) => {
@@ -817,16 +896,16 @@ export class RoadmapPanel {
         const step = findStepLocal(this.roadmap?.steps ?? [], id);
         if (!step) return;
         const hours = await formDialog({
-            title: 'Zeit buchen',
+            title: t('bookTime'),
             message: step.title,
             fields: [
-                {name: 'planned', label: 'Geplant (h)', type: 'number', value: step.plannedHours !== undefined ? String(step.plannedHours) : ''},
-                {name: 'actual', label: 'Umgesetzt (h)', type: 'number', value: step.actualHours !== undefined ? String(step.actualHours) : ''}
+                {name: 'planned', label: t('plannedHours'), type: 'number', value: step.plannedHours !== undefined ? String(step.plannedHours) : ''},
+                {name: 'actual', label: t('actualHours'), type: 'number', value: step.actualHours !== undefined ? String(step.actualHours) : ''}
             ],
-            confirmLabel: 'Speichern',
-            cancelLabel: 'Abbrechen',
+            confirmLabel: tc('save'),
+            cancelLabel: tc('cancel'),
             validate: (v) => [v.planned!, v.actual!].some((x) => x !== '' && !Number.isFinite(Number.parseFloat(x)))
-                ? 'Stunden als Zahl angeben (leer lassen für unverändert).'
+                ? t('hoursInvalid')
                 : null
         });
         if (hours === null) return;
@@ -846,13 +925,13 @@ export class RoadmapPanel {
         // Resolve to an existing note before storing, so no dead links are created.
         const resolve = this.opts.resolveNoteLink;
         const raw = await promptDialog({
-            title: 'Notiz verlinken',
-            label: 'Titel, Alias oder Pfad',
-            placeholder: 'z. B. Memory/projekt/notiz.md',
-            confirmLabel: 'Verlinken',
-            cancelLabel: 'Abbrechen',
+            title: t('linkNote'),
+            label: t('noteRef'),
+            placeholder: t('noteRefPlaceholder'),
+            confirmLabel: t('link'),
+            cancelLabel: tc('cancel'),
             validate: (v) => v !== '' && resolve !== undefined && resolve(v) === null
-                ? `Keine Notiz gefunden für „${v}“. Exakter Titel, Alias oder Pfad.`
+                ? t('noteNotFound', {ref: v})
                 : null
         });
         if (!raw) return;
@@ -873,10 +952,10 @@ export class RoadmapPanel {
      */
     private async deleteStep(id: string): Promise<void> {
         const ok = await confirmDialog({
-            title: 'Schritt löschen?',
-            message: 'Der Schritt wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.',
-            confirmLabel: 'Löschen',
-            cancelLabel: 'Abbrechen',
+            title: t('deleteStepTitle'),
+            message: t('deleteStepMessage'),
+            confirmLabel: tc('delete'),
+            cancelLabel: tc('cancel'),
             danger: true
         });
         if (!ok) return;

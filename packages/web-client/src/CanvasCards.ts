@@ -3,6 +3,17 @@ import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
 import {resolveColor, SIDES} from './CanvasGeometry.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('canvasCards', {
+    noteMissing: '(note not found in vault)',
+    resize: 'Resize',
+    dragEdge: 'Drag to create edge ({side})',
+    top: 'top',
+    right: 'right',
+    bottom: 'bottom',
+    left: 'left'
+});
 
 /**
  * DOM for canvas cards and group frames (plan P7 / D2). Every element
@@ -63,7 +74,7 @@ export interface CardOptions {
 /** Title plus a 320-char preview of the note, filled in asynchronously. */
 const populateFileCard = (card: HTMLElement, fileId: string): void => {
     const title = el('div', {class: 'canvas-card-file-title', text: fileId});
-    const preview = el('div', {class: 'canvas-card-file-preview', text: 'loading…'});
+    const preview = el('div', {class: 'canvas-card-file-preview', text: tc('loading')});
 
     card.appendChild(title);
     card.appendChild(preview);
@@ -74,7 +85,7 @@ const populateFileCard = (card: HTMLElement, fileId: string): void => {
         const snippet = note.content.slice(0, 320);
         preview.textContent = snippet + (note.content.length > 320 ? '…' : '');
     }).catch(() => {
-        preview.textContent = '(note not found in vault)';
+        preview.textContent = t('noteMissing');
         preview.classList.add('canvas-card-file-missing');
     });
 };
@@ -106,7 +117,7 @@ const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
     }
 
     if (opts.editable) {
-        const handle = el('div', {class: 'canvas-card-resize', attrs: {title: 'Resize'}});
+        const handle = el('div', {class: 'canvas-card-resize', attrs: {title: t('resize')}});
         handle.dataset.role = 'resize';
         card.appendChild(handle);
 
@@ -116,7 +127,7 @@ const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
         for (const side of SIDES) {
             const anchor = el('div', {
                 class: `canvas-card-anchor canvas-card-anchor-${side}`,
-                attrs: {title: `Drag to create edge (${side})`}
+                attrs: {title: t('dragEdge', {side: t(side)})}
             });
             anchor.dataset.role = 'anchor';
             anchor.dataset.side = side;

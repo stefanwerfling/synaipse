@@ -69,7 +69,10 @@ const MIGRATED = [
     'Login', 'Search', 'Settings', 'Shortcuts', 'Tabs', 'TagBar', 'TagPicker', 'Toast', 'Topbar',
     // S4b notes and editor
     'Drafts', 'Editor', 'EditorToolbar', 'HistoryPanel', 'MarkdownPreview', 'NoteLinks', 'NoteToolbar', 'NotesPanel',
-    'NotesSidebar', 'NotesTree', 'PreviewDialog', 'SummarizeDialog', 'Toc'
+    'NotesSidebar', 'NotesTree', 'PreviewDialog', 'SummarizeDialog', 'Toc',
+    // S4c panels
+    'ActivityPanel', 'AuditPanel', 'BenchmarksPanel', 'CanvasBottomBar', 'CanvasCards', 'CanvasPanel', 'CanvasRenderer',
+    'CardEditor', 'ChatPanel', 'ChatSidebar', 'InboxPanel', 'JobsPanel', 'RoadmapPanel'
 ];
 
 const placeholders = (message: string): string[] => [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort();
@@ -126,14 +129,29 @@ describe('message tables', () => {
 });
 
 describe('migrated modules', () => {
-    // A quoted literal with a word in it, in a spot the user reads.
-    const UI_LITERAL = /\b(text|title|placeholder|label|subtitle|message|confirmLabel|cancelLabel|closeLabel|'aria-label')\s*:\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}/;
-    const ASSIGNED = /\.(textContent|title)\s*=\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}/;
-    const TOAST = /\b(toast|toastError)\(\s*['`]/;
+    // A quoted literal in a spot the user reads; group 1 is its text.
+    const UI_LITERAL = /\b(?:text|title|placeholder|label|subtitle|message|confirmLabel|cancelLabel|closeLabel|'aria-label')\s*:\s*['`]([^'`]*)['`]/g;
+    const ASSIGNED = /\.(?:textContent|title)\s*=\s*['`]([^'`]*)['`]/g;
+    const TOAST = /\b(?:toast|toastError)\(\s*['`]([^'`]*)['`]/g;
     // A text child on a line of its own: el('label', {}, input, 'preview').
-    const BARE_CHILD = /^\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}[^'`]*['`],?\s*$/;
-    // Brand name; `demote` is a ranking-signal name like fulltext / semantic.
-    const ALLOWED = [/text: 'Synaipse'/, /text: 'demote'/];
+    const BARE_CHILD = /^\s*['`]([^'`]*)['`],?\s*$/g;
+    // Brand and product names, the same in every language.
+    const ALLOWED = new Set(['Synaipse', 'demote', 'Benchmarks', 'URL', '🔎 Web']);
+    // A line may say why its literals are not UI text: `// i18n: id` or `// i18n: example`.
+    const MARKED = /\/\/ i18n: (id|example)\b/;
+
+    /** Words a reader sees, as opposed to ids (snake_case, camelCase, with digits) and paths or URLs. */
+    const isText = (value: string): boolean => {
+        // Interpolations are code, including a nested template cut off by the pattern.
+        const plain = value.replace(/\$\{[^}]*\}/g, '').replace(/\$\{.*$/, '').trim();
+        if (!/[A-Za-zÄÖÜäöü]{3,}/.test(plain)) return false;
+        if (ALLOWED.has(plain)) return false;
+        if (!/\s/.test(plain)) {
+            if (/[_\d]|[a-z][A-Z]/.test(plain)) return false;
+            if (/[/.:-]/.test(plain)) return false;
+        }
+        return true;
+    };
 
     it('keep no hard-coded UI text', () => {
         const found: string[] = [];
@@ -148,13 +166,17 @@ describe('migrated modules', () => {
                     return;
                 }
                 const code = line.trim();
-                if (code.startsWith('//') || code.startsWith('*')) return;
-                const bare = line.replace(/\$\{[^}]*\}/g, '');
-                if (!(UI_LITERAL.test(bare) || ASSIGNED.test(bare) || TOAST.test(bare) || BARE_CHILD.test(line))) return;
-                if (ALLOWED.some((ok) => ok.test(line))) return;
-                found.push(`${name}.ts:${i + 1}: ${code}`);
+                if (code.startsWith('//') || code.startsWith('*') || MARKED.test(line)) return;
+                const literals = [UI_LITERAL, ASSIGNED, TOAST, BARE_CHILD].flatMap((re) => [...line.matchAll(re)].map((m) => m[1]!));
+                if (literals.some(isText)) found.push(`${name}.ts:${i + 1}: ${code}`);
             });
         }
         expect(found).toEqual([]);
+    });
+
+    it('isText tells UI words from ids, paths and brands', () => {
+        expect(['preview', 'Save', 'No notes yet', 'loading…'].map(isText)).toEqual([true, true, true, true]);
+        expect(['in_progress', 'range24h', 'aiActive', 'Crawler/', 'https://x.org', 'Synaipse', ' · '].map(isText))
+            .toEqual([false, false, false, false, false, false, false]);
     });
 });

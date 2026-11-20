@@ -1,5 +1,28 @@
 import {api, type InboxItem, type InboxRef} from './Api.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('inboxPanel', {
+    title: 'Inbox',
+    subtitle: 'What agents noted in passing via remember. Accept appends the text to a note or creates a new one, Discard removes the entry. Both are recorded in the version history.',
+    project: 'Project',
+    noEntries: '— no entries —',
+    newTitleMissing: 'The title for the new note is missing.',
+    noteNotFound: 'No note “{name}” found.',
+    empty: 'The inbox is empty. Entries appear when an agent calls synaipse_remember.',
+    summaryPartial: '{total} entries, the newest {shown} with suggestions',
+    summary: '{count} entry|{count} entries',
+    openInbox: 'Open inbox note',
+    alreadyIn: 'Probably already in {notes} – then the entry can go.',
+    otherNote: 'Other note …',
+    newNote: 'New note …',
+    otherPlaceholder: 'Title or path',
+    newPlaceholder: 'Title of the new note',
+    to: 'To',
+    accept: 'Accept',
+    done: 'Done',
+    discard: 'Discard'
+});
 
 /**
  * The `remember` inbox (plan P8 / C5): what agents noted in passing, per
@@ -47,10 +70,10 @@ export class InboxPanel {
 
         const header = el('div', {class: 'rm-head'},
             el('div', {class: 'rm-head-left'},
-                el('h1', {class: 'rm-title', text: 'Inbox'}),
-                el('p', {class: 'rm-sub', text: 'Was Agenten per remember nebenbei notiert haben. Übernehmen hängt den Text an eine Notiz an oder legt eine neue an, Verwerfen entfernt den Eintrag. Beides steht in der Versionsgeschichte.'}),
+                el('h1', {class: 'rm-title', text: t('title')}),
+                el('p', {class: 'rm-sub', text: t('subtitle')}),
                 el('div', {class: 'rm-picker'},
-                    el('span', {class: 'rm-picker-label', text: 'Projekt'}),
+                    el('span', {class: 'rm-picker-label', text: t('project')}),
                     this.picker
                 ),
                 this.summary
@@ -80,7 +103,7 @@ export class InboxPanel {
         }
 
         clear(this.picker);
-        if (inboxes.length === 0) this.picker.appendChild(el('option', {text: '— keine Einträge —', attrs: {value: ''}}));
+        if (inboxes.length === 0) this.picker.appendChild(el('option', {text: t('noEntries'), attrs: {value: ''}}));
         for (const i of inboxes) {
             this.picker.appendChild(el('option', {text: `${i.project} (${i.entries})`, attrs: {value: i.project}}));
         }
@@ -157,7 +180,7 @@ export class InboxPanel {
         let target: {id: string} | {newTitle: string};
         if (state.target === NEW) {
             if (state.newTitle.trim() === '') {
-                this.error = {key: this.keyOf(entry), message: 'Titel für die neue Notiz fehlt.'};
+                this.error = {key: this.keyOf(entry), message: t('newTitleMissing')};
                 this.render();
                 return;
             }
@@ -165,7 +188,7 @@ export class InboxPanel {
         } else if (state.target === OTHER) {
             const id = this.opts.resolveNoteLink(state.other.trim());
             if (id === null) {
-                this.error = {key: this.keyOf(entry), message: `Keine Notiz „${state.other.trim()}“ gefunden.`};
+                this.error = {key: this.keyOf(entry), message: t('noteNotFound', {name: state.other.trim()})};
                 this.render();
                 return;
             }
@@ -194,14 +217,14 @@ export class InboxPanel {
 
         if (this.project === null) {
             this.summary.textContent = '';
-            this.listHost.appendChild(el('div', {class: 'rm-empty', text: 'Die Inbox ist leer. Einträge entstehen, wenn ein Agent synaipse_remember aufruft.'}));
+            this.listHost.appendChild(el('div', {class: 'rm-empty', text: t('empty')}));
             return;
         }
 
         const shown = this.entries.length;
         this.summary.textContent = shown < this.total
-            ? `${this.total} Einträge, die neuesten ${shown} mit Vorschlägen`
-            : `${this.total} ${this.total === 1 ? 'Eintrag' : 'Einträge'}`;
+            ? t('summaryPartial', {total: this.total, shown})
+            : t('summary', {count: this.total});
 
         let day = '';
         for (const entry of this.entries) {
@@ -224,10 +247,10 @@ export class InboxPanel {
 
         const meta = el('div', {class: 'ib-meta'},
             el('span', {class: 'ib-time', text: entry.time}),
-            ...entry.tags.map((t) => el('span', {class: 'ib-tag', text: `#${t}`})),
+            ...entry.tags.map((tag) => el('span', {class: 'ib-tag', text: `#${tag}`})),
             el('button', {
                 class: 'ib-link',
-                attrs: {type: 'button', title: 'Inbox-Notiz öffnen'},
+                attrs: {type: 'button', title: t('openInbox')},
                 text: entry.inbox.split('/').pop() ?? entry.inbox,
                 on: {click: () => this.opts.onOpenNote(entry.inbox)}
             })
@@ -236,14 +259,15 @@ export class InboxPanel {
         const card = el('article', {class: 'ib-card'}, meta, text);
 
         if (entry.alreadyIn.length > 0) {
+            const [before = '', after = ''] = t('alreadyIn').split('{notes}');
             card.appendChild(el('div', {class: 'ib-already'},
-                el('span', {text: 'Steht vermutlich schon in '}),
+                el('span', {text: before}),
                 ...entry.alreadyIn.flatMap((d, i) => [
                     ...(i > 0 ? [el('span', {text: ', '})] : []),
                     el('button', {class: 'ib-link', attrs: {type: 'button'}, text: d.title, on: {click: () => this.opts.onOpenNote(d.id)}}),
                     el('span', {class: 'ib-sim', text: ` ${Math.round(d.similarity * 100)} %`})
                 ]),
-                el('span', {text: ' – dann kann der Eintrag weg.'})
+                el('span', {text: after})
             ));
         }
 
@@ -254,28 +278,28 @@ export class InboxPanel {
             seen.add(n.id);
             select.appendChild(el('option', {text: n.title, attrs: {value: n.id, title: n.id}}));
         }
-        select.appendChild(el('option', {text: 'Andere Notiz …', attrs: {value: OTHER}}));
-        select.appendChild(el('option', {text: 'Neue Notiz …', attrs: {value: NEW}}));
+        select.appendChild(el('option', {text: t('otherNote'), attrs: {value: OTHER}}));
+        select.appendChild(el('option', {text: t('newNote'), attrs: {value: NEW}}));
         select.value = state.target;
 
         const extra = state.target === OTHER
-            ? el('input', {class: 'ib-input', attrs: {type: 'text', placeholder: 'Titel oder Pfad', value: state.other}, on: {input: (e) => { state.other = (e.target as HTMLInputElement).value; }}})
+            ? el('input', {class: 'ib-input', attrs: {type: 'text', placeholder: t('otherPlaceholder'), value: state.other}, on: {input: (e) => { state.other = (e.target as HTMLInputElement).value; }}})
             : state.target === NEW
-                ? el('input', {class: 'ib-input', attrs: {type: 'text', placeholder: 'Titel der neuen Notiz', value: state.newTitle}, on: {input: (e) => { state.newTitle = (e.target as HTMLInputElement).value; }}})
+                ? el('input', {class: 'ib-input', attrs: {type: 'text', placeholder: t('newPlaceholder'), value: state.newTitle}, on: {input: (e) => { state.newTitle = (e.target as HTMLInputElement).value; }}})
                 : null;
 
         const actions = el('div', {class: 'ib-actions'},
-            el('span', {class: 'rm-picker-label', text: 'Nach'}),
+            el('span', {class: 'rm-picker-label', text: t('to')}),
             select,
             ...(extra !== null ? [extra] : []),
-            el('button', {class: 'rm-btn sm', attrs: {type: 'button', disabled: this.busy}, text: 'Übernehmen', on: {click: () => this.promote(entry, state)}}),
+            el('button', {class: 'rm-btn sm', attrs: {type: 'button', disabled: this.busy}, text: t('accept'), on: {click: () => this.promote(entry, state)}}),
             el('button', {
                 class: 'rm-btn sm ghost',
                 attrs: {type: 'button', disabled: this.busy},
-                text: state.editing ? 'Fertig' : 'Bearbeiten',
+                text: state.editing ? t('done') : tc('edit'),
                 on: {click: () => { state.editing = !state.editing; this.render(); }}
             }),
-            el('button', {class: entry.alreadyIn.length > 0 ? 'rm-btn sm' : 'rm-btn sm ghost', attrs: {type: 'button', disabled: this.busy}, text: 'Verwerfen', on: {click: () => this.discard(entry)}})
+            el('button', {class: entry.alreadyIn.length > 0 ? 'rm-btn sm' : 'rm-btn sm ghost', attrs: {type: 'button', disabled: this.busy}, text: t('discard'), on: {click: () => this.discard(entry)}})
         );
         card.appendChild(actions);
 

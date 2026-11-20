@@ -8,7 +8,92 @@ import {
 } from './Api.js';
 import {clear, el, portalHost} from './Dom.js';
 import {confirmDialog} from './Dialogs.js';
+import {defineMessages, formatDateTime, tc} from './I18n.js';
 import {toastError} from './Toast.js';
+
+const t = defineMessages('jobsPanel', {
+    relinkLabel: 'Relink notes',
+    relinkDescription: 'Add a "## Related" section to notes that lack one.',
+    prefixAll: 'Prefix (empty = all notes)',
+    prefixAllPlaceholder: 'leave empty for all notes',
+    limit: 'Limit',
+    noLimit: 'no limit',
+    relinkForce: 'force (rebuild even if already linked)',
+    useLlm: 'use LLM (smarter filter, costs quota)',
+    compileLabel: 'Compile crawler content',
+    compileDescription: 'Run crawled articles through the LLM into .compiled.md summaries.',
+    prefix: 'Prefix',
+    compileForce: 'force (rebuild unchanged)',
+    giteaLabel: 'Crawl Gitea issues',
+    giteaDescription: 'Import issues from a Gitea repo (with consent-pending frontmatter).',
+    baseUrl: 'Base URL',
+    owner: 'Owner (user or org)',
+    repository: 'Repository',
+    project: 'Project (target folder + frontmatter.project)',
+    projectPlaceholder: 'memory project name',
+    apiToken: 'API token (optional, for private repos)',
+    optional: 'optional',
+    issueState: 'Issue state',
+    stateOpen: 'open',
+    stateClosed: 'closed',
+    stateAll: 'all',
+    starsLabel: 'Crawl GitHub stars',
+    starsDescription: 'Import your starred repositories with their READMEs.',
+    username: 'Username (empty = token owner)',
+    readmeMax: 'Max README chars',
+    targetFolder: 'Target folder',
+    githubTokenHint: 'Token is read from the server’s GITHUB_TOKEN.',
+    devtoLabel: 'Crawl dev.to',
+    devtoDescription: 'Import the latest dev.to articles.',
+    perPage: 'Articles per page',
+    bodyMax: 'Max body chars (0 = skip full fetch)',
+    downloadImages: 'download inline images',
+    devtoKeyHint: 'API key is read from the server’s DEVTO_API_KEY.',
+    codeLabel: 'Crawl code repository',
+    codeDescription: 'Walk a repository on the server host into per-file notes.',
+    repoPath: 'Repo path (on the server)',
+    repoName: 'Repo name (defaults to folder name)',
+    withSource: 'include full source in each note',
+    inUnderMinute: 'in <1 min',
+    inMinutes: 'in {count} min',
+    justNow: 'just now',
+    minutesAgo: '{count} min ago',
+    title: 'Jobs',
+    newJobBtn: '＋ New job',
+    empty: 'No jobs yet. Click "＋ New job" to add one — pick a provider, configure it, and give it a schedule (or leave the cron empty for a manual job).',
+    manual: 'manual',
+    never: 'never',
+    lastResult: '{time} ({result})',
+    toggleFailed: 'Could not toggle the job',
+    runNowTitle: 'Run this job once, right now',
+    runNow: 'Run now',
+    runNowFailed: 'Run now failed',
+    deleteTitle: 'Delete job?',
+    deleteMessage: 'The scheduled job "{name}" will be deleted.',
+    deleteFailed: 'Delete failed',
+    enabledTitle: 'Enabled',
+    next: 'next: {time}',
+    last: 'last: {time}',
+    unparseable: '(unparseable params)',
+    yourStars: '(your stars)',
+    latestArticles: 'latest articles',
+    allNotes: '(all notes)',
+    queued: 'queued',
+    waitsFor: 'waits for the running {type} job',
+    progressFailed: '{done}/{total} · {failed} failed',
+    editJob: 'Edit job',
+    newJob: 'New job',
+    namePlaceholder: 'e.g. "Nightly relink"',
+    cronPlaceholder: 'empty = manual · every 2h · daily 08:00',
+    paramsLocked: 'Parameters can’t be edited — to change them, delete this job and create a new one.',
+    provider: 'Provider',
+    jobName: 'Job name',
+    schedule: 'Schedule (cron)',
+    enabled: 'enabled',
+    nameRequired: 'Job name is required.',
+    saveFailed: 'Save failed: {error}',
+    fieldRequired: '{label} is required.'
+});
 
 /**
  * Jobs tab, redesigned around persistent jobs:
@@ -41,6 +126,8 @@ interface FieldSpec {
     defaultValue?: string | number | boolean;
     /** Small helper note under the field (e.g. "falls back to env"). */
     hint?: string;
+    /** Display text per select option; the option value stays the API value. */
+    optionLabels?: Readonly<Record<string, string>>;
 }
 
 interface ProviderSpec {
@@ -50,75 +137,77 @@ interface ProviderSpec {
     fields: readonly FieldSpec[];
 }
 
-const PROVIDERS: readonly ProviderSpec[] = [
+/** Built per call so the labels follow the UI language. */
+const providers = (): readonly ProviderSpec[] => [
     {
         type: 'relink',
-        label: 'Relink notes',
-        description: 'Add a "## Related" section to notes that lack one.',
+        label: t('relinkLabel'),
+        description: t('relinkDescription'),
         fields: [
-            {key: 'prefix', label: 'Prefix (empty = all notes)', type: 'text', placeholder: 'leave empty for all notes'},
-            {key: 'limit', label: 'Limit', type: 'number', placeholder: 'no limit'},
-            {key: 'force', label: 'force (rebuild even if already linked)', type: 'checkbox'},
-            {key: 'useLlm', label: 'use LLM (smarter filter, costs quota)', type: 'checkbox'}
+            {key: 'prefix', label: t('prefixAll'), type: 'text', placeholder: t('prefixAllPlaceholder')},
+            {key: 'limit', label: t('limit'), type: 'number', placeholder: t('noLimit')},
+            {key: 'force', label: t('relinkForce'), type: 'checkbox'},
+            {key: 'useLlm', label: t('useLlm'), type: 'checkbox'}
         ]
     },
     {
         type: 'compile',
-        label: 'Compile crawler content',
-        description: 'Run crawled articles through the LLM into .compiled.md summaries.',
+        label: t('compileLabel'),
+        description: t('compileDescription'),
         fields: [
-            {key: 'prefix', label: 'Prefix', type: 'text', placeholder: 'Crawler/', defaultValue: 'Crawler/'},
-            {key: 'limit', label: 'Limit', type: 'number', placeholder: 'no limit'},
-            {key: 'force', label: 'force (rebuild unchanged)', type: 'checkbox'}
+            {key: 'prefix', label: t('prefix'), type: 'text', placeholder: 'Crawler/', defaultValue: 'Crawler/'},
+            {key: 'limit', label: t('limit'), type: 'number', placeholder: t('noLimit')},
+            {key: 'force', label: t('compileForce'), type: 'checkbox'}
         ]
     },
     {
         type: 'crawl-gitea',
-        label: 'Crawl Gitea issues',
-        description: 'Import issues from a Gitea repo (with consent-pending frontmatter).',
+        label: t('giteaLabel'),
+        description: t('giteaDescription'),
         fields: [
-            {key: 'baseUrl', label: 'Base URL', type: 'text', placeholder: 'https://gitea.example.com', required: true},
-            {key: 'owner', label: 'Owner (user or org)', type: 'text', placeholder: 'owner-or-org', required: true},
-            {key: 'repo', label: 'Repository', type: 'text', placeholder: 'repository', required: true},
-            {key: 'project', label: 'Project (target folder + frontmatter.project)', type: 'text', placeholder: 'memory project name', required: true},
-            {key: 'token', label: 'API token (optional, for private repos)', type: 'password', placeholder: 'optional'},
-            {key: 'state', label: 'Issue state', type: 'select', options: ['open', 'closed', 'all'], defaultValue: 'open'}
+            {key: 'baseUrl', label: t('baseUrl'), type: 'text', placeholder: 'https://gitea.example.com', required: true},
+            {key: 'owner', label: t('owner'), type: 'text', placeholder: 'owner-or-org', required: true},
+            {key: 'repo', label: t('repository'), type: 'text', placeholder: 'repository', required: true}, // i18n: example
+            {key: 'project', label: t('project'), type: 'text', placeholder: t('projectPlaceholder'), required: true},
+            {key: 'token', label: t('apiToken'), type: 'password', placeholder: t('optional')},
+            {key: 'state', label: t('issueState'), type: 'select', options: ['open', 'closed', 'all'], defaultValue: 'open',
+                optionLabels: {open: t('stateOpen'), closed: t('stateClosed'), all: t('stateAll')}}
         ]
     },
     {
         type: 'crawl-github-stars',
-        label: 'Crawl GitHub stars',
-        description: 'Import your starred repositories with their READMEs.',
+        label: t('starsLabel'),
+        description: t('starsDescription'),
         fields: [
-            {key: 'username', label: 'Username (empty = token owner)', type: 'text', placeholder: 'octocat'},
-            {key: 'readmeMax', label: 'Max README chars', type: 'number', placeholder: '3000'},
-            {key: 'pathPrefix', label: 'Target folder', type: 'text', placeholder: 'Crawler/github/starred', hint: 'Token is read from the server’s GITHUB_TOKEN.'}
+            {key: 'username', label: t('username'), type: 'text', placeholder: 'octocat'}, // i18n: example
+            {key: 'readmeMax', label: t('readmeMax'), type: 'number', placeholder: '3000'},
+            {key: 'pathPrefix', label: t('targetFolder'), type: 'text', placeholder: 'Crawler/github/starred', hint: t('githubTokenHint')}
         ]
     },
     {
         type: 'crawl-devto',
-        label: 'Crawl dev.to',
-        description: 'Import the latest dev.to articles.',
+        label: t('devtoLabel'),
+        description: t('devtoDescription'),
         fields: [
-            {key: 'perPage', label: 'Articles per page', type: 'number', placeholder: '100'},
-            {key: 'bodyMax', label: 'Max body chars (0 = skip full fetch)', type: 'number', placeholder: '3000'},
-            {key: 'pathPrefix', label: 'Target folder', type: 'text', placeholder: 'Crawler/devto/articles'},
-            {key: 'downloadImages', label: 'download inline images', type: 'checkbox', defaultValue: true, hint: 'API key is read from the server’s DEVTO_API_KEY.'}
+            {key: 'perPage', label: t('perPage'), type: 'number', placeholder: '100'},
+            {key: 'bodyMax', label: t('bodyMax'), type: 'number', placeholder: '3000'},
+            {key: 'pathPrefix', label: t('targetFolder'), type: 'text', placeholder: 'Crawler/devto/articles'},
+            {key: 'downloadImages', label: t('downloadImages'), type: 'checkbox', defaultValue: true, hint: t('devtoKeyHint')}
         ]
     },
     {
         type: 'crawl-code',
-        label: 'Crawl code repository',
-        description: 'Walk a repository on the server host into per-file notes.',
+        label: t('codeLabel'),
+        description: t('codeDescription'),
         fields: [
-            {key: 'repoPath', label: 'Repo path (on the server)', type: 'text', placeholder: '/abs/path/to/repo', required: true},
-            {key: 'repoName', label: 'Repo name (defaults to folder name)', type: 'text', placeholder: 'my-repo'},
-            {key: 'withSource', label: 'include full source in each note', type: 'checkbox'}
+            {key: 'repoPath', label: t('repoPath'), type: 'text', placeholder: '/abs/path/to/repo', required: true},
+            {key: 'repoName', label: t('repoName'), type: 'text', placeholder: 'my-repo'},
+            {key: 'withSource', label: t('withSource'), type: 'checkbox'}
         ]
     }
 ];
 
-const providerByType = new Map(PROVIDERS.map((p) => [p.type, p]));
+const providerByType = (type: JobType): ProviderSpec | undefined => providers().find((p) => p.type === type);
 
 const formatTime = (ts: number): string => {
     const now = Date.now();
@@ -126,10 +215,10 @@ const formatTime = (ts: number): string => {
     const absDiff = Math.abs(diff);
     if (absDiff < 12 * 60 * 60 * 1000) {
         const minutes = Math.round(absDiff / 60_000);
-        if (diff > 0) return minutes < 1 ? 'in <1 min' : `in ${minutes} min`;
-        return minutes < 1 ? 'just now' : `${minutes} min ago`;
+        if (diff > 0) return minutes < 1 ? t('inUnderMinute') : t('inMinutes', {count: minutes});
+        return minutes < 1 ? t('justNow') : t('minutesAgo', {count: minutes});
     }
-    return new Date(ts).toLocaleString();
+    return formatDateTime(ts);
 };
 
 export interface JobsPanelOptions {
@@ -161,18 +250,18 @@ export class JobsPanel {
         this.listHost = el('div', {class: 'jobs-list'});
 
         this.element.appendChild(el('div', {class: 'jobs-head'},
-            el('h2', {text: 'Jobs'}),
+            el('h2', {text: t('title')}),
             el('div', {class: 'jobs-head-actions'},
                 el('button', {
                     class: 'btn jobs-refresh',
                     attrs: {type: 'button'},
-                    text: 'Refresh',
+                    text: tc('refresh'),
                     on: {click: () => void this.refresh()}
                 }),
                 el('button', {
                     class: 'btn btn-primary jobs-new-btn',
                     attrs: {type: 'button'},
-                    text: '＋ New job',
+                    text: t('newJobBtn'),
                     on: {click: () => this.openModal('create')}
                 })
             )
@@ -222,8 +311,7 @@ export class JobsPanel {
         if (this.schedules.length === 0) {
             this.listHost.appendChild(el('div', {
                 class: 'jobs-empty',
-                text: 'No jobs yet. Click "＋ New job" to add one — pick a provider, '
-                    + 'configure it, and give it a schedule (or leave the cron empty for a manual job).'
+                text: t('empty')
             }));
             return;
         }
@@ -234,13 +322,13 @@ export class JobsPanel {
     }
 
     private renderRow(s: Schedule): HTMLElement {
-        const provider = providerByType.get(s.jobType);
+        const provider = providerByType(s.jobType);
         const providerLabel = provider?.label ?? s.jobType;
-        const cronText = s.cron.trim() === '' ? 'manual' : s.cron;
+        const cronText = s.cron.trim() === '' ? t('manual') : s.cron;
         const nextText = s.nextRun !== undefined ? formatTime(s.nextRun) : '—';
         const lastText = s.lastRun !== undefined
-            ? `${formatTime(s.lastRun)} (${s.lastResult ?? 'ok'})`
-            : 'never';
+            ? t('lastResult', {time: formatTime(s.lastRun), result: s.lastResult ?? 'ok'})
+            : t('never');
 
         const enabledToggle = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
         enabledToggle.checked = s.enabled;
@@ -248,44 +336,44 @@ export class JobsPanel {
             void schedulesApi.update(s.id, {enabled: enabledToggle.checked})
                 .then(() => this.refresh())
                 .catch((cause) => {
-                    toastError('Could not toggle the job', cause);
+                    toastError(t('toggleFailed'), cause);
                     enabledToggle.checked = s.enabled;
                 });
         });
 
         const runNowBtn = el('button', {
             class: 'btn schedule-run-now',
-            attrs: {type: 'button', title: 'Run this job once, right now'},
-            text: 'Run now',
+            attrs: {type: 'button', title: t('runNowTitle')},
+            text: t('runNow'),
             on: {click: () => {
                 void schedulesApi.runNow(s.id)
                     .then(() => this.refresh())
-                    .catch((cause) => toastError('Run now failed', cause));
+                    .catch((cause) => toastError(t('runNowFailed'), cause));
             }}
         });
 
         const editBtn = el('button', {
             class: 'btn schedule-edit',
             attrs: {type: 'button'},
-            text: 'Edit',
+            text: tc('edit'),
             on: {click: () => this.openModal({edit: s})}
         });
 
         const deleteBtn = el('button', {
             class: 'btn btn-danger schedule-delete',
             attrs: {type: 'button'},
-            text: 'Delete',
+            text: tc('delete'),
             on: {click: () => {
                 void confirmDialog({
-                    title: 'Delete job?',
-                    message: `The scheduled job "${s.name}" will be deleted.`,
-                    confirmLabel: 'Delete',
+                    title: t('deleteTitle'),
+                    message: t('deleteMessage', {name: s.name}),
+                    confirmLabel: tc('delete'),
                     danger: true
                 }).then((ok) => {
                     if (!ok) return;
                     void schedulesApi.delete(s.id)
                         .then(() => this.refresh())
-                        .catch((cause) => toastError('Delete failed', cause));
+                        .catch((cause) => toastError(t('deleteFailed'), cause));
                 });
             }}
         });
@@ -303,15 +391,15 @@ export class JobsPanel {
         const row = el('div', {class: `schedule-row${s.enabled ? '' : ' schedule-row-disabled'}`},
             el('div', {class: 'schedule-row-main'},
                 el('div', {class: 'schedule-row-head'},
-                    el('label', {class: 'schedule-enabled', attrs: {title: 'Enabled'}}, enabledToggle, el('span')),
+                    el('label', {class: 'schedule-enabled', attrs: {title: t('enabledTitle')}}, enabledToggle, el('span')),
                     el('span', {class: 'schedule-name', text: s.name}),
                     el('span', {class: 'schedule-badge', text: providerLabel}),
                     el('code', {class: 'schedule-cron', text: cronText})
                 ),
                 el('div', {class: 'schedule-row-meta'},
                     el('span', {class: 'schedule-summary', text: this.paramSummary(s)}),
-                    el('span', {class: 'schedule-next', text: `next: ${nextText}`}),
-                    el('span', {class: 'schedule-last', text: `last: ${lastText}`})
+                    el('span', {class: 'schedule-next', text: t('next', {time: nextText})}),
+                    el('span', {class: 'schedule-last', text: t('last', {time: lastText})})
                 ),
                 progressWrap
             ),
@@ -335,7 +423,7 @@ export class JobsPanel {
         try {
             params = JSON.parse(s.jobParams) as Record<string, unknown>;
         } catch {
-            return '(unparseable params)';
+            return t('unparseable');
         }
 
         switch (s.jobType) {
@@ -345,12 +433,12 @@ export class JobsPanel {
                 return String(params.repoPath ?? '');
             case 'crawl-github-stars':
                 return params.username !== undefined && params.username !== ''
-                    ? `@${String(params.username)}` : '(your stars)';
+                    ? `@${String(params.username)}` : t('yourStars');
             case 'crawl-devto':
-                return 'latest articles';
+                return t('latestArticles');
             default: {
                 const prefix = (params.prefix as string | undefined) ?? '';
-                return prefix === '' ? '(all notes)' : prefix;
+                return prefix === '' ? t('allNotes') : prefix;
             }
         }
     }
@@ -365,12 +453,12 @@ export class JobsPanel {
         refs.bar.classList.toggle('failed', job.status === 'failed');
         refs.bar.classList.toggle('done', job.status === 'done');
         if (job.status === 'queued') {
-            refs.progressLabel.textContent = 'queued';
-            refs.currentLabel.textContent = `waits for the running ${job.type} job`;
+            refs.progressLabel.textContent = t('queued');
+            refs.currentLabel.textContent = t('waitsFor', {type: job.type});
             return;
         }
         refs.progressLabel.textContent = job.progress.failed > 0
-            ? `${job.progress.done}/${job.progress.total} · ${job.progress.failed} failed`
+            ? t('progressFailed', {done: job.progress.done, total: job.progress.total, failed: job.progress.failed})
             : `${job.progress.done}/${job.progress.total}`;
         refs.currentLabel.textContent = job.progress.current ?? '';
     }
@@ -427,16 +515,17 @@ export class JobsPanel {
         this.closeModal();
 
         const editing = mode !== 'create' ? mode.edit : null;
-        const initialType: JobType = editing?.jobType ?? PROVIDERS[0]!.type;
+        const specs = providers();
+        const initialType: JobType = editing?.jobType ?? specs[0]!.type;
 
         const backdrop = el('div', {class: 'jobs-modal-backdrop'});
         const panel = el('div', {class: 'jobs-modal'});
 
-        const title = el('h3', {class: 'jobs-modal-title', text: editing !== null ? 'Edit job' : 'New job'});
+        const title = el('h3', {class: 'jobs-modal-title', text: editing !== null ? t('editJob') : t('newJob')});
 
         // Provider picker (locked when editing — PUT can't change the type).
         const providerSelect = el('select', {class: 'job-input'},
-            ...PROVIDERS.map((p) => el('option', {attrs: {value: p.type}, text: p.label}))
+            ...specs.map((p) => el('option', {attrs: {value: p.type}, text: p.label}))
         ) as HTMLSelectElement;
         providerSelect.value = initialType;
         if (editing !== null) providerSelect.disabled = true;
@@ -444,11 +533,11 @@ export class JobsPanel {
         const fieldsHost = el('div', {class: 'jobs-modal-fields'});
         const nameInput = el('input', {
             class: 'job-input',
-            attrs: {type: 'text', placeholder: 'e.g. "Nightly relink"'}
+            attrs: {type: 'text', placeholder: t('namePlaceholder')}
         }) as HTMLInputElement;
         const cronInput = el('input', {
             class: 'job-input',
-            attrs: {type: 'text', placeholder: 'empty = manual · every 2h · daily 08:00'}
+            attrs: {type: 'text', placeholder: t('cronPlaceholder')}
         }) as HTMLInputElement;
         const enabledBox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
         enabledBox.checked = editing?.enabled ?? true;
@@ -468,7 +557,7 @@ export class JobsPanel {
         const renderFields = (type: JobType): void => {
             clear(fieldsHost);
             fieldInputs = new Map();
-            const provider = providerByType.get(type);
+            const provider = specs.find((p) => p.type === type);
             if (provider === undefined) return;
 
             fieldsHost.appendChild(el('p', {class: 'jobs-modal-hint', text: provider.description}));
@@ -483,7 +572,7 @@ export class JobsPanel {
                     fieldsHost.appendChild(el('label', {class: 'job-checkbox'}, box, el('span', {text: f.label})));
                 } else if (f.type === 'select') {
                     const sel = el('select', {class: 'job-input'},
-                        ...(f.options ?? []).map((o) => el('option', {attrs: {value: o}, text: o}))
+                        ...(f.options ?? []).map((o) => el('option', {attrs: {value: o}, text: f.optionLabels?.[o] ?? o}))
                     ) as HTMLSelectElement;
                     sel.value = editing !== null && typeof stored === 'string' ? stored : String(f.defaultValue ?? '');
                     if (editing !== null) sel.disabled = true;
@@ -507,7 +596,7 @@ export class JobsPanel {
             if (editing !== null) {
                 fieldsHost.appendChild(el('p', {
                     class: 'jobs-modal-note',
-                    text: 'Parameters can’t be edited — to change them, delete this job and create a new one.'
+                    text: t('paramsLocked')
                 }));
             }
         };
@@ -529,22 +618,22 @@ export class JobsPanel {
         const saveBtn = el('button', {
             class: 'btn btn-primary',
             attrs: {type: 'button'},
-            text: 'Save',
+            text: tc('save'),
             on: {click: () => void this.saveFromModal(mode, providerSelect.value as JobType, fieldInputs, nameInput, cronInput, enabledBox, showError)}
         });
         const cancelBtn = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Cancel',
+            text: tc('cancel'),
             on: {click: () => this.closeModal()}
         });
 
         panel.appendChild(title);
-        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: 'Provider'}), providerSelect));
+        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: t('provider')}), providerSelect));
         panel.appendChild(fieldsHost);
-        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: 'Job name'}), nameInput));
-        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: 'Schedule (cron)'}), cronInput));
-        panel.appendChild(el('label', {class: 'job-checkbox'}, enabledBox, el('span', {text: 'enabled'})));
+        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: t('jobName')}), nameInput));
+        panel.appendChild(el('label', {class: 'job-field'}, el('span', {text: t('schedule')}), cronInput));
+        panel.appendChild(el('label', {class: 'job-checkbox'}, enabledBox, el('span', {text: t('enabled')})));
         panel.appendChild(errorLine);
         panel.appendChild(el('div', {class: 'jobs-modal-actions'}, cancelBtn, saveBtn));
 
@@ -586,7 +675,7 @@ export class JobsPanel {
     ): Promise<void> {
         const name = nameInput.value.trim();
         if (name === '') {
-            showError('Job name is required.');
+            showError(t('nameRequired'));
             return;
         }
         const cron = cronInput.value.trim();
@@ -609,7 +698,7 @@ export class JobsPanel {
                 await schedulesApi.update(mode.edit.id, {name, cron, enabled: enabledBox.checked});
             }
         } catch (cause) {
-            showError(`Save failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+            showError(t('saveFailed', {error: cause instanceof Error ? cause.message : String(cause)}));
             return;
         }
 
@@ -622,7 +711,7 @@ export class JobsPanel {
         type: JobType,
         fieldInputs: Map<string, HTMLInputElement | HTMLSelectElement>
     ): {params: JobParams; error?: string} {
-        const provider = providerByType.get(type);
+        const provider = providerByType(type);
         const out: Record<string, unknown> = {};
         if (provider === undefined) return {params: out as JobParams};
 
@@ -645,7 +734,7 @@ export class JobsPanel {
 
             if (raw === '') {
                 if (f.required === true) {
-                    return {params: out as JobParams, error: `${f.label} is required.`};
+                    return {params: out as JobParams, error: t('fieldRequired', {label: f.label})};
                 }
                 continue;
             }

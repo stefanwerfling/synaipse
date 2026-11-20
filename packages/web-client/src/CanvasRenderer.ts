@@ -27,6 +27,12 @@ import {
     type ArrowStyle
 } from './CanvasGeometry.js';
 import {CanvasHistory} from './CanvasHistory.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('canvasRenderer', {
+    groupLabel: 'group label',
+    edgeLabel: 'label'
+});
 
 // Kept here for existing importers; the implementation lives in CanvasGeometry.
 export {nodesInsideGroup} from './CanvasGeometry.js';
@@ -470,7 +476,7 @@ export class CanvasRenderer {
         openLabelEdit(this.stage, {
             className: 'canvas-group-label-edit',
             value: group.label ?? '',
-            placeholder: 'group label',
+            placeholder: t('groupLabel'),
             left: group.x + 8,
             top: group.y - 22,
             onCommit: (next) => {
@@ -492,7 +498,7 @@ export class CanvasRenderer {
         openLabelEdit(this.stage, {
             className: 'canvas-edge-label-edit',
             value: edge.label ?? '',
-            placeholder: 'label',
+            placeholder: t('edgeLabel'),
             left: mid.x,
             top: mid.y - 12,
             onCommit: (next) => {

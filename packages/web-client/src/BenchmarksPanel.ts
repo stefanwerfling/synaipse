@@ -13,6 +13,62 @@ import {api} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog, promptDialog, validProjectName} from './Dialogs.js';
 import {toast} from './Toast.js';
+import {defineMessages, formatDateTime, formatNumber, tc} from './I18n.js';
+
+const t = defineMessages('benchmarksPanel', {
+    newProjectTitle: 'Create a benchmark set for a new project',
+    newProject: '＋ Project',
+    subtitle: 'Speed/quality comparisons per project — machine, backend, technique: freely definable dimensions, no fixed schema.',
+    project: 'Project',
+    noBenchmarks: '— no benchmarks —',
+    emptyProjects: 'No benchmarks yet. Create a set for a project — or let Claude log them via MCP (synaipse_benchmark_add).',
+    newProjectDialog: 'New project',
+    projectName: 'Project name (a-z, 0-9, . _ -)',
+    entries: 'Entries',
+    dimensions: 'Dimensions',
+    metrics: 'Metrics',
+    deleted: 'Deleted',
+    allMetrics: '— all metrics —',
+    metric: 'Metric',
+    groupBy: 'Group by',
+    all: '— all —',
+    showDeleted: '🗑 Show deleted ({count})',
+    noSet: 'No benchmark set loaded.',
+    closeForm: '－ Close',
+    addEntry: '＋ Entry',
+    noEntries: 'No benchmark entries yet. Use “＋ Entry” above — or Claude adds them via MCP (synaipse_benchmark_add).',
+    noMatches: 'No entries for the current filter selection.',
+    leaderboard: 'Leaderboard',
+    noData: 'no data',
+    comparison: 'Comparison',
+    noDataMetric: 'no data for this metric',
+    viewBar: 'Bars',
+    viewBarH: 'Bars (horizontal)',
+    viewTrend: 'Trend',
+    focusMetric: 'Click to view this metric on its own',
+    noTrend: 'No entries with a timestamp for a trend.',
+    sort: 'Sort',
+    value: 'Value',
+    unit: 'Unit',
+    recorded: 'Recorded',
+    notes: 'Notes',
+    restore: 'Restore',
+    markDeleted: 'Mark as deleted (hidden, can be restored)',
+    best: 'Best value for this metric',
+    keyPlaceholder: 'Key',
+    removeDimension: 'Remove dimension',
+    addDimension: '＋ Dimension',
+    metricPlaceholder: 'e.g. decode_tok_s',
+    unitPlaceholder: 'e.g. tok/s',
+    contextPlaceholder: 'e.g. single-user, 2316-tok prompt',
+    noteLinksPlaceholder: 'Note titles, comma-separated',
+    required: 'At least one dimension, metric, value and unit are required.',
+    higherIsBetter: 'Higher is better',
+    context: 'Context',
+    noteLinks: 'Note links',
+    deleteTitle: 'Delete entry?',
+    deleteMessage: 'The entry is marked as deleted and hidden. It stays in the vault and can be restored.'
+});
 
 export interface BenchmarksPanelOptions {
     /** Open a linked note in the Notes tab. */
@@ -73,8 +129,8 @@ export class BenchmarksPanel {
 
         const newBtn = el('button', {
             class: 'rm-btn ghost',
-            attrs: {type: 'button', title: 'Benchmark-Set für ein neues Projekt anlegen'},
-            text: '＋ Projekt',
+            attrs: {type: 'button', title: t('newProjectTitle')},
+            text: t('newProject'),
             on: {click: () => void this.createProject()}
         });
 
@@ -86,9 +142,9 @@ export class BenchmarksPanel {
         const header = el('div', {class: 'rm-head'},
             el('div', {class: 'rm-head-left'},
                 el('h1', {class: 'rm-title', text: 'Benchmarks'}),
-                el('p', {class: 'rm-sub', text: 'Speed-/Qualitäts-Vergleiche pro Projekt — Maschine, Backend, Technik: frei definierbare Dimensionen, kein festes Schema.'}),
+                el('p', {class: 'rm-sub', text: t('subtitle')}),
                 el('div', {class: 'rm-picker'},
-                    el('span', {class: 'rm-picker-label', text: 'Projekt'}),
+                    el('span', {class: 'rm-picker-label', text: t('project')}),
                     this.picker,
                     newBtn
                 )
@@ -126,7 +182,7 @@ export class BenchmarksPanel {
 
         clear(this.picker);
         if (this.projects.length === 0) {
-            this.picker.appendChild(el('option', {text: '— keine Benchmarks —', attrs: {value: ''}}));
+            this.picker.appendChild(el('option', {text: t('noBenchmarks'), attrs: {value: ''}}));
         }
         for (const p of this.projects) {
             this.picker.appendChild(el('option', {text: p, attrs: {value: p}}));
@@ -141,7 +197,7 @@ export class BenchmarksPanel {
 
         if (this.project === null) {
             this.set = null;
-            this.renderEmpty('Noch keine Benchmarks. Lege ein Set für ein Projekt an — oder lass Claude per MCP (synaipse_benchmark_add) loggen.');
+            this.renderEmpty(t('emptyProjects'));
             this.renderKpis(null);
             clear(this.filtersHost);
             return;
@@ -161,10 +217,10 @@ export class BenchmarksPanel {
 
     private async createProject(): Promise<void> {
         const name = await promptDialog({
-            title: 'Neues Projekt',
-            label: 'Projektname (a-z, 0-9, . _ -)',
-            confirmLabel: 'Anlegen',
-            cancelLabel: 'Abbrechen',
+            title: t('newProjectDialog'),
+            label: t('projectName'),
+            confirmLabel: tc('create'),
+            cancelLabel: tc('cancel'),
             validate: validProjectName
         });
         if (!name) return;
@@ -237,10 +293,10 @@ export class BenchmarksPanel {
                 el('div', {class: 'rm-kpi-v', text: value})
             );
 
-        this.kpis.appendChild(kpi('Einträge', String(summary.totalEntries)));
-        this.kpis.appendChild(kpi('Dimensionen', String(summary.dimensionKeys.length)));
-        this.kpis.appendChild(kpi('Metriken', String(summary.metrics.length)));
-        this.kpis.appendChild(kpi('Gelöscht', String(deletedCount), deletedCount > 0));
+        this.kpis.appendChild(kpi(t('entries'), formatNumber(summary.totalEntries)));
+        this.kpis.appendChild(kpi(t('dimensions'), formatNumber(summary.dimensionKeys.length)));
+        this.kpis.appendChild(kpi(t('metrics'), formatNumber(summary.metrics.length)));
+        this.kpis.appendChild(kpi(t('deleted'), formatNumber(deletedCount), deletedCount > 0));
     }
 
     /** Filter dropdowns are built dynamically from whatever dimension keys this project actually uses. */
@@ -260,13 +316,13 @@ export class BenchmarksPanel {
             class: 'rm-picker-select',
             on: {change: (e) => { this.metricFilter = (e.target as HTMLSelectElement).value; this.render(); }}
         }) as HTMLSelectElement;
-        metricSel.appendChild(el('option', {text: '— alle Metriken —', attrs: {value: ''}}));
+        metricSel.appendChild(el('option', {text: t('allMetrics'), attrs: {value: ''}}));
         for (const m of metrics) {
             const opt = el('option', {text: m, attrs: {value: m}}) as HTMLOptionElement;
             if (m === this.metricFilter) opt.selected = true;
             metricSel.appendChild(opt);
         }
-        this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Metrik'}), metricSel));
+        this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: t('metric')}), metricSel));
 
         if (keys.length > 0) {
             // One checkbox per dimension key — check several to nest
@@ -288,7 +344,7 @@ export class BenchmarksPanel {
                 });
                 groupHost.appendChild(el('label', {class: 'bm-group-toggle'}, checkbox, el('span', {text: key})));
             }
-            this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: 'Gruppieren nach'}), groupHost));
+            this.filtersHost.appendChild(el('label', {class: 'bm-filter'}, el('span', {class: 'rm-picker-label', text: t('groupBy')}), groupHost));
         }
 
         for (const key of keys) {
@@ -297,7 +353,7 @@ export class BenchmarksPanel {
                 class: 'rm-picker-select',
                 on: {change: (e) => { this.dimFilters[key] = (e.target as HTMLSelectElement).value; this.render(); }}
             }) as HTMLSelectElement;
-            sel.appendChild(el('option', {text: '— alle —', attrs: {value: ''}}));
+            sel.appendChild(el('option', {text: t('all'), attrs: {value: ''}}));
             for (const v of values) {
                 const opt = el('option', {text: v, attrs: {value: v}}) as HTMLOptionElement;
                 if (v === this.dimFilters[key]) opt.selected = true;
@@ -316,7 +372,7 @@ export class BenchmarksPanel {
             });
             this.filtersHost.appendChild(el('label', {class: 'rm-deleted-toggle'},
                 toggle,
-                el('span', {text: `🗑 Gelöschte anzeigen (${deletedCount})`})
+                el('span', {text: t('showDeleted', {count: deletedCount})})
             ));
         }
     }
@@ -335,7 +391,7 @@ export class BenchmarksPanel {
 
     private render(): void {
         if (this.set === null) {
-            this.renderEmpty('Kein Benchmark-Set geladen.');
+            this.renderEmpty(t('noSet'));
             this.renderKpis(null);
             clear(this.filtersHost);
             return;
@@ -352,7 +408,7 @@ export class BenchmarksPanel {
         const addBtn = el('button', {
             class: 'rm-btn',
             attrs: {type: 'button'},
-            text: this.addFormOpen ? '－ Schließen' : '＋ Eintrag',
+            text: this.addFormOpen ? t('closeForm') : t('addEntry'),
             on: {click: () => {
                 this.addFormOpen = !this.addFormOpen;
                 this.editingId = null;
@@ -370,8 +426,8 @@ export class BenchmarksPanel {
 
         if (visible.length === 0) {
             const msg = set.entries.length === 0
-                ? 'Noch keine Benchmark-Einträge. „＋ Eintrag" oben — oder Claude trägt sie per MCP (synaipse_benchmark_add) ein.'
-                : 'Keine Einträge für die aktuelle Filterauswahl.';
+                ? t('noEntries')
+                : t('noMatches');
             this.contentHost.appendChild(el('p', {class: 'rm-empty-inline', text: msg}));
             return;
         }
@@ -385,7 +441,7 @@ export class BenchmarksPanel {
 
     private renderLeaderboard(visible: BenchmarkEntry[]): HTMLElement {
         const section = el('section', {class: 'activity-section'});
-        section.appendChild(el('h3', {class: 'activity-section-title', text: 'Leaderboard'}));
+        section.appendChild(el('h3', {class: 'activity-section-title', text: t('leaderboard')}));
 
         // Ranking is scoped by metric plus whichever dimension filters are
         // currently pinned — pin "machine" to rank within that machine, leave
@@ -394,7 +450,7 @@ export class BenchmarksPanel {
         const groups = computeWinners(visible, ['metric', ...activeDimKeys]);
 
         if (groups.length === 0) {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'keine Daten'}));
+            section.appendChild(el('div', {class: 'activity-empty', text: t('noData')}));
             return section;
         }
 
@@ -414,7 +470,7 @@ export class BenchmarksPanel {
                 ),
                 el('div', {class: 'activity-bar-content'},
                     el('span', {class: 'activity-bar-label', text: `🏆 ${label}`}),
-                    el('span', {class: 'activity-bar-value', text: `${winner.value.toLocaleString('de-DE')} ${winner.unit}`})
+                    el('span', {class: 'activity-bar-value', text: `${formatNumber(winner.value)} ${winner.unit}`})
                 )
             );
             row.addEventListener('click', () => {
@@ -428,7 +484,7 @@ export class BenchmarksPanel {
                 const rankList = el('ol', {class: 'bm-rank-list'});
                 group.entries.forEach((e, i) => {
                     const dims = Object.entries(e.dimensions).map(([k, v]) => `${k}=${v}`).join(', ');
-                    rankList.appendChild(el('li', {}, `${dims || e.metric} — ${e.value.toLocaleString('de-DE')} ${e.unit}`, i === 0 ? ' 🏆' : ''));
+                    rankList.appendChild(el('li', {}, `${dims || e.metric} — ${formatNumber(e.value)} ${e.unit}`, i === 0 ? ' 🏆' : ''));
                 });
                 list.appendChild(el('li', {class: 'bm-group-detail'}, rankList));
             }
@@ -441,7 +497,7 @@ export class BenchmarksPanel {
 
     private renderChart(visible: BenchmarkEntry[]): HTMLElement {
         const section = el('section', {class: 'activity-section'});
-        section.appendChild(el('h3', {class: 'activity-section-title', text: 'Vergleich'}));
+        section.appendChild(el('h3', {class: 'activity-section-title', text: t('comparison')}));
 
         // No metric picked: show every metric's comparison at once (small
         // multiples) instead of forcing a pick-one-metric-first empty state
@@ -453,14 +509,14 @@ export class BenchmarksPanel {
 
         const items = visible.filter((e) => e.metric === this.metricFilter);
         if (items.length === 0) {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'keine Daten für diese Metrik'}));
+            section.appendChild(el('div', {class: 'activity-empty', text: t('noDataMetric')}));
             return section;
         }
 
         const views: ReadonlyArray<{id: 'bar' | 'bar-h' | 'trend'; label: string}> = [
-            {id: 'bar', label: 'Balken'},
-            {id: 'bar-h', label: 'Balken (horizontal)'},
-            {id: 'trend', label: 'Verlauf'}
+            {id: 'bar', label: t('viewBar')},
+            {id: 'bar-h', label: t('viewBarH')},
+            {id: 'trend', label: t('viewTrend')}
         ];
         const tabs = el('div', {class: 'bm-chart-tabs'});
         for (const v of views) {
@@ -508,7 +564,7 @@ export class BenchmarksPanel {
         const metrics = [...new Set(visible.map((e) => e.metric))].sort();
 
         if (metrics.length === 0) {
-            return el('div', {class: 'activity-empty', text: 'keine Daten'});
+            return el('div', {class: 'activity-empty', text: t('noData')});
         }
 
         const grid = el('div', {class: 'bm-overview-grid'});
@@ -522,7 +578,7 @@ export class BenchmarksPanel {
 
             const card = el('div', {
                 class: 'bm-overview-card',
-                attrs: {role: 'button', title: 'Klicken, um diese Metrik einzeln zu betrachten'},
+                attrs: {role: 'button', title: t('focusMetric')},
                 on: {click: () => { this.metricFilter = metric; this.render(); }}
             },
                 el('div', {class: 'bm-overview-title', text: metric}),
@@ -562,7 +618,7 @@ export class BenchmarksPanel {
             rect.setAttribute('rx', '2');
 
             const title = document.createElementNS(SVG_NS, 'title');
-            title.textContent = `${labelFor(entry)}: ${entry.value.toLocaleString('de-DE')} ${entry.unit}`;
+            title.textContent = `${labelFor(entry)}: ${formatNumber(entry.value)} ${entry.unit}`;
             rect.appendChild(title);
 
             svg.appendChild(rect);
@@ -592,7 +648,7 @@ export class BenchmarksPanel {
                 ),
                 el('div', {class: 'activity-bar-content'},
                     el('span', {class: 'activity-bar-label', text: labelFor(entry)}),
-                    el('span', {class: 'activity-bar-value', text: `${entry.value.toLocaleString('de-DE')} ${entry.unit}`})
+                    el('span', {class: 'activity-bar-value', text: `${formatNumber(entry.value)} ${entry.unit}`})
                 )
             ));
         });
@@ -604,7 +660,7 @@ export class BenchmarksPanel {
         const wrap = el('div', {});
         const dated = items.filter((e) => e.recordedAt !== undefined);
         if (dated.length === 0) {
-            wrap.appendChild(el('div', {class: 'activity-empty', text: 'Keine Einträge mit Zeitstempel für einen Verlauf.'}));
+            wrap.appendChild(el('div', {class: 'activity-empty', text: t('noTrend')}));
             return wrap;
         }
 
@@ -665,7 +721,7 @@ export class BenchmarksPanel {
                 circle.setAttribute('fill', color);
                 const title = document.createElementNS(SVG_NS, 'title');
                 title.textContent =
-                    `${label}: ${entry.value.toLocaleString('de-DE')} ${entry.unit} — ${new Date(entry.recordedAt as string).toLocaleString('de-DE')}`;
+                    `${label}: ${formatNumber(entry.value)} ${entry.unit} — ${formatDateTime(entry.recordedAt as string)}`;
                 circle.appendChild(title);
                 svg.appendChild(circle);
             }
@@ -706,7 +762,7 @@ export class BenchmarksPanel {
         const arrow = active ? (this.sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
         return el('th', {
             class: extraCls,
-            attrs: {title: 'Sortieren'},
+            attrs: {title: t('sort')},
             on: {click: () => this.toggleSort(key)}
         }, `${label}${arrow}`);
     }
@@ -738,11 +794,11 @@ export class BenchmarksPanel {
         const table = el('table', {class: 'rm-table bm-table'});
         table.appendChild(el('thead', {}, el('tr', {},
             ...rowKeys.map((k) => this.sortableHeader(k, k)),
-            this.sortableHeader('Metrik', 'metric'),
-            this.sortableHeader('Wert', 'value', 'r'),
-            this.sortableHeader('Einheit', 'unit'),
-            this.sortableHeader('Erfasst', 'recordedAt'),
-            el('th', {text: 'Notizen'}),
+            this.sortableHeader(t('metric'), 'metric'),
+            this.sortableHeader(t('value'), 'value', 'r'),
+            this.sortableHeader(t('unit'), 'unit'),
+            this.sortableHeader(t('recorded'), 'recordedAt'),
+            el('th', {text: t('notes')}),
             el('th', {text: ''})
         )));
 
@@ -861,7 +917,7 @@ export class BenchmarksPanel {
         const metricCell = keys.length === 0
             ? el('td', {}, makeIndent(), el('span', {text: entry.metric}))
             : el('td', {text: entry.metric});
-        const valueCell = el('td', {class: 'r num', text: entry.value.toLocaleString('de-DE')});
+        const valueCell = el('td', {class: 'r num', text: formatNumber(entry.value)});
 
         const notes = el('div', {class: 'rm-notes'});
         for (const link of entry.noteLinks ?? []) {
@@ -877,17 +933,17 @@ export class BenchmarksPanel {
         }
 
         const recorded = entry.recordedAt
-            ? new Date(entry.recordedAt).toLocaleDateString('de-DE')
+            ? formatDateTime(entry.recordedAt, {dateStyle: 'medium'})
             : '—';
 
         const actions = entry.deleted
             ? el('div', {class: 'rm-row-actions'},
-                el('button', {class: 'rm-icon', attrs: {type: 'button', title: 'Wiederherstellen', 'aria-label': 'Wiederherstellen'}, text: '♻', on: {click: () => void this.restoreEntry(entry.id)}})
+                el('button', {class: 'rm-icon', attrs: {type: 'button', title: t('restore'), 'aria-label': t('restore')}, text: '♻', on: {click: () => void this.restoreEntry(entry.id)}})
             )
             : el('div', {class: 'rm-row-actions'},
                 el('button', {
                     class: 'rm-icon',
-                    attrs: {type: 'button', title: 'Bearbeiten', 'aria-label': 'Bearbeiten'},
+                    attrs: {type: 'button', title: tc('edit'), 'aria-label': tc('edit')},
                     text: '✎',
                     on: {click: () => {
                         this.editingId = this.editingId === entry.id ? null : entry.id;
@@ -895,7 +951,7 @@ export class BenchmarksPanel {
                         this.render();
                     }}
                 }),
-                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: 'Als gelöscht markieren (ausblenden, wiederherstellbar)', 'aria-label': 'Als gelöscht markieren (ausblenden, wiederherstellbar)'}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
+                el('button', {class: 'rm-icon danger', attrs: {type: 'button', title: t('markDeleted'), 'aria-label': t('markDeleted')}, text: '🗑', on: {click: () => void this.deleteEntry(entry.id)}})
             );
 
         const rowCls = ['rm-row', entry.deleted ? 'rm-deleted' : '', depth > 0 ? 'bm-child-row' : ''].filter(Boolean).join(' ');
@@ -906,7 +962,7 @@ export class BenchmarksPanel {
             el('td', {text: entry.unit}),
             el('td', {text: recorded}),
             el('td', {}, notes),
-            el('td', {}, isWinner ? el('span', {class: 'bm-winner-badge', attrs: {title: 'Bestwert für diese Metrik'}, text: '🏆'}) : null, actions)
+            el('td', {}, isWinner ? el('span', {class: 'bm-winner-badge', attrs: {title: t('best')}, text: '🏆'}) : null, actions)
         );
     }
 
@@ -920,12 +976,12 @@ export class BenchmarksPanel {
         const rows: Array<{keyInput: HTMLInputElement; valueInput: HTMLInputElement}> = [];
 
         const addRow = (key = '', value = ''): void => {
-            const keyInput = el('input', {class: 'bm-dim-input', attrs: {type: 'text', placeholder: 'Key', list: 'bm-dim-keys', value: key}}) as HTMLInputElement;
-            const valueInput = el('input', {class: 'bm-dim-input', attrs: {type: 'text', placeholder: 'Wert', value}}) as HTMLInputElement;
+            const keyInput = el('input', {class: 'bm-dim-input', attrs: {type: 'text', placeholder: t('keyPlaceholder'), list: 'bm-dim-keys', value: key}}) as HTMLInputElement;
+            const valueInput = el('input', {class: 'bm-dim-input', attrs: {type: 'text', placeholder: t('value'), value}}) as HTMLInputElement;
             const row = el('div', {class: 'bm-dim-row'}, keyInput, valueInput,
                 el('button', {
                     class: 'rm-icon danger',
-                    attrs: {type: 'button', title: 'Dimension entfernen', 'aria-label': 'Dimension entfernen'},
+                    attrs: {type: 'button', title: t('removeDimension'), 'aria-label': t('removeDimension')},
                     text: '✕',
                     on: {click: () => {
                         row.remove();
@@ -971,18 +1027,18 @@ export class BenchmarksPanel {
         const addDimBtn = el('button', {
             class: 'rm-btn ghost sm',
             attrs: {type: 'button'},
-            text: '＋ Dimension',
+            text: t('addDimension'),
             on: {click: () => dimCtl.addRow()}
         });
 
-        const metricInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: 'z.B. decode_tok_s', value: existing?.metric ?? '', list: 'bm-metrics'}}) as HTMLInputElement;
+        const metricInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: t('metricPlaceholder'), value: existing?.metric ?? '', list: 'bm-metrics'}}) as HTMLInputElement;
         const valueInput = el('input', {class: 'rm-edit-input', attrs: {type: 'number', step: 'any', value: existing !== null ? String(existing.value) : ''}}) as HTMLInputElement;
-        const unitInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: 'z.B. tok/s', value: existing?.unit ?? ''}}) as HTMLInputElement;
+        const unitInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: t('unitPlaceholder'), value: existing?.unit ?? ''}}) as HTMLInputElement;
         const higherCheckbox = el('input', {attrs: {type: 'checkbox'}}) as HTMLInputElement;
         higherCheckbox.checked = existing?.higherIsBetter ?? true;
-        const contextArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '2', placeholder: 'z.B. single-user, 2316-tok prompt'}}) as HTMLTextAreaElement;
+        const contextArea = el('textarea', {class: 'rm-edit-area', attrs: {rows: '2', placeholder: t('contextPlaceholder')}}) as HTMLTextAreaElement;
         contextArea.value = existing?.context ?? '';
-        const noteLinksInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: 'Notiz-Titel, kommagetrennt', value: (existing?.noteLinks ?? []).join(', ')}}) as HTMLInputElement;
+        const noteLinksInput = el('input', {class: 'rm-edit-input', attrs: {type: 'text', placeholder: t('noteLinksPlaceholder'), value: (existing?.noteLinks ?? []).join(', ')}}) as HTMLInputElement;
 
         const field = (label: string, control: HTMLElement): HTMLElement =>
             el('label', {class: 'rm-edit-field'}, el('span', {class: 'rm-edit-lbl', text: label}), control);
@@ -994,7 +1050,7 @@ export class BenchmarksPanel {
             const unit = unitInput.value.trim();
 
             if (Object.keys(dimensions).length === 0 || metric.length === 0 || !Number.isFinite(value) || unit.length === 0) {
-                toast('Mindestens eine Dimension, Metrik, Wert und Einheit sind Pflichtfelder.', {kind: 'error'});
+                toast(t('required'), {kind: 'error'});
                 return;
             }
 
@@ -1014,21 +1070,21 @@ export class BenchmarksPanel {
             dimKeyList,
             metricList,
             el('div', {class: 'bm-form-row'},
-                el('span', {class: 'rm-edit-lbl', text: 'Dimensionen'}),
+                el('span', {class: 'rm-edit-lbl', text: t('dimensions')}),
                 dimHost,
                 addDimBtn
             ),
             el('div', {class: 'bm-form-grid'},
-                field('Metrik', metricInput),
-                field('Wert', valueInput),
-                field('Einheit', unitInput),
-                el('label', {class: 'rm-edit-field'}, el('span', {class: 'rm-edit-lbl', text: 'Höher ist besser'}), higherCheckbox)
+                field(t('metric'), metricInput),
+                field(t('value'), valueInput),
+                field(t('unit'), unitInput),
+                el('label', {class: 'rm-edit-field'}, el('span', {class: 'rm-edit-lbl', text: t('higherIsBetter')}), higherCheckbox)
             ),
-            field('Kontext', contextArea),
-            field('Notiz-Links', noteLinksInput),
+            field(t('context'), contextArea),
+            field(t('noteLinks'), noteLinksInput),
             el('div', {class: 'rm-edit-actions'},
-                el('button', {class: 'rm-btn sm', attrs: {type: 'button'}, text: 'Speichern', on: {click: save}}),
-                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button'}, text: 'Abbrechen', on: {click: onCancel}})
+                el('button', {class: 'rm-btn sm', attrs: {type: 'button'}, text: tc('save'), on: {click: save}}),
+                el('button', {class: 'rm-btn ghost sm', attrs: {type: 'button'}, text: tc('cancel'), on: {click: onCancel}})
             )
         );
     }
@@ -1060,10 +1116,10 @@ export class BenchmarksPanel {
      */
     private async deleteEntry(id: string): Promise<void> {
         const ok = await confirmDialog({
-            title: 'Eintrag löschen?',
-            message: 'Der Eintrag wird als gelöscht markiert und ausgeblendet. Er bleibt im Vault erhalten und lässt sich wiederherstellen.',
-            confirmLabel: 'Löschen',
-            cancelLabel: 'Abbrechen',
+            title: t('deleteTitle'),
+            message: t('deleteMessage'),
+            confirmLabel: tc('delete'),
+            cancelLabel: tc('cancel'),
             danger: true
         });
         if (!ok) return;

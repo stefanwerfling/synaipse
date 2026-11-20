@@ -3,6 +3,27 @@ import {api, type CanvasSummary} from './Api.js';
 import {CanvasRenderer} from './CanvasRenderer.js';
 import {clear, el} from './Dom.js';
 import {slugify} from './Wikilinks.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('canvasPanel', {
+    newTitle: 'Create a new .canvas file',
+    newCanvas: '+ New canvas',
+    namePlaceholder: 'Name…',
+    nameLabel: 'Canvas name',
+    canvases: 'Canvases',
+    loadFailed: 'Could not load canvases: {error}',
+    noCanvases: 'No .canvas files in vault',
+    openFailed: 'Could not open {id}: {error}',
+    inFolder: 'in {folder}/',
+    exists: '"{path}" already exists',
+    error: 'Error: {error}',
+    saving: 'saving…',
+    saved: 'saved ✓',
+    saveFailed: 'save failed',
+    pickTitle: 'Pick a canvas',
+    pickHint: 'Select a canvas from the sidebar or click "+ New canvas".',
+    loadingCanvas: 'loading canvas…'
+});
 
 export interface CanvasPanelOptions {
     onOpenNote: (noteId: string) => void;
@@ -81,8 +102,8 @@ export class CanvasPanel {
 
         const newBtn = el('button', {
             class: 'btn btn-primary',
-            attrs: {type: 'button', title: 'Create a new .canvas file'},
-            text: '+ New canvas',
+            attrs: {type: 'button', title: t('newTitle')},
+            text: t('newCanvas'),
             on: {click: () => this.openCreateRow()}
         });
 
@@ -90,7 +111,7 @@ export class CanvasPanel {
 
         this.createInput = el('input', {
             class: 'create-row-input',
-            attrs: {type: 'text', placeholder: 'Name…', 'aria-label': 'Canvas name'},
+            attrs: {type: 'text', placeholder: t('namePlaceholder'), 'aria-label': t('nameLabel')},
             on: {keydown: (e) => this.onCreateInputKey(e as KeyboardEvent)}
         }) as HTMLInputElement;
         this.createHint = el('div', {class: 'create-row-hint'});
@@ -100,7 +121,7 @@ export class CanvasPanel {
         );
 
         this.sidebar = el('aside', {class: 'canvas-sidebar'},
-            el('div', {class: 'canvas-sidebar-head', text: 'Canvases'}),
+            el('div', {class: 'canvas-sidebar-head', text: t('canvases')}),
             toolbar,
             this.createRow,
             this.saveIndicator,
@@ -118,7 +139,7 @@ export class CanvasPanel {
         try {
             this.canvases = await api.listCanvases();
         } catch (e) {
-            this.renderError(`Could not load canvases: ${e instanceof Error ? e.message : String(e)}`);
+            this.renderError(t('loadFailed', {error: e instanceof Error ? e.message : String(e)}));
             return;
         }
         this.renderList();
@@ -128,7 +149,7 @@ export class CanvasPanel {
         clear(this.canvasList);
 
         if (this.canvases.length === 0) {
-            this.canvasList.appendChild(el('li', {class: 'canvas-list-empty', text: 'No .canvas files in vault'}));
+            this.canvasList.appendChild(el('li', {class: 'canvas-list-empty', text: t('noCanvases')}));
             return;
         }
 
@@ -158,7 +179,7 @@ export class CanvasPanel {
         try {
             doc = await api.getCanvas(id);
         } catch (e) {
-            this.renderError(`Could not open ${id}: ${e instanceof Error ? e.message : String(e)}`);
+            this.renderError(t('openFailed', {id, error: e instanceof Error ? e.message : String(e)}));
             return;
         }
 
@@ -183,7 +204,7 @@ export class CanvasPanel {
     private openCreateRow(): void {
         this.createOpen = true;
         this.createHint.classList.remove('create-row-hint-error');
-        this.createHint.textContent = `in ${DEFAULT_CANVAS_FOLDER}/`;
+        this.createHint.textContent = t('inFolder', {folder: DEFAULT_CANVAS_FOLDER});
         this.createInput.value = '';
         this.createRow.removeAttribute('hidden');
         window.requestAnimationFrame(() => {
@@ -220,7 +241,7 @@ export class CanvasPanel {
         const path = `${DEFAULT_CANVAS_FOLDER}/${slug}.canvas`;
 
         if (this.canvases.some((c) => c.id === path)) {
-            this.createHint.textContent = `"${path}" already exists`;
+            this.createHint.textContent = t('exists', {path});
             this.createHint.classList.add('create-row-hint-error');
             return;
         }
@@ -228,7 +249,7 @@ export class CanvasPanel {
         try {
             await api.putCanvas(path, {nodes: [], edges: []});
         } catch (e) {
-            this.createHint.textContent = `Error: ${e instanceof Error ? e.message : String(e)}`;
+            this.createHint.textContent = t('error', {error: e instanceof Error ? e.message : String(e)});
             this.createHint.classList.add('create-row-hint-error');
             return;
         }
@@ -282,9 +303,9 @@ export class CanvasPanel {
         }
 
         this.saveIndicator.textContent =
-            status === 'saving' ? 'saving…' :
-            status === 'saved' ? 'saved ✓' :
-            'save failed';
+            status === 'saving' ? t('saving') :
+            status === 'saved' ? t('saved') :
+            t('saveFailed');
 
         // Auto-clear "saved" and "error" so the sidebar doesn't feel noisy.
         if (this.saveIndicatorTimer !== null) window.clearTimeout(this.saveIndicatorTimer);
@@ -299,14 +320,14 @@ export class CanvasPanel {
     private renderEmpty(): void {
         clear(this.main);
         this.main.appendChild(el('div', {class: 'canvas-empty'},
-            el('div', {class: 'canvas-empty-title', text: 'Pick a canvas'}),
-            el('div', {class: 'canvas-empty-hint', text: 'Select a canvas from the sidebar or click "+ New canvas".'})
+            el('div', {class: 'canvas-empty-title', text: t('pickTitle')}),
+            el('div', {class: 'canvas-empty-hint', text: t('pickHint')})
         ));
     }
 
     private renderLoading(): void {
         clear(this.main);
-        this.main.appendChild(el('p', {class: 'loading', text: 'loading canvas…'}));
+        this.main.appendChild(el('p', {class: 'loading', text: t('loadingCanvas')}));
     }
 
     private renderError(message: string): void {

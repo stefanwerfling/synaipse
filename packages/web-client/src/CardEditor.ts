@@ -3,6 +3,26 @@ import TurndownService from 'turndown';
 import {gfm} from 'turndown-plugin-gfm';
 import {el} from './Dom.js';
 import {promptDialog} from './Dialogs.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('cardEditor', {
+    code: 'code',
+    codeLang: 'code ({lang})',
+    block: 'block',
+    bold: 'Bold (Ctrl+B)',
+    italic: 'Italic (Ctrl+I)',
+    heading1: 'Heading 1',
+    heading2: 'Heading 2',
+    heading3: 'Heading 3',
+    paragraph: 'Paragraph',
+    bulletList: 'Bulleted list',
+    numberedList: 'Numbered list',
+    blockquote: 'Blockquote',
+    inlineCode: 'Inline code',
+    link: 'Link (Ctrl+K)',
+    closeTitle: 'Close (Esc)',
+    linkTitle: 'Link'
+});
 
 /**
  * WYSIWYG editor for canvas text cards. Roundtrip goal is lossless for
@@ -25,10 +45,10 @@ import {promptDialog} from './Dialogs.js';
  * body matching so adjacent blocks don't merge.
  */
 const OPAQUE_PATTERNS: {label: string; icon: string; re: RegExp}[] = [
-    {label: 'code', icon: '⌘', re: /```[^\n]*\n[\s\S]*?\n```/g},
-    {label: 'code', icon: '⌘', re: /~~~[^\n]*\n[\s\S]*?\n~~~/g},
-    {label: 'block', icon: '📦', re: /^:::[^\n]*\n[\s\S]*?\n:::\s*$/gm},
-    {label: 'wikilink', icon: '🔗', re: /\[\[[^\]\n]+\]\]/g}
+    {label: 'code', icon: '⌘', re: /```[^\n]*\n[\s\S]*?\n```/g}, // i18n: id
+    {label: 'code', icon: '⌘', re: /~~~[^\n]*\n[\s\S]*?\n~~~/g}, // i18n: id
+    {label: 'block', icon: '📦', re: /^:::[^\n]*\n[\s\S]*?\n:::\s*$/gm}, // i18n: id
+    {label: 'wikilink', icon: '🔗', re: /\[\[[^\]\n]+\]\]/g} // i18n: id
 ];
 
 const TOKEN_PREFIX = 'CANVASEDITTOKEN';
@@ -75,13 +95,13 @@ const shortLabelFor = (token: OpaqueToken): string => {
         return line.slice(2, -2);
     }
     if (line.startsWith(':::')) {
-        return line.slice(3).trim() || 'block';
+        return line.slice(3).trim() || t('block');
     }
     if (line.startsWith('```') || line.startsWith('~~~')) {
         const lang = line.slice(3).trim();
-        return lang.length > 0 ? `code (${lang})` : 'code';
+        return lang.length > 0 ? t('codeLang', {lang}) : t('code');
     }
-    return token.label;
+    return token.label === 'code' ? t('code') : token.label === 'block' ? t('block') : token.label;
 };
 
 /**
@@ -383,17 +403,17 @@ export const mountCardEditor = (
 const buildToolbar = (): HTMLElement => {
     const bar = el('div', {class: 'canvas-card-editor-toolbar'});
     const buttons: {cmd: string; label: string; title: string}[] = [
-        {cmd: 'bold', label: 'B', title: 'Bold (Ctrl+B)'},
-        {cmd: 'italic', label: 'I', title: 'Italic (Ctrl+I)'},
-        {cmd: 'h1', label: 'H1', title: 'Heading 1'},
-        {cmd: 'h2', label: 'H2', title: 'Heading 2'},
-        {cmd: 'h3', label: 'H3', title: 'Heading 3'},
-        {cmd: 'p', label: '¶', title: 'Paragraph'},
-        {cmd: 'ul', label: '•', title: 'Bulleted list'},
-        {cmd: 'ol', label: '1.', title: 'Numbered list'},
-        {cmd: 'quote', label: '❝', title: 'Blockquote'},
-        {cmd: 'code', label: '</>', title: 'Inline code'},
-        {cmd: 'link', label: '🔗', title: 'Link (Ctrl+K)'}
+        {cmd: 'bold', label: 'B', title: t('bold')},
+        {cmd: 'italic', label: 'I', title: t('italic')},
+        {cmd: 'h1', label: 'H1', title: t('heading1')},
+        {cmd: 'h2', label: 'H2', title: t('heading2')},
+        {cmd: 'h3', label: 'H3', title: t('heading3')},
+        {cmd: 'p', label: '¶', title: t('paragraph')},
+        {cmd: 'ul', label: '•', title: t('bulletList')},
+        {cmd: 'ol', label: '1.', title: t('numberedList')},
+        {cmd: 'quote', label: '❝', title: t('blockquote')},
+        {cmd: 'code', label: '</>', title: t('inlineCode')},
+        {cmd: 'link', label: '🔗', title: t('link')}
     ];
     for (const b of buttons) {
         const btn = el('button', {
@@ -411,7 +431,7 @@ const buildToolbar = (): HTMLElement => {
     bar.appendChild(spacer);
     const close = el('button', {
         class: 'canvas-card-editor-btn canvas-card-editor-btn-close',
-        attrs: {type: 'button', title: 'Close (Esc)', 'aria-label': 'Close'},
+        attrs: {type: 'button', title: t('closeTitle'), 'aria-label': tc('close')},
         text: '×'
     });
     close.dataset.cmd = 'close';
@@ -456,7 +476,7 @@ const runCommand = (cmd: string, surface: HTMLElement): void => {
             // The dialog takes focus, so keep the selection to wrap.
             const sel = window.getSelection();
             const range = sel !== null && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
-            void promptDialog({title: 'Link', label: 'URL', value: 'https://', type: 'url'}).then((url) => {
+            void promptDialog({title: t('linkTitle'), label: 'URL', value: 'https://', type: 'url'}).then((url) => {
                 if (url === null || url.length === 0 || url === 'https://') return;
                 surface.focus();
                 if (range !== null) {

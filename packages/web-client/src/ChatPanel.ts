@@ -6,6 +6,41 @@ import {FrameThrottle} from './FrameThrottle.js';
 import {renderMarkdownDraftInto, renderMarkdownInto} from './MarkdownPreview.js';
 import {PreviewDialog, previewSkipFlag} from './PreviewDialog.js';
 import {toastError} from './Toast.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('chatPanel', {
+    newChat: 'New conversation',
+    saveAsNoteTitle: 'Add the conversation to the vault as a note',
+    saveAsNote: '📥 Save as note',
+    inputPlaceholder: 'Ask something about your notes…  (Enter to send, Shift+Enter for a new line)',
+    send: 'Send',
+    researchTitle: 'Search the web instead of the vault',
+    stopTitle: 'Stop the answer',
+    stop: 'Stop',
+    notConfigured: 'Chat is not configured. Set SYNAIPSE_CHAT_PROVIDER + a model in your .env.',
+    local: 'local',
+    external: 'external',
+    localTitle: 'Vault content does not leave the host ({provider})',
+    externalTitle: 'Vault content is sent to an external LLM provider ({provider})',
+    continueChat: 'Continue current chat',
+    startNewChat: 'Start a new conversation',
+    choiceLead: 'Question about ',
+    choiceTail: ' — where should it go?',
+    removeContext: 'remove context',
+    saving: 'Saving…',
+    savedToVault: '✓ In the vault',
+    saveFailed: 'Error',
+    empty: 'Ask something about your notes — the answer is based solely on the vault. Conversations are saved automatically in the vault under Chats/.',
+    unknownModel: 'unknown',
+    modelTitle: 'This answer was produced by {model}',
+    answerBy: 'Answer from',
+    sources: '📎 Sources · {count}',
+    previewFailed: 'Could not load the GDPR preview, sending cancelled',
+    hidden: '{count} hidden',
+    hiddenTitle: '{count} note was hidden (private marker)|{count} notes were hidden (private marker)',
+    redacted: '{count} redacted',
+    redactedTitle: '{count} PII/secret hits redacted: {detail}'
+});
 
 export type ChatSource = ChatSourceRef;
 
@@ -101,12 +136,12 @@ export class ChatPanel {
             onNew: () => this.startNewChat()
         });
 
-        this.threadTitle = el('h2', {class: 'chat-title', text: 'Neues Gespräch'});
+        this.threadTitle = el('h2', {class: 'chat-title', text: t('newChat')});
 
         this.saveAsNoteBtn = el('button', {
             class: 'chat-save-as-note',
-            attrs: {type: 'button', title: 'Gespräch als Notiz in den Vault übernehmen'},
-            text: '📥 Als Notiz speichern',
+            attrs: {type: 'button', title: t('saveAsNoteTitle')},
+            text: t('saveAsNote'),
             on: {click: () => void this.handleSaveAsNote()}
         }) as HTMLButtonElement;
         this.saveAsNoteBtn.hidden = true;
@@ -125,7 +160,7 @@ export class ChatPanel {
         this.input = el('textarea', {
             class: 'chat-input',
             attrs: {
-                placeholder: 'Frag etwas zu deinen Notizen…  (Enter zum Senden, Shift+Enter für Zeilenumbruch)',
+                placeholder: t('inputPlaceholder'),
                 rows: 3
             },
             on: {
@@ -142,13 +177,13 @@ export class ChatPanel {
         this.sendBtn = el('button', {
             class: 'chat-send',
             attrs: {type: 'button'},
-            text: 'Senden',
+            text: t('send'),
             on: {click: () => void this.send()}
         }) as HTMLButtonElement;
 
         this.researchBtn = el('button', {
             class: 'chat-research',
-            attrs: {type: 'button', title: 'Web durchsuchen statt Vault'},
+            attrs: {type: 'button', title: t('researchTitle')},
             text: '🔎 Web',
             on: {click: () => void this.send({research: true})}
         }) as HTMLButtonElement;
@@ -156,8 +191,8 @@ export class ChatPanel {
 
         this.stopBtn = el('button', {
             class: 'chat-stop',
-            attrs: {type: 'button', title: 'Antwort stoppen'},
-            text: 'Stop',
+            attrs: {type: 'button', title: t('stopTitle')},
+            text: t('stop'),
             on: {click: () => this.stop()}
         }) as HTMLButtonElement;
         this.stopBtn.hidden = true;
@@ -199,7 +234,7 @@ export class ChatPanel {
         if (!enabled) {
             clear(this.thread);
             this.thread.appendChild(
-                el('div', {class: 'chat-empty', text: 'Chat nicht konfiguriert. Setze SYNAIPSE_CHAT_PROVIDER + Modell in deiner .env.'})
+                el('div', {class: 'chat-empty', text: t('notConfigured')})
             );
             this.input.disabled = true;
             return;
@@ -222,10 +257,10 @@ export class ChatPanel {
         this.providerBadge.className = `chat-provider-badge ${isLocal ? 'local' : 'external'}`;
 
         const icon = isLocal ? '🔒' : '🌐';
-        const label = isLocal ? 'local' : 'external';
+        const label = isLocal ? t('local') : t('external');
         const title = isLocal
-            ? `Vault-Inhalte verlassen den Host nicht (${provider})`
-            : `Vault-Inhalte werden an einen externen LLM-Provider übertragen (${provider})`;
+            ? t('localTitle', {provider})
+            : t('externalTitle', {provider});
 
         this.providerBadge.setAttribute('title', title);
         this.providerBadge.appendChild(el('span', {class: 'chat-provider-icon', text: icon}));
@@ -298,7 +333,7 @@ export class ChatPanel {
         const continueBtn = el('button', {
             class: 'chat-context-choice-btn primary',
             attrs: {type: 'button'},
-            text: 'Aktuellen Chat fortführen',
+            text: t('continueChat'),
             on: {click: () => {
                 this.renderSticky();
                 this.focusInput();
@@ -308,7 +343,7 @@ export class ChatPanel {
         const newBtn = el('button', {
             class: 'chat-context-choice-btn',
             attrs: {type: 'button'},
-            text: 'Neues Gespräch starten',
+            text: t('startNewChat'),
             on: {click: () => {
                 const pending = this.stickyContext;
                 this.startNewChat();
@@ -322,9 +357,9 @@ export class ChatPanel {
         this.stickyHost.appendChild(
             el('div', {class: 'chat-context-choice'},
                 el('div', {class: 'chat-context-choice-text'},
-                    el('strong', {text: 'Frage zu '}),
+                    el('strong', {text: t('choiceLead')}),
                     el('span', {class: 'chat-context-choice-label', text: label}),
-                    el('span', {text: ' — wo soll sie hin?'})
+                    el('span', {text: t('choiceTail')})
                 ),
                 el('div', {class: 'chat-context-choice-actions'}, continueBtn, newBtn)
             )
@@ -354,7 +389,7 @@ export class ChatPanel {
                 ),
                 el('button', {
                     class: 'chat-sticky-clear',
-                    attrs: {type: 'button', 'aria-label': 'context entfernen'},
+                    attrs: {type: 'button', 'aria-label': t('removeContext')},
                     text: '×',
                     on: {click: () => this.clearStickyContext()}
                 })
@@ -370,7 +405,7 @@ export class ChatPanel {
         this.sessionId = null;
         this.sessionTitle = null;
         this.messages = [];
-        this.threadTitle.textContent = 'Neues Gespräch';
+        this.threadTitle.textContent = t('newChat');
         this.sidebar.setActive(null);
         this.updateSaveAsNoteVisibility();
         this.renderEmpty();
@@ -415,11 +450,11 @@ export class ChatPanel {
 
         const originalText = this.saveAsNoteBtn.textContent;
         this.saveAsNoteBtn.disabled = true;
-        this.saveAsNoteBtn.textContent = 'Speichere…';
+        this.saveAsNoteBtn.textContent = t('saving');
 
         try {
             const {noteId} = await api.saveChatAsNote(this.sessionId);
-            this.saveAsNoteBtn.textContent = '✓ Im Vault';
+            this.saveAsNoteBtn.textContent = t('savedToVault');
             window.setTimeout(() => {
                 this.saveAsNoteBtn.textContent = originalText;
                 this.saveAsNoteBtn.disabled = false;
@@ -428,7 +463,7 @@ export class ChatPanel {
             window.setTimeout(() => this.cb.onOpenNote(noteId), 800);
         } catch (cause) {
             console.error('save chat as note failed', cause);
-            this.saveAsNoteBtn.textContent = 'Fehler';
+            this.saveAsNoteBtn.textContent = t('saveFailed');
             window.setTimeout(() => {
                 this.saveAsNoteBtn.textContent = originalText;
                 this.saveAsNoteBtn.disabled = false;
@@ -507,7 +542,7 @@ export class ChatPanel {
     private renderEmpty(): void {
         clear(this.thread);
         this.thread.appendChild(
-            el('div', {class: 'chat-empty', text: 'Frag was zu deinen Notes — die Antwort basiert ausschließlich auf dem Vault. Gespräche werden automatisch im Vault unter Chats/ gespeichert.'})
+            el('div', {class: 'chat-empty', text: t('empty')})
         );
     }
 
@@ -623,12 +658,12 @@ export class ChatPanel {
         // 'unbekannt' rather than guessing the current global.
         const modelText = msg.model !== undefined && msg.model.length > 0
             ? msg.model
-            : 'unbekannt';
+            : t('unknownModel');
         const modelPill = el('span', {
             class: 'chat-card-model-pill',
-            attrs: {title: `Diese Antwort wurde von ${modelText} erstellt`}
+            attrs: {title: t('modelTitle', {model: modelText})}
         },
-            el('span', {class: 'chat-card-model-prefix', text: 'Antwort von'}),
+            el('span', {class: 'chat-card-model-prefix', text: t('answerBy')}),
             el('span', {class: 'chat-card-badge-dot'}),
             el('span', {class: 'chat-card-badge-label', text: modelText})
         );
@@ -685,7 +720,7 @@ export class ChatPanel {
         const pillBtn = el('button', {
             class: 'chat-card-sources-pill',
             attrs: {type: 'button', 'aria-expanded': 'false'},
-            text: `📎 Quellen · ${sources.length}`
+            text: t('sources', {count: sources.length})
         }) as HTMLButtonElement;
 
         let expanded = false;
@@ -713,7 +748,7 @@ export class ChatPanel {
             preview = await api.chatPreview({question});
         } catch (cause) {
             console.error('DSGVO preview failed', cause);
-            toastError('DSGVO-Vorschau konnte nicht geladen werden, Senden abgebrochen', cause);
+            toastError(t('previewFailed'), cause);
             return false;
         }
 
@@ -750,17 +785,17 @@ export class ChatPanel {
         const tooltipLines: string[] = [];
 
         if (stats.filteredPrivate !== undefined && stats.filteredPrivate > 0) {
-            parts.push(`${stats.filteredPrivate} ausgeblendet`);
-            tooltipLines.push(`${stats.filteredPrivate} Note(s) wurden ausgeblendet (Privat-Marker)`);
+            parts.push(t('hidden', {count: stats.filteredPrivate}));
+            tooltipLines.push(t('hiddenTitle', {count: stats.filteredPrivate}));
         }
 
         const redactions = stats.redactions ?? [];
         const redactTotal = redactions.reduce((sum, r) => sum + r.count, 0);
 
         if (redactTotal > 0) {
-            parts.push(`${redactTotal} redacted`);
+            parts.push(t('redacted', {count: redactTotal}));
             const detail = redactions.map((r) => `${r.count} ${r.kind}`).join(', ');
-            tooltipLines.push(`${redactTotal} PII/Secret-Treffer geschwärzt: ${detail}`);
+            tooltipLines.push(t('redactedTitle', {count: redactTotal, detail}));
         }
 
         if (parts.length === 0) return null;

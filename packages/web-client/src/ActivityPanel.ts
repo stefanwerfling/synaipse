@@ -1,5 +1,40 @@
 import {activityApi, type ActivityBucket, type ActivityCommit, type ActivityCount, type ActivityReport} from './Api.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
+
+/** The server's bucket for commits without a project (Activity.ts). */
+const NO_PROJECT = '<no project>';
+
+const t = defineMessages('activityPanel', {
+    noProject: 'no project',
+    range24h: '24h',
+    range7d: '7d',
+    range30d: '30d',
+    range90d: '90d',
+    justNow: 'just now',
+    minutesAgo: '{count}m ago',
+    hoursAgo: '{count}h ago',
+    daysAgo: '{count}d ago',
+    title: 'Activity',
+    failed: 'failed: {error}',
+    emptyTitle: 'No activity in this window',
+    emptyHint: 'Try a longer range. Activity only shows up after Synaipse-driven writes; manual edits via Obsidian appear here too once the watcher picks them up.',
+    statCommits: 'Commits',
+    statNotes: 'Notes touched',
+    statTools: 'Tools used',
+    statProjects: 'Projects',
+    tools: 'Tools',
+    projects: 'Projects',
+    perDay: 'Commits per day',
+    noData: 'no data',
+    barTitle: '{date}: {commits}, {notes}',
+    commits: '{count} commit|{count} commits',
+    notes: '{count} note|{count} notes',
+    hotNotes: 'Hot notes',
+    noNotes: 'no notes touched',
+    recent: 'Recent commits',
+    loadOlder: 'Load older'
+});
 
 /**
  * Activity dashboard — reads from the ngit log, aggregates per-day commit
@@ -14,11 +49,11 @@ export interface ActivityPanelOptions {
 /** Commits per "Ältere laden" click. */
 const MORE_PAGE = 50;
 
-const RANGES: ReadonlyArray<{label: string; days: number}> = [
-    {label: '24h', days: 1},
-    {label: '7d', days: 7},
-    {label: '30d', days: 30},
-    {label: '90d', days: 90}
+const RANGES: ReadonlyArray<{label: 'range24h' | 'range7d' | 'range30d' | 'range90d'; days: number}> = [
+    {label: 'range24h', days: 1},
+    {label: 'range7d', days: 7},
+    {label: 'range30d', days: 30},
+    {label: 'range90d', days: 90}
 ];
 
 const TOOL_COLORS: Record<string, string> = {
@@ -37,10 +72,10 @@ const formatRelative = (ts: number): string => {
     const now = Date.now();
     const diff = now - ts;
 
-    if (diff < 60_000) return 'just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+    if (diff < 60_000) return t('justNow');
+    if (diff < 3_600_000) return t('minutesAgo', {count: Math.floor(diff / 60_000)});
+    if (diff < 86_400_000) return t('hoursAgo', {count: Math.floor(diff / 3_600_000)});
+    if (diff < 604_800_000) return t('daysAgo', {count: Math.floor(diff / 86_400_000)});
     return new Date(ts).toISOString().slice(0, 10);
 };
 
@@ -68,11 +103,11 @@ export class ActivityPanel {
         this.bodyHost = el('div', {class: 'activity-body'});
 
         const head = el('div', {class: 'activity-head'},
-            el('h2', {text: 'Activity'}),
+            el('h2', {text: t('title')}),
             el('button', {
                 class: 'btn',
                 attrs: {type: 'button'},
-                text: 'Refresh',
+                text: tc('refresh'),
                 on: {click: () => void this.refresh()}
             })
         );
@@ -90,7 +125,7 @@ export class ActivityPanel {
             const btn = el('button', {
                 class: r.days === this.rangeDays ? 'range-btn active' : 'range-btn',
                 attrs: {type: 'button'},
-                text: r.label,
+                text: t(r.label),
                 on: {click: () => {
                     this.rangeDays = r.days;
                     this.renderRanges();
@@ -104,14 +139,14 @@ export class ActivityPanel {
     private async refresh(): Promise<void> {
         clear(this.bodyHost);
         clear(this.statsHost);
-        this.bodyHost.appendChild(el('div', {class: 'activity-loading', text: 'loading…'}));
+        this.bodyHost.appendChild(el('div', {class: 'activity-loading', text: tc('loading')}));
 
         try {
             const report = await activityApi.get(this.rangeDays);
             this.render(report);
         } catch (cause) {
             clear(this.bodyHost);
-            this.bodyHost.appendChild(el('div', {class: 'activity-error', text: `failed: ${String(cause)}`}));
+            this.bodyHost.appendChild(el('div', {class: 'activity-error', text: t('failed', {error: String(cause)})}));
         }
     }
 
@@ -121,24 +156,24 @@ export class ActivityPanel {
 
         if (report.total === 0) {
             this.bodyHost.appendChild(el('div', {class: 'activity-empty'},
-                el('h3', {text: 'No activity in this window'}),
-                el('p', {text: 'Try a longer range. Activity only shows up after Synaipse-driven writes; manual edits via Obsidian appear here too once the watcher picks them up.'})
+                el('h3', {text: t('emptyTitle')}),
+                el('p', {text: t('emptyHint')})
             ));
             return;
         }
 
         const totalNotes = new Set(report.commits.filter((c) => c.noteId !== null).map((c) => c.noteId)).size;
-        this.statsHost.appendChild(this.statTile('Commits', String(report.total)));
-        this.statsHost.appendChild(this.statTile('Notes touched', String(totalNotes)));
-        this.statsHost.appendChild(this.statTile('Tools used', String(report.byTool.length)));
-        this.statsHost.appendChild(this.statTile('Projects', String(report.byProject.length)));
+        this.statsHost.appendChild(this.statTile(t('statCommits'), String(report.total)));
+        this.statsHost.appendChild(this.statTile(t('statNotes'), String(totalNotes)));
+        this.statsHost.appendChild(this.statTile(t('statTools'), String(report.byTool.length)));
+        this.statsHost.appendChild(this.statTile(t('statProjects'), String(report.byProject.length)));
 
         this.bodyHost.appendChild(this.renderTimeline(report.timeline));
 
         const grid = el('div', {class: 'activity-grid'});
         grid.appendChild(this.renderHotNotes(report.hotNotes));
-        grid.appendChild(this.renderHistogram('Tools', report.byTool, (k) => colorForTool(k)));
-        grid.appendChild(this.renderHistogram('Projects', report.byProject, () => 'var(--accent)'));
+        grid.appendChild(this.renderHistogram(t('tools'), report.byTool, (k) => colorForTool(k)));
+        grid.appendChild(this.renderHistogram(t('projects'), report.byProject, () => 'var(--accent)'));
         this.bodyHost.appendChild(grid);
 
         this.bodyHost.appendChild(this.renderRecent(report.commits.slice(0, 30)));
@@ -153,12 +188,12 @@ export class ActivityPanel {
 
     private renderTimeline(buckets: ActivityBucket[]): HTMLElement {
         const section = el('section', {class: 'activity-section'});
-        section.appendChild(el('h3', {class: 'activity-section-title', text: 'Commits per day'}));
+        section.appendChild(el('h3', {class: 'activity-section-title', text: t('perDay')}));
 
         const chartHost = el('div', {class: 'activity-chart'});
 
         if (buckets.length === 0) {
-            chartHost.appendChild(el('div', {class: 'activity-empty', text: 'no data'}));
+            chartHost.appendChild(el('div', {class: 'activity-empty', text: t('noData')}));
             section.appendChild(chartHost);
             return section;
         }
@@ -189,7 +224,7 @@ export class ActivityPanel {
             rect.setAttribute('rx', '2');
 
             const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            title.textContent = `${b.date}: ${b.commits} commits, ${b.notes} notes`;
+            title.textContent = t('barTitle', {date: b.date, commits: t('commits', {count: b.commits}), notes: t('notes', {count: b.notes})});
             rect.appendChild(title);
 
             svg.appendChild(rect);
@@ -210,10 +245,10 @@ export class ActivityPanel {
 
     private renderHotNotes(notes: Array<{noteId: string; edits: number}>): HTMLElement {
         const section = el('section', {class: 'activity-section'});
-        section.appendChild(el('h3', {class: 'activity-section-title', text: 'Hot notes'}));
+        section.appendChild(el('h3', {class: 'activity-section-title', text: t('hotNotes')}));
 
         if (notes.length === 0) {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'no notes touched'}));
+            section.appendChild(el('div', {class: 'activity-empty', text: t('noNotes')}));
             return section;
         }
 
@@ -244,7 +279,7 @@ export class ActivityPanel {
         section.appendChild(el('h3', {class: 'activity-section-title', text: title}));
 
         if (counts.length === 0) {
-            section.appendChild(el('div', {class: 'activity-empty', text: 'no data'}));
+            section.appendChild(el('div', {class: 'activity-empty', text: t('noData')}));
             return section;
         }
 
@@ -258,7 +293,7 @@ export class ActivityPanel {
                     el('div', {class: 'activity-bar-fill', style: {width: `${pct}%`, background: color(c.key)}})
                 ),
                 el('div', {class: 'activity-bar-content'},
-                    el('span', {class: 'activity-bar-label', text: c.key}),
+                    el('span', {class: 'activity-bar-label', text: c.key === NO_PROJECT ? t('noProject') : c.key}),
                     el('span', {class: 'activity-bar-value', text: String(c.count)})
                 )
             ));
@@ -270,7 +305,7 @@ export class ActivityPanel {
 
     private renderRecent(commits: ActivityCommit[]): HTMLElement {
         const section = el('section', {class: 'activity-section'});
-        section.appendChild(el('h3', {class: 'activity-section-title', text: 'Recent commits'}));
+        section.appendChild(el('h3', {class: 'activity-section-title', text: t('recent')}));
 
         const list = el('ul', {class: 'activity-commits'});
 
@@ -291,7 +326,7 @@ export class ActivityPanel {
         const more = el('button', {
             class: 'btn activity-more',
             attrs: {type: 'button'},
-            text: 'Ältere laden',
+            text: t('loadOlder'),
             on: {
                 click: () => {
                     more.setAttribute('disabled', '');
@@ -300,7 +335,7 @@ export class ActivityPanel {
                         cursor = page.nextCursor ?? undefined;
                         if (page.nextCursor === null) more.remove();
                     }).catch((cause: unknown) => {
-                        more.textContent = `failed: ${String(cause)}`;
+                        more.textContent = t('failed', {error: String(cause)});
                     }).finally(() => more.removeAttribute('disabled'));
                 }
             }

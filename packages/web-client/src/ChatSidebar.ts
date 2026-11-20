@@ -1,6 +1,19 @@
 import {api, type ChatSummary} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog} from './Dialogs.js';
+import {defineMessages, formatDateTime, tc} from './I18n.js';
+
+const t = defineMessages('chatSidebar', {
+    newChat: '+  New conversation',
+    title: 'Conversations',
+    loadFailed: 'Could not load the list.',
+    empty: 'No conversations yet.',
+    deleteTitle: 'Delete conversation',
+    deleteConfirmTitle: 'Delete conversation?',
+    deleteConfirmMessage: 'The conversation will be deleted permanently.',
+    today: 'Today {time}',
+    yesterday: 'Yesterday'
+});
 
 export interface ChatSidebarCallbacks {
     onSelect: (id: string) => void;
@@ -22,12 +35,12 @@ export class ChatSidebar {
         const newBtn = el('button', {
             class: 'chat-sidebar-new',
             attrs: {type: 'button'},
-            text: '+  Neues Gespräch',
+            text: t('newChat'),
             on: {click: () => this.cb.onNew()}
         });
 
         const head = el('div', {class: 'chat-sidebar-head'},
-            el('div', {class: 'chat-sidebar-title', text: 'Gespräche'}),
+            el('div', {class: 'chat-sidebar-title', text: t('title')}),
             newBtn
         );
 
@@ -46,7 +59,7 @@ export class ChatSidebar {
             console.error('failed to list chats', cause);
             clear(this.listHost);
             this.listHost.appendChild(
-                el('li', {class: 'chat-sidebar-empty', text: 'Liste konnte nicht geladen werden.'})
+                el('li', {class: 'chat-sidebar-empty', text: t('loadFailed')})
             );
         } finally {
             this.loading = false;
@@ -63,7 +76,7 @@ export class ChatSidebar {
 
         if (this.chats.length === 0) {
             this.listHost.appendChild(
-                el('li', {class: 'chat-sidebar-empty', text: 'Noch keine Gespräche.'})
+                el('li', {class: 'chat-sidebar-empty', text: t('empty')})
             );
             return;
         }
@@ -77,7 +90,7 @@ export class ChatSidebar {
 
             const deleteBtn = el('button', {
                 class: 'chat-sidebar-item-delete',
-                attrs: {type: 'button', title: 'Gespräch löschen', 'aria-label': 'Gespräch löschen'},
+                attrs: {type: 'button', title: t('deleteTitle'), 'aria-label': t('deleteTitle')},
                 text: '×',
                 on: {
                     click: (event) => {
@@ -102,10 +115,10 @@ export class ChatSidebar {
 
     private async handleDelete(id: string): Promise<void> {
         const ok = await confirmDialog({
-            title: 'Gespräch löschen?',
-            message: 'Das Gespräch wird endgültig gelöscht.',
-            confirmLabel: 'Löschen',
-            cancelLabel: 'Abbrechen',
+            title: t('deleteConfirmTitle'),
+            message: t('deleteConfirmMessage'),
+            confirmLabel: tc('delete'),
+            cancelLabel: tc('cancel'),
             danger: true
         });
         if (!ok) return;
@@ -132,14 +145,14 @@ const formatDate = (iso: string): string => {
     const sameDay = date.toDateString() === now.toDateString();
 
     if (sameDay) {
-        return `Heute ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        return t('today', {time: formatDateTime(date, {hour: '2-digit', minute: '2-digit'})});
     }
 
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     if (date.toDateString() === yesterday.toDateString()) {
-        return 'Gestern';
+        return t('yesterday');
     }
 
-    return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.`;
+    return formatDateTime(date, {day: '2-digit', month: '2-digit'});
 };
