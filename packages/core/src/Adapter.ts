@@ -87,6 +87,13 @@ export interface NoteAdapter {
     /** Release local resources (state DB handle). Called from SynaipseService.stop(). */
     closeLocal?(): void;
     backlinksOf(id: NoteId): NoteId[];
+    /**
+     * Wikilink target text → note id from the adapter's incremental link
+     * index (title before alias, first note wins), so a write does not
+     * force a rebuild over every note (plan A1). Optional: without it the
+     * service builds a title/alias map from list().
+     */
+    resolveLink?(key: string): NoteId | undefined;
     tags(): Map<string, NoteId[]>;
 
     /** Index-entry queries (hash + access journal). */

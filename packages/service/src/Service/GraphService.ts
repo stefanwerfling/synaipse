@@ -217,7 +217,19 @@ export class GraphService {
         const myTags = new Set(note.tags);
 
         if (myTags.size > 0) {
-            for (const other of this.notes.list()) {
+            // Only notes sharing a tag, visited in list order as a full scan would (plan A1).
+            const {list, byTag} = this.core.tagPostings();
+            const positions = new Set<number>();
+
+            for (const tag of myTags) {
+                for (const position of byTag.get(tag) ?? []) {
+                    positions.add(position);
+                }
+            }
+
+            for (const position of [...positions].sort((a, b) => a - b)) {
+                const other = list[position]!;
+
                 if (other.id === id) {
                     continue;
                 }
@@ -237,17 +249,14 @@ export class GraphService {
         }
 
         return [...accumulator.entries()]
-            .map(([otherId, {score, reasons}]) => {
-                const other = this.notes.tryGet(otherId);
-                return {
-                    id: otherId,
-                    title: other?.title ?? otherId,
-                    score,
-                    reasons: [...reasons]
-                };
-            })
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
+            .sort((a, b) => b[1].score - a[1].score)
+            .slice(0, limit)
+            .map(([otherId, {score, reasons}]) => ({
+                id: otherId,
+                title: this.notes.tryGet(otherId)?.title ?? otherId,
+                score,
+                reasons: [...reasons]
+            }));
     }
 
     /**

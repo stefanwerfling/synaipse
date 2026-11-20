@@ -19,6 +19,18 @@ export interface NoteCoreOptions {
     embedExcludePrefixes: readonly string[];
 }
 
+/** Read side of a wikilink-target → note-id lookup (a Map satisfies it). */
+export interface LinkKeys {
+    get(key: string): NoteId | undefined;
+    has(key: string): boolean;
+}
+
+/** The note list a tag index was built from, and tag → positions in it. */
+export interface TagPostings {
+    readonly list: readonly Note[];
+    readonly byTag: ReadonlyMap<string, readonly number[]>;
+}
+
 /**
  * The state every part of the service shares (plan P7 / D2): the note
  * adapter, both search indexes, the embedding bookkeeping and the
@@ -39,14 +51,23 @@ export class NoteCore {
     private cachedGraph: Graph | null = null;
     private cachedAdjacency: AdjacencyMap | null = null;
     private cachedLinkKeys: Map<string, NoteId> | null = null;
+    /** {@link linkKeyMap} backed by NoteAdapter.resolveLink, when the adapter has it. */
+    private readonly adapterLinkKeys: LinkKeys | null;
     /** Superseded note → successor (plan P8 / B4), rebuilt after topology changes. */
     private cachedSuccessors: Map<NoteId, NoteId> | null = null;
+    /** See {@link tagPostings}. */
+    private cachedTagPostings: TagPostings | null = null;
     /** Service-internal reactions (layout recompute); run before the public listeners. */
     private readonly invalidateHooks: Array<() => void> = [];
     private readonly topologyListeners = new Set<(version: number) => void>();
 
     public constructor(opts: NoteCoreOptions) {
         this.notes = opts.notes;
+        const resolve = opts.notes.resolveLink?.bind(opts.notes);
+        this.adapterLinkKeys = resolve === undefined ? null : {
+            get: (key) => resolve(key),
+            has: (key) => resolve(key) !== undefined
+        };
         this.index = opts.index;
         this.embedModel = opts.embedModel;
         this.embedExcludePrefixes = opts.embedExcludePrefixes;
@@ -390,12 +411,42 @@ export class NoteCore {
         };
     }
 
-    /** Cached wikilink-target → note-id map (titles, then aliases; see buildLinkKeyMap). */
-    public linkKeyMap(): Map<string, NoteId> {
+    /**
+     * Wikilink target → note id (titles, then aliases). Answered by the
+     * adapter's incremental link index when it has one (plan A1: no
+     * rebuild over every note after each write); otherwise a map built
+     * from list() and cached until the next topology change.
+     */
+    public linkKeyMap(): LinkKeys {
+        if (this.adapterLinkKeys !== null) {
+            return this.adapterLinkKeys;
+        }
         if (this.cachedLinkKeys === null) {
             this.cachedLinkKeys = buildLinkKeyMap(this.notes.list());
         }
         return this.cachedLinkKeys;
+    }
+
+    /**
+     * tag → positions in `list`, the adapter's current note list (plan A1).
+     * Rebuilt only when the adapter hands out a new list, i.e. after a
+     * change, so it can't go stale even if a write path forgets
+     * {@link invalidateTopology}.
+     */
+    public tagPostings(): TagPostings {
+        const list = this.notes.list();
+        if (this.cachedTagPostings?.list !== list) {
+            const byTag = new Map<string, number[]>();
+            for (let i = 0; i < list.length; i++) {
+                for (const tag of new Set(list[i]!.tags)) {
+                    let positions = byTag.get(tag);
+                    if (positions === undefined) byTag.set(tag, positions = []);
+                    positions.push(i);
+                }
+            }
+            this.cachedTagPostings = {list, byTag};
+        }
+        return this.cachedTagPostings;
     }
 
     /** Superseded note → successor, from `supersedes` frontmatter and typed links (path, title or alias). */

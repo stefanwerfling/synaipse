@@ -95,11 +95,11 @@ Suite 1108 grün. Tool-Liste von ca. 7k auf ca. 4,5k Tokens (31 sichtbare Tools)
 | Punkt | Stand |
 |---|---|
 | B1 SDK, `instructions`, Annotations, kompaktes JSON, `isError` statt Protokollfehler, Enums ablehnen, `Tools/`-Split | erledigt. **Abweichung:** kein Umstieg auf `McpServer.registerTool`; der Low-Level-`Server` kann `instructions`, Annotations und `title` genauso, ohne alle Schemas nach zod zu portieren |
-| B1 `outputSchema`/`structuredContent`, `resource_link` | offen → P8 (zusammen mit Resources) |
+| B1 `outputSchema`/`structuredContent`, `resource_link` | erledigt in P8 S5 |
 | B2 `synaipse_list`, `synaipse_links`, begrenzter `synaipse_graph`, `link_note` mit NoteRef-Validierung | erledigt. Alte Namen am 2026-11-20 entfernt (Entscheidung #3); ein Aufruf nennt den Nachfolger (`REMOVED_TOOLS`) |
 | B2 Admin-Gruppe hinter Flag | erledigt als `SYNAIPSE_MCP_TOOLSETS` (`core`, `roadmap`, `benchmark`, `admin`; `admin` default aus). `list_changed` entfällt, weil die Toolsets pro Prozess feststehen |
 | B3 schlanke Write-Antworten mit Dead-Link-Warnungen, `read_note` mit Titel/Alias, `section`, Paging, Vorschlägen; ISO-Zeit plus Alter; Roadmap-Writes nur Gliederung | erledigt |
-| B3 `search`-Filter und Treffer-Anker, globales `verbosity` | offen → P8. `verbosity` scheint nach den schlanken Defaults überflüssig |
+| B3 `search`-Filter und Treffer-Anker, globales `verbosity` | Filter und Anker erledigt in P8 S4; `verbosity` entfällt (schlanke Defaults machen es überflüssig) |
 | B6 Primer als `additionalContext` | erledigt (nicht bei `resume`, nicht wenn `CLAUDE.md` ihn noch importiert) |
 | B6 Plugin-`.mcp.json`, Skill, Stop-Hook, Allowlist-Logging, `install-skill.mjs` | erledigt (P8 S8) |
 
@@ -117,7 +117,7 @@ Suite 1127 grün (25 übersprungen), Lint ohne Fehler.
 | G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bundle-Budget seit D4 drin; Bench-Gate seit A7 als eigener Job `bench`; Playwright-Smoke seit P4 als Job `e2e` |
 | G5 Pinning | erledigt: `ngit`, `vts` und `mdfloor` auf die Commit-SHAs aus dem Lockfile gepinnt; `engines.node >=22.13`, `.nvmrc`. **Offen:** vitest-Major-Update und Ersatz von `gray-matter` (braucht Round-Trip-Tests, eigener Slice) |
 | A1 `LinkIndex` und Bulk-Write | erledigt: Backlinks werden inkrementell gepflegt, Tag-Index ebenso. `service.batch()` macht einen ngit-Commit, embeddet in Gruppen und flusht einmal. Crawler-CLI und Jobs (gitea, devto, github-stars, code) nutzen es |
-| A1 persistente Titel/Alias-Indizes | offen. Die O(N)-Rescans in `related`, `prime`, `todos` usw. bleiben vorerst; sie sind erst ab ca. 50k Notes spürbar → mit A7-Bench messen, dann entscheiden |
+| A1 persistente Titel/Alias-Indizes | erledigt 2026-11-20 (gemessen, dann gebaut; siehe unten „A1-Rest“) |
 | A2 SQLite-State | erledigt für die Index-Einträge: `<vault>/.synaipse/state.db` (`node:sqlite`, WAL), es werden nur geänderte Zeilen geschrieben, Fremdprozesse über `PRAGMA data_version` erkannt. Das alte JSON wird beim ersten Start importiert (ohne Re-Embedding) und als `*.migrated-<ts>` behalten. Mit echtem Vault-Abzug (2118 Einträge) geprüft: 0 Abweichungen, Import ca. 100 ms, 200 Zugriffe plus Flush ca. 3 ms. Such-Treffer zählen nicht mehr als Zugriff. **Offen:** Tabellen `audit`, `jobs`, `query_cache` (die Sidecars bleiben JSON, bis ein Slice sie braucht) |
 | G2 Logging | erledigt mit eigenem, abhängigkeitsfreiem Logger (`core/Log.ts`) statt pino: Levels, `child`, Kontext-Provider, `SYNAIPSE_LOG_FORMAT=json`, immer stderr. Alle serverseitigen `stderr.write` wurden umgestellt; CLI-Ausgaben bleiben. **Abweichung:** kein pino, weil `core` auch im Browser läuft und der Bedarf klein ist. **Offen:** Request-IDs über den Kontext-Provider und `/api/metrics` |
 
@@ -137,8 +137,8 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 | D1 `Disposables`, `View`, Tab-Registry, Lazy-Panels | erledigt (`Disposables.ts`, `Tabs.ts`). Haupt-Chunk 643 → 495 kB. **Offen:** reaktiver Kern (`Signal`) → P7 |
 | D3 Scoping | erledigt: jede Regel unter `.synaipse-root` (Test als Wächter statt stylelint), Portal-Layer für Overlays, ein alter Kommentar-Bug (`.bm-kpis` verworfen) behoben. **Offen:** Datei-Split in `@layer`s, 63 Hex-Farben auf Tokens, Breakpoints → P7 |
 | E2 explizite Config, `ready`/`health`, vollständiges `close`, Body robust, Typ-Export | erledigt (`startSynaipseEmbed`, `server/body.ts`, Exports `@synaipse/web/embed` und `/mount`) |
-| E2 `registerTools` beim Host-Gateway, Auth-Brücke | offen, hängt an §13.2 |
-| PKG-Studio-Seite | offen: Umstellung im Host-Repo, Schritte in embedding.md („Migrating PKG Studio“) |
+| E2 `registerTools` beim Host-Gateway, Auth-Brücke | erledigt: Gateway-Registrar in P9 S2, Auth-Brücke im Gegenplan G7 |
+| PKG-Studio-Seite | umgesetzt (Gegenplan G0–G7), im PKG-Studio-Repo noch nicht committet |
 
 **Nebenbefund:** Zeigte `SYNAIPSE_INDEX_CACHE` auf eine andere Vault, hat die Migration aus P1 deren Datei umbenannt. Behoben in `4e0d8b7`: Umbenannt wird nur noch innerhalb der eigenen Vault.
 
@@ -409,6 +409,19 @@ Messung lokal (8 Kerne, Node 24), zwei Läufe, beide Größen zusammen unter 1 M
 | Write p95 | 11 ms | 44 ms |
 
 Zweiter Lauf gegen den ersten: größte Abweichung +10 % (RSS 50k), kein Fehlalarm. Eine präparierte Baseline mit halbierter Layout-Zeit schlägt an. Warmstart ≈ Kaltstart ist erwartbar: Der Hash-Cache in `state.db` spart nur Embeddings, die im Gate aus sind. Auffällig für A1: Write-p95 und Search-p95 wachsen bei 5-mal so vielen Notes etwa 4-fach, also nahezu linear.
+
+A1-Rest (2026-11-20): gemessen im Prozess bei 10k/50k Notizen, nachdem der Watcher seinen ersten Durchlauf beendet hatte. Ein Titel-Index existierte schon (`linkKeyMap`), wurde aber nach jedem Write verworfen und beim nächsten Zugriff über alle Notizen neu gebaut; die eigentlichen Kosten lagen woanders:
+
+| Aufruf (50k) | vorher | nachher | Änderung |
+|---|---|---|---|
+| `list()` | 18 ms | 0 ms | Vault und MariaDB-Adapter bauen die Liste mit Backlinks einmal pro Stand und geben sie eingefroren heraus |
+| `related` | 64 ms | 26 ms | nur Notizen mit gemeinsamem Tag (`NoteCore.tagPostings`, an die Identität der Liste gebunden), erst kürzen, dann auflösen; Ergebnis per Test identisch mit dem alten Vollscan |
+| `todos` | 89 ms | 0 ms | pro Notiz geparst und gemerkt, solange Titel und Inhalt gleich bleiben |
+| `appendSessionLog` mit Referenz | 151 ms | 1 ms | Auflösung über den Link-Index des Adapters (`NoteAdapter.resolveLink`, inkrementell) statt eigener Map; Titel vor Alias wie beim geschriebenen `[[…]]` |
+| `prime` (Projekt mit allen 50k Notizen) | 174 ms | 55 ms | Folge der obigen |
+| `listRoadmaps` | 20 ms | 3 ms | Folge von `list()` |
+
+`linkKeyMap()` fragt jetzt den Link-Index des Adapters, den auch die Backlinks nutzen; Graph-Kanten und Backlinks lösen doppelte Titel damit nach derselben Regel auf. Adapter ohne `resolveLink` bekommen weiter die gecachte Map. Write p95 über HTTP bleibt bei ≈ 45 ms (50k): rund 80 % davon kostet chokidar, das nach jedem atomaren Write das ganze Zielverzeichnis neu einliest (im Bench-Vault 1000 Dateien pro Ordner). Die Kosten hängen an der Ordnergröße, nicht an der Vault-Größe; im echten Vault (max. 226 Notizen pro Ordner) sind es grob 5–8 ms. Offener Punkt, falls große Ordner (Crawler) relevant werden: Watcher ohne Verzeichnis-Rescan bei eigenen Writes.
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 

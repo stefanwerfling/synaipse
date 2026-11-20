@@ -215,6 +215,8 @@ export const buildFlushStatement = (vaultId: number, chunk: ReadonlyArray<readon
  */
 export class MariaDBNoteAdapter implements NoteAdapter {
     private notes = new Map<NoteId, Note>();
+    /** See {@link list}; null after any change to {@link notes}. */
+    private listCache: Note[] | null = null;
     private entries = new Map<NoteId, NoteEntry>();
     private readonly links = new LinkIndex();
     private tagIndex = new Map<string, Set<NoteId>>();
@@ -256,6 +258,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             [this.cfg.vaultId]
         );
 
+        this.listCache = null;
         this.notes.clear();
         this.entries.clear();
         this.links.clear();
@@ -449,8 +452,12 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         return this.loaded;
     }
 
+    /** Built once per state and frozen, like `Vault.list` (plan A1). */
     public list(): Note[] {
-        return [...this.notes.values()].map((n) => this.withBacklinks(n));
+        if (this.listCache === null) {
+            this.listCache = Object.freeze([...this.notes.values()].map((n) => Object.freeze(this.withBacklinks(n)))) as Note[];
+        }
+        return this.listCache;
     }
 
     public get(id: NoteId): Note {
@@ -476,6 +483,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             throw new Error(`Note not found: ${id}`);
         }
         const note = rowToNote(row);
+        this.listCache = null;
         this.notes.set(note.id, note);
         return this.withBacklinks(note);
     }
@@ -551,6 +559,10 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         this.unindexNote(id);
         this.entries.delete(id);
         this.dirtyEntries.delete(id);
+    }
+
+    public resolveLink(key: string): NoteId | undefined {
+        return key.length === 0 ? undefined : this.links.resolve(key);
     }
 
     public backlinksOf(id: NoteId): NoteId[] {
@@ -741,6 +753,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
 
     private indexNote(note: Note): void {
         const prev = this.notes.get(note.id);
+        this.listCache = null;
         this.notes.set(note.id, note);
 
         if (prev) {
@@ -766,6 +779,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     private unindexNote(id: NoteId): void {
         const note = this.notes.get(id);
         if (!note) return;
+        this.listCache = null;
         this.notes.delete(id);
         for (const tag of note.tags) {
             const bucket = this.tagIndex.get(tag);

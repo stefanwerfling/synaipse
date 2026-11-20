@@ -66,6 +66,10 @@ export class FilesystemNoteAdapter implements NoteAdapter {
         return this.vault.commitBatch(changes, ctx);
     }
 
+    public resolveLink(key: string): NoteId | undefined {
+        return this.vault.resolveLink(key);
+    }
+
     public backlinksOf(id: NoteId): NoteId[] {
         return this.vault.backlinksOf(id);
     }

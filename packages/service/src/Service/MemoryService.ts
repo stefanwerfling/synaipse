@@ -10,6 +10,28 @@ import {buildCommitMessage, extractExcerpt, MS_PER_DAY} from './Util.js';
 
 const TODO_REGEX = /^\s*-\s+\[([ xX])\]\s+(.+?)\s*$/;
 
+/** Checkbox lines of one note, open and done. */
+const parseTodos = (note: Note): TodoItem[] => {
+    const result: TodoItem[] = [];
+    const lines = note.content.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+        const match = TODO_REGEX.exec(lines[i] ?? '');
+
+        if (match !== null) {
+            result.push(Object.freeze({
+                noteId: note.id,
+                title: note.title,
+                line: i + 1,
+                text: (match[2] ?? '').trim(),
+                done: match[1] !== ' '
+            }));
+        }
+    }
+
+    return result;
+};
+
 /**
  * Agent memory: the session log and the remember inbox (writes), the
  * primer for a new session, open todos, and decay (stale notes and
@@ -22,6 +44,11 @@ export class MemoryService {
         private readonly searchService: SearchService,
         private readonly scope: ProjectScope
     ) {}
+
+    /** Parsed todos per note, reused while title and content are unchanged (plan A1). */
+    private readonly todosByNote = new Map<NoteId, {title: string; content: string; items: readonly TodoItem[]}>();
+    /** All todos (open and done) of one note list, see {@link allTodos}. */
+    private todoSnapshot: {list: readonly Note[]; items: readonly TodoItem[]} | null = null;
 
     private get notes(): NoteCore['notes'] {
         return this.core.notes;
@@ -62,28 +89,12 @@ export class MemoryService {
         // don't exist yet) still get written as a wikilink above but don't
         // bump anything here.
         if (references.length > 0) {
-            const titleOrAliasToNote = new Map<string, Note>();
-
-            for (const other of this.notes.list()) {
-                if (other.title.length > 0 && !titleOrAliasToNote.has(other.title)) {
-                    titleOrAliasToNote.set(other.title, other);
-                }
-
-                const aliases = other.frontmatter.aliases;
-
-                if (aliases === undefined) {
-                    continue;
-                }
-
-                for (const alias of aliases) {
-                    if (alias.length > 0 && !titleOrAliasToNote.has(alias)) {
-                        titleOrAliasToNote.set(alias, other);
-                    }
-                }
-            }
+            // Resolved like the [[reference]] written above: title before alias (plan A1: cached map, no rescan).
+            const keys = this.core.linkKeyMap();
 
             for (const reference of references) {
-                const target = titleOrAliasToNote.get(reference);
+                const targetId = keys.get(reference);
+                const target = targetId === undefined ? undefined : this.notes.tryGet(targetId);
 
                 if (target !== undefined) {
                     // Seed hash/mtime like touchAccess does — a note that's
@@ -268,40 +279,46 @@ export class MemoryService {
     }
 
     public todos(pathPrefix = '', includeDone = false): TodoItem[] {
-        const result: TodoItem[] = [];
+        return this.allTodos().filter((t) =>
+            (includeDone || !t.done) && (pathPrefix.length === 0 || t.noteId.startsWith(pathPrefix)));
+    }
 
-        for (const note of this.notes.list()) {
-            if (pathPrefix.length > 0 && !note.id.startsWith(pathPrefix)) {
-                continue;
+    /**
+     * Every checkbox in the vault, in note-list order. Between writes the
+     * adapter hands out the same list and this is one lookup; after a write
+     * only the changed notes are parsed again.
+     */
+    private allTodos(): readonly TodoItem[] {
+        const list = this.notes.list();
+
+        if (this.todoSnapshot?.list === list) {
+            return this.todoSnapshot.items;
+        }
+
+        const items: TodoItem[] = [];
+
+        for (const note of list) {
+            let cached = this.todosByNote.get(note.id);
+
+            if (cached === undefined || cached.content !== note.content || cached.title !== note.title) {
+                cached = {title: note.title, content: note.content, items: parseTodos(note)};
+                this.todosByNote.set(note.id, cached);
             }
 
-            const lines = note.content.split('\n');
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i] ?? '';
-                const match = TODO_REGEX.exec(line);
-
-                if (match === null) {
-                    continue;
-                }
-
-                const done = match[1] !== ' ';
-
-                if (done && !includeDone) {
-                    continue;
-                }
-
-                result.push({
-                    noteId: note.id,
-                    title: note.title,
-                    line: i + 1,
-                    text: (match[2] ?? '').trim(),
-                    done
-                });
+            for (const item of cached.items) {
+                items.push(item);
             }
         }
 
-        return result;
+        if (this.todosByNote.size > list.length) {
+            const live = new Set(list.map((n) => n.id));
+            for (const id of this.todosByNote.keys()) {
+                if (!live.has(id)) this.todosByNote.delete(id);
+            }
+        }
+
+        this.todoSnapshot = {list, items};
+        return items;
     }
 
     public async prime(opts: PrimeOptions = {}): Promise<PrimeResult> {

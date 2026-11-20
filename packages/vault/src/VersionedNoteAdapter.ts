@@ -26,6 +26,7 @@ const log = createLogger('versioned-notes');
  */
 export class VersionedNoteAdapter implements NoteAdapter {
     public readonly onExternalChange?: (listener: (changes: readonly ExternalNoteChange[]) => void) => () => void;
+    public readonly resolveLink?: (key: string) => NoteId | undefined;
 
     public constructor(
         private readonly inner: NoteAdapter,
@@ -33,6 +34,10 @@ export class VersionedNoteAdapter implements NoteAdapter {
     ) {
         if (inner.onExternalChange !== undefined) {
             this.onExternalChange = inner.onExternalChange.bind(inner);
+        }
+        // Only when the inner adapter has one: otherwise the service falls back to its own map.
+        if (inner.resolveLink !== undefined) {
+            this.resolveLink = inner.resolveLink.bind(inner);
         }
     }
 

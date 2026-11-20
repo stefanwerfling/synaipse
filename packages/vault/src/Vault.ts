@@ -40,6 +40,8 @@ export class Vault {
     private readonly links = new LinkIndex();
     /** tag → ids, maintained incrementally alongside {@link links}. */
     private readonly tagIndex = new Map<string, Set<NoteId>>();
+    /** See {@link list}; null after any change to {@link notes}. */
+    private listCache: Note[] | null = null;
     private loaded = false;
     private readonly historyConfig: VaultHistoryConfig | null;
     private repo: Repo | null = null;
@@ -94,6 +96,7 @@ export class Vault {
 
     public async load(): Promise<void> {
         await this.ensureRoot();
+        this.listCache = null;
         this.notes.clear();
         this.links.clear();
         this.tagIndex.clear();
@@ -120,8 +123,16 @@ export class Vault {
         return this.loaded;
     }
 
+    /**
+     * The note list with backlinks, built once per vault state (plan A1):
+     * dropped on every change, so callers between writes share one array
+     * instead of copying every note. Frozen, because it is shared.
+     */
     public list(): Note[] {
-        return [...this.notes.values()].map((n) => this.withBacklinks(n));
+        if (this.listCache === null) {
+            this.listCache = Object.freeze([...this.notes.values()].map((n) => Object.freeze(this.withBacklinks(n)))) as Note[];
+        }
+        return this.listCache;
     }
 
     public get(id: NoteId): Note {
@@ -257,6 +268,11 @@ export class Vault {
         }
     }
 
+    /** See NoteAdapter.resolveLink. */
+    public resolveLink(key: string): NoteId | undefined {
+        return key.length === 0 ? undefined : this.links.resolve(key);
+    }
+
     public backlinksOf(id: NoteId): NoteId[] {
         // Title before alias, first note wins — the same rule as graph(),
         // related() and the MariaDB adapter (see core/LinkIndex).
@@ -307,6 +323,7 @@ export class Vault {
         }
 
         this.unindexTags(this.notes.get(note.id));
+        this.listCache = null;
         this.notes.set(note.id, note);
         this.links.upsert(note);
         for (const tag of note.tags) {
@@ -318,6 +335,7 @@ export class Vault {
 
     private forget(id: NoteId): void {
         this.unindexTags(this.notes.get(id));
+        this.listCache = null;
         this.notes.delete(id);
         this.links.remove(id);
     }
