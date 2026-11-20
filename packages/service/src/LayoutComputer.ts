@@ -1,13 +1,15 @@
 import {createLogger} from '@synaipse/core';
 import {WorkerRpc} from '@synaipse/core/worker-rpc';
 import {computeLayout, type GraphInput, type GraphLayout} from './Layout.js';
+import {packGraphInput, transferablesOf} from './LayoutTransfer.js';
 
 const log = createLogger('layout');
 
 /**
  * Runs {@link computeLayout} off the main thread (plan P4 / A3).
  *
- * One lazily started worker serves all requests in order. When the
+ * One lazily started worker serves all requests in order; the graph
+ * goes over packed (ids once, edges as index pairs, see LayoutTransfer). When the
  * compiled worker entry is missing (vitest runs the TypeScript sources)
  * or the worker cannot start, it computes in-process instead, so callers
  * never have to care. A crashed worker rejects what it had in flight and
@@ -34,7 +36,8 @@ export class LayoutComputer {
 
         if (this.rpc.available) {
             try {
-                return await this.rpc.call<GraphLayout>('computeLayout', input);
+                const packed = packGraphInput(input);
+                return await this.rpc.callTransfer<GraphLayout>('computePackedLayout', [packed], transferablesOf(packed));
             } catch (error) {
                 if (this.rpc.available) throw error;
                 log.warn('layout worker unavailable, computing in-process', {error: error instanceof Error ? error.message : String(error)});

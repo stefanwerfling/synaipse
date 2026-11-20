@@ -50,6 +50,11 @@ export class WorkerRpc {
     }
 
     public async call<T>(method: string, ...args: unknown[]): Promise<T> {
+        return this.callTransfer<T>(method, args, []);
+    }
+
+    /** Like {@link call}, moving `transfer` (ArrayBuffers inside `args`) instead of copying them. */
+    public async callTransfer<T>(method: string, args: unknown[], transfer: ArrayBuffer[]): Promise<T> {
         if (this.closed) {
             throw new Error(`${this.name} worker is closed`);
         }
@@ -60,7 +65,7 @@ export class WorkerRpc {
         return new Promise<T>((resolve, reject) => {
             this.pending.set(id, {resolve: resolve as (value: unknown) => void, reject});
             worker.ref();
-            worker.postMessage({id, method, args} satisfies RpcRequest);
+            worker.postMessage({id, method, args} satisfies RpcRequest, transfer);
         });
     }
 
