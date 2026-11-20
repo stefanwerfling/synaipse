@@ -5,6 +5,35 @@ import {listDraftIds} from './Drafts.js';
 import {GROUP_ROW_H, firstRowAt, layoutRows, noteRowHeight, type GroupMode, type VirtualRow} from './NotesTree.js';
 import {PersistentValue, setCodec} from './Persistence.js';
 import {slugify} from './Wikilinks.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('notesSidebar', {
+    filter: 'Filter notes…',
+    newNote: 'New note',
+    newShort: '+ New',
+    groupBy: 'Group notes by',
+    name: 'Name…',
+    nameLabel: 'Note name',
+    inFolder: 'in {folder}',
+    error: 'Error: {message}',
+    resize: 'Resize sidebar',
+    resizeHint: 'Drag to resize, double-click to reset',
+    modeFolder: 'folder',
+    modeTag: 'tag',
+    modeRecent: 'recent',
+    byFolder: 'Group by folder',
+    byTag: 'Group by primary tag',
+    byRecent: 'Group by modification time',
+    count: '{count} note|{count} notes',
+    countFiltered: '{visible} of {total}',
+    emptyTitle: 'No notes yet',
+    emptyHint: 'Click + New to create your first note.',
+    noMatchTitle: 'No matches',
+    noMatchHint: 'No notes match “{filter}”.',
+    newIn: 'New note in {folder}',
+    private: 'GDPR: private, never sent to external LLMs',
+    draft: 'Unsaved draft'
+});
 
 const STORAGE_GROUP_MODE = 'synaipse.notes.groupMode';
 const STORAGE_COLLAPSED = 'synaipse.notes.collapsedGroups';
@@ -64,7 +93,7 @@ export class NotesSidebar {
         this.draftIds = listDraftIds();
 
         const filterInput = el('input', {
-            attrs: {type: 'text', placeholder: 'Filter notes…'},
+            attrs: {type: 'text', placeholder: t('filter')},
             on: {input: (e) => {
                 this.filter = (e.target as HTMLInputElement).value;
                 this.render();
@@ -73,19 +102,19 @@ export class NotesSidebar {
 
         const newBtn = el('button', {
             class: 'btn btn-primary btn-new',
-            attrs: {type: 'button', title: 'New note'},
-            text: '+ New',
+            attrs: {type: 'button', title: t('newNote')},
+            text: t('newShort'),
             on: {click: () => this.opts.onNew()}
         });
 
         const head = el('div', {class: 'sidebar-head'}, filterInput, newBtn);
 
-        this.modeSwitcher = el('div', {class: 'group-mode-switcher', attrs: {role: 'group', 'aria-label': 'Group notes by'}});
+        this.modeSwitcher = el('div', {class: 'group-mode-switcher', attrs: {role: 'group', 'aria-label': t('groupBy')}});
         this.renderModeSwitcher();
 
         this.createInput = el('input', {
             class: 'create-row-input',
-            attrs: {type: 'text', placeholder: 'Name…', 'aria-label': 'Note name'},
+            attrs: {type: 'text', placeholder: t('name'), 'aria-label': t('nameLabel')},
             on: {keydown: (e) => this.onCreateInputKey(e as KeyboardEvent)}
         }) as HTMLInputElement;
         this.createHint = el('div', {class: 'create-row-hint'});
@@ -94,7 +123,7 @@ export class NotesSidebar {
             this.createInput
         );
 
-        this.noteCounter = el('div', {class: 'sidebar-counter', text: '0 notes'});
+        this.noteCounter = el('div', {class: 'sidebar-counter', text: t('count', {count: 0})});
 
         this.noteList = el('ul', {
             class: 'note-list',
@@ -144,7 +173,7 @@ export class NotesSidebar {
             ? {folder, title: context.title}
             : {folder};
         this.createHint.classList.remove('create-row-hint-error');
-        this.createHint.textContent = `in ${folder.length > 0 ? folder + '/' : '/'}`;
+        this.createHint.textContent = t('inFolder', {folder: folder.length > 0 ? folder + '/' : '/'});
         this.createInput.value = context.title !== undefined ? slugify(context.title) : '';
         this.createRow.removeAttribute('hidden');
         // Focus + select once the row is in the layout (post-layout tick).
@@ -187,7 +216,7 @@ export class NotesSidebar {
             await this.opts.onCreate(path, title);
             this.closeCreateRow();
         } catch (e) {
-            this.createHint.textContent = `Error: ${e instanceof Error ? e.message : String(e)}`;
+            this.createHint.textContent = t('error', {message: e instanceof Error ? e.message : String(e)});
             this.createHint.classList.add('create-row-hint-error');
         }
     }
@@ -233,8 +262,8 @@ export class NotesSidebar {
             attrs: {
                 role: 'separator',
                 'aria-orientation': 'vertical',
-                'aria-label': 'Resize sidebar',
-                title: 'Drag to resize, double-click to reset'
+                'aria-label': t('resize'),
+                title: t('resizeHint')
             }
         });
 
@@ -313,9 +342,9 @@ export class NotesSidebar {
             }}
         });
 
-        this.modeSwitcher.appendChild(button('folder', 'folder', 'Group by folder'));
-        this.modeSwitcher.appendChild(button('tag', 'tag', 'Group by primary tag'));
-        this.modeSwitcher.appendChild(button('recent', 'recent', 'Group by modification time'));
+        this.modeSwitcher.appendChild(button('folder', t('modeFolder'), t('byFolder')));
+        this.modeSwitcher.appendChild(button('tag', t('modeTag'), t('byTag')));
+        this.modeSwitcher.appendChild(button('recent', t('modeRecent'), t('byRecent')));
     }
 
     private renderEmptyList(title: string, hint: string): void {
@@ -340,18 +369,18 @@ export class NotesSidebar {
         const total = this.notes.length;
 
         if (q === '') {
-            this.noteCounter.textContent = total === 1 ? '1 note' : `${total} notes`;
+            this.noteCounter.textContent = t('count', {count: total});
         } else {
-            this.noteCounter.textContent = `${visible.length} of ${total}`;
+            this.noteCounter.textContent = t('countFiltered', {visible: visible.length, total});
         }
 
         if (this.notes.length === 0) {
-            this.renderEmptyList('No notes yet', 'Click + New to create your first note.');
+            this.renderEmptyList(t('emptyTitle'), t('emptyHint'));
             return;
         }
 
         if (visible.length === 0) {
-            this.renderEmptyList('No matches', `No notes match "${this.filter}".`);
+            this.renderEmptyList(t('noMatchTitle'), t('noMatchHint', {filter: this.filter}));
             return;
         }
 
@@ -415,8 +444,8 @@ export class NotesSidebar {
                     class: 'note-group-add',
                     attrs: {
                         type: 'button',
-                        title: `New note in ${folderKey}/`,
-                        'aria-label': `New note in ${folderKey}`
+                        title: t('newIn', {folder: `${folderKey}/`}),
+                        'aria-label': t('newIn', {folder: folderKey})
                     },
                     text: '+',
                     on: {click: (ev) => {
@@ -467,7 +496,7 @@ export class NotesSidebar {
             ? el('span', {
                 class: 'note-list-lock',
                 text: '🔒',
-                attrs: {title: 'DSGVO: privat — wird nicht an externe LLMs gesendet'}
+                attrs: {title: t('private')}
             })
             : null;
 
@@ -475,7 +504,7 @@ export class NotesSidebar {
             ? el('span', {
                 class: 'note-list-draft',
                 text: '●',
-                attrs: {title: 'Unsaved draft'}
+                attrs: {title: t('draft')}
             })
             : null;
 

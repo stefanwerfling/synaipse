@@ -3,7 +3,7 @@ import {extractTypedLinks} from '@synaipse/core';
 import {api, NoteSummary} from './Api.js';
 import {clear, el} from './Dom.js';
 import {confirmDialog} from './Dialogs.js';
-import {Editor} from './Editor.js';
+import type {Editor} from './Editor.js';
 import {HistoryPanel} from './HistoryPanel.js';
 import {LocalGraphPanel} from './LocalGraphPanel.js';
 import {clipSnippet} from './HoverCard.js';
@@ -20,6 +20,20 @@ import {toastError} from './Toast.js';
 import {buildWikilinkResolver, WikilinkResolver} from './Wikilinks.js';
 import {fuzzyMatch} from './Fuzzy.js';
 import type {WikilinkMatch} from './WikilinkAutocomplete.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('notesPanel', {
+    unsavedTitle: 'Unsaved changes',
+    discard: 'Discard',
+    discardSwitch: 'Discard your changes and switch to the other note?',
+    discardNew: 'Discard your changes and create a new note?',
+    deleteTitle: 'Delete note?',
+    deleteMessage: '{id} will be deleted.',
+    deleteFailed: 'Could not delete',
+    empty: '(empty)',
+    noneTitle: 'No note selected',
+    noneHint: 'Pick a note from the sidebar or create a new one to get started.'
+});
 
 export interface NotesPanelOptions {
     onNotesChanged: () => void;
@@ -56,6 +70,8 @@ export class NotesPanel {
 
     private viewerPreview: MarkdownPreview | null = null;
     private currentEditor: Editor | null = null;
+    /** Bumped on every editor (re)build; a stale lazy load sees a newer value and gives up. */
+    private editorGeneration = 0;
     private historyPanel: HistoryPanel | null = null;
     private historyEnabled = false;
     private chatEnabled = false;
@@ -153,9 +169,9 @@ export class NotesPanel {
         }
 
         return await confirmDialog({
-            title: 'Unsaved changes',
+            title: t('unsavedTitle'),
             message: promptMessage,
-            confirmLabel: 'Discard',
+            confirmLabel: t('discard'),
             danger: true
         });
     }
@@ -165,7 +181,7 @@ export class NotesPanel {
             return;
         }
 
-        if (!opts.skipDirtyCheck && !await this.confirmDiscardIfDirty('Discard your changes and switch to the other note?')) {
+        if (!opts.skipDirtyCheck && !await this.confirmDiscardIfDirty(t('discardSwitch'))) {
             return;
         }
 
@@ -194,7 +210,7 @@ export class NotesPanel {
      * "+" on a folder header. Opens the sidebar's create row.
      */
     private async handleNew(folder?: string): Promise<void> {
-        if (!await this.confirmDiscardIfDirty('Discard your changes and create a new note?')) {
+        if (!await this.confirmDiscardIfDirty(t('discardNew'))) {
             return;
         }
         this.sidebar.openCreateRow({folder: folder ?? this.defaultCreateFolder()});
@@ -236,9 +252,9 @@ export class NotesPanel {
 
         const id = this.active.id;
         const ok = await confirmDialog({
-            title: 'Delete note?',
-            message: `${id} will be deleted.`,
-            confirmLabel: 'Delete',
+            title: t('deleteTitle'),
+            message: t('deleteMessage', {id}),
+            confirmLabel: tc('delete'),
             danger: true
         });
         if (!ok || this.active?.id !== id) {
@@ -253,7 +269,7 @@ export class NotesPanel {
             this.opts.onNotesChanged();
             this.renderEmpty();
         } catch (e) {
-            toastError('Could not delete', e);
+            toastError(t('deleteFailed'), e);
         }
     }
 
@@ -287,7 +303,7 @@ export class NotesPanel {
         const snippet: NoteSnippet = {
             title: note.title,
             tags: note.tags,
-            preview: clipSnippet(note.content, 220) || '(empty)'
+            preview: clipSnippet(note.content, 220) || t('empty')
         };
         this.snippetCache.set(noteId, snippet);
         return snippet;
@@ -328,15 +344,15 @@ export class NotesPanel {
 
         this.viewer.appendChild(el('div', {class: 'viewer-empty'},
             el('div', {class: 'viewer-empty-icon', text: '◌'}),
-            el('h2', {class: 'viewer-empty-title', text: 'No note selected'}),
-            el('p', {class: 'viewer-empty-hint', text: 'Pick a note from the sidebar or create a new one to get started.'})
+            el('h2', {class: 'viewer-empty-title', text: t('noneTitle')}),
+            el('p', {class: 'viewer-empty-hint', text: t('noneHint')})
         ));
     }
 
     private renderLoading(): void {
         this.resetViewer();
         this.toc.update(this.viewerPreview?.element ?? null);
-        this.viewer.appendChild(el('p', {class: 'loading', text: 'loading…'}));
+        this.viewer.appendChild(el('p', {class: 'loading', text: tc('loading')}));
     }
 
     private renderError(error: unknown): void {
@@ -446,6 +462,7 @@ export class NotesPanel {
 
     // --- editor ------------------------------------------------------------
 
+    /** The editor is its own chunk (plan P7 / S4b): most visits only read. */
     private renderEditor(): void {
         if (this.active === null) {
             this.renderEmpty();
@@ -456,7 +473,25 @@ export class NotesPanel {
         this.disposeEditor();
         clear(this.viewer);
 
-        this.currentEditor = new Editor(this.active, {
+        const generation = ++this.editorGeneration;
+        const note = this.active;
+        const loading = el('p', {class: 'loading', text: tc('loading')});
+        this.viewer.appendChild(loading);
+
+        void import('./Editor.js').then(({Editor}) => {
+            // Another note, viewer or editor took over while the chunk loaded.
+            if (generation !== this.editorGeneration || !this.editing || this.active !== note) return;
+            loading.remove();
+            this.mountEditor(new Editor(note, this.editorCallbacks()));
+        }, (cause: unknown) => {
+            if (generation !== this.editorGeneration) return;
+            loading.remove();
+            this.viewer.appendChild(el('p', {class: 'editor-error', text: String(cause)}));
+        });
+    }
+
+    private editorCallbacks(): ConstructorParameters<typeof Editor>[1] {
+        return {
             onSave: (input) => this.handleSave(input),
             onCancel: () => {
                 this.editing = false;
@@ -468,9 +503,12 @@ export class NotesPanel {
             fetchSnippet: this.fetchSnippet,
             searchTitles: (query) => this.searchTitles(query),
             onDirtyChange: () => this.sidebar.refreshDrafts()
-        });
+        };
+    }
 
-        this.viewer.appendChild(this.currentEditor.element);
+    private mountEditor(editor: Editor): void {
+        this.currentEditor = editor;
+        this.viewer.appendChild(editor.element);
         this.toc.update(null);
     }
 
@@ -491,6 +529,8 @@ export class NotesPanel {
     }
 
     private disposeEditor(): void {
+        // Also cancels an editor chunk that is still loading.
+        this.editorGeneration += 1;
         if (this.currentEditor !== null) {
             this.currentEditor.destroy();
             this.currentEditor = null;

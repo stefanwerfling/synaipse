@@ -1,5 +1,24 @@
 import {api, type HistoryEntry, type SnapshotEntry} from './Api.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, formatDateTime, tc} from './I18n.js';
+
+const t = defineMessages('historyPanel', {
+    title: 'History',
+    verify: 'Verify',
+    verifyTitle: 'Re-hash every stored object',
+    verifying: 'verifying…',
+    noCommitsHint: 'no commits yet — edit a note via Synaipse to start versioning',
+    healthy: '{count} objects · all healthy',
+    corrupt: '{bad} of {count} corrupt',
+    noCommits: 'no commits yet',
+    diff: 'Diff',
+    snapshot: 'Snapshot',
+    diffing: 'diffing…',
+    root: 'Snapshot root',
+    emptyTree: 'empty tree',
+    initial: 'initial commit · {sha}',
+    noChanges: 'no changes'
+});
 
 export interface HistoryPanelCallbacks {
     onClose: () => void;
@@ -10,8 +29,7 @@ type DetailMode = 'diff' | 'snapshot';
 const shortSha = (sha: string): string => sha.slice(0, 7);
 
 const formatDate = (iso: string): string => {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, {
+    return formatDateTime(iso, {
         year: 'numeric',
         month: 'short',
         day: '2-digit',
@@ -38,12 +56,12 @@ export class HistoryPanel {
         this.verifyHost = el('div', {class: 'history-verify'});
 
         const header = el('header', {class: 'history-head'},
-            el('h3', {class: 'history-title', text: 'History'}),
+            el('h3', {class: 'history-title', text: t('title')}),
             el('div', {class: 'history-head-actions'},
                 el('button', {
                     class: 'history-verify-btn',
-                    attrs: {type: 'button', title: 'Re-hash every stored object'},
-                    text: 'Verify',
+                    attrs: {type: 'button', title: t('verifyTitle')},
+                    text: t('verify'),
                     on: {click: () => void this.runVerify()}
                 }),
                 el('button', {
@@ -66,7 +84,7 @@ export class HistoryPanel {
         this.selectedSha = null;
         clear(this.body);
         clear(this.detailHost);
-        this.body.appendChild(el('div', {class: 'history-loading', text: 'loading…'}));
+        this.body.appendChild(el('div', {class: 'history-loading', text: tc('loading')}));
 
         try {
             const {entries} = await api.noteHistory(noteId, 50);
@@ -80,7 +98,7 @@ export class HistoryPanel {
 
     private async runVerify(): Promise<void> {
         clear(this.verifyHost);
-        this.verifyHost.appendChild(el('div', {class: 'history-loading', text: 'verifying…'}));
+        this.verifyHost.appendChild(el('div', {class: 'history-loading', text: t('verifying')}));
 
         try {
             const report = await api.verifyHistory();
@@ -88,7 +106,7 @@ export class HistoryPanel {
 
             if (!report.enabled) {
                 this.verifyHost.appendChild(
-                    el('div', {class: 'history-verify-row off', text: 'no commits yet — edit a note via Synaipse to start versioning'})
+                    el('div', {class: 'history-verify-row off', text: t('noCommitsHint')})
                 );
                 return;
             }
@@ -96,8 +114,8 @@ export class HistoryPanel {
             const klass = report.ok ? 'history-verify-row ok' : 'history-verify-row bad';
             const dot = el('span', {class: 'verify-dot'});
             const label = report.ok
-                ? `${report.checked} objects · all healthy`
-                : `${report.corrupt.length} of ${report.checked} corrupt`;
+                ? t('healthy', {count: report.checked})
+                : t('corrupt', {bad: report.corrupt.length, count: report.checked});
 
             this.verifyHost.appendChild(
                 el('div', {class: klass}, dot, el('span', {text: label}))
@@ -120,7 +138,7 @@ export class HistoryPanel {
         clear(this.body);
 
         if (this.entries.length === 0) {
-            this.body.appendChild(el('div', {class: 'history-empty', text: 'no commits yet'}));
+            this.body.appendChild(el('div', {class: 'history-empty', text: t('noCommits')}));
             return;
         }
 
@@ -186,15 +204,15 @@ export class HistoryPanel {
         return el('div', {class: 'history-detail-head'},
             el('span', {class: 'history-detail-sha', text: shortSha(sha)}),
             el('div', {class: 'history-detail-tabs'},
-                tabBtn('Diff', 'diff'),
-                tabBtn('Snapshot', 'snapshot')
+                tabBtn(t('diff'), 'diff'),
+                tabBtn(t('snapshot'), 'snapshot')
             )
         );
     }
 
     private async renderDiffView(sha: string): Promise<void> {
         if (this.noteId === null) return;
-        this.detailHost.appendChild(el('div', {class: 'history-loading', text: 'diffing…'}));
+        this.detailHost.appendChild(el('div', {class: 'history-loading', text: t('diffing')}));
 
         const entry = this.entries.find((e) => e.sha === sha);
         const parentSha = entry?.parents[0];
@@ -216,7 +234,7 @@ export class HistoryPanel {
     }
 
     private async renderSnapshotView(sha: string): Promise<void> {
-        this.detailHost.appendChild(el('div', {class: 'history-loading', text: 'loading…'}));
+        this.detailHost.appendChild(el('div', {class: 'history-loading', text: tc('loading')}));
 
         try {
             const data = await api.snapshotList(sha, this.snapshotPath.length > 0 ? this.snapshotPath : undefined);
@@ -232,7 +250,7 @@ export class HistoryPanel {
         const crumbs = el('div', {class: 'snapshot-crumbs'},
             el('button', {
                 class: 'snapshot-crumb',
-                attrs: {type: 'button', 'aria-label': 'Snapshot root'},
+                attrs: {type: 'button', 'aria-label': t('root')},
                 text: '/',
                 on: {click: () => {
                     this.snapshotPath = '';
@@ -264,7 +282,7 @@ export class HistoryPanel {
         this.detailHost.appendChild(crumbs);
 
         if (entries.length === 0) {
-            this.detailHost.appendChild(el('div', {class: 'history-empty', text: 'empty tree'}));
+            this.detailHost.appendChild(el('div', {class: 'history-empty', text: t('emptyTree')}));
             return;
         }
 
@@ -301,7 +319,7 @@ export class HistoryPanel {
 
     private appendInitial(content: string, sha: string): void {
         this.detailHost.appendChild(
-            el('div', {class: 'history-diff-head', text: `initial commit · ${shortSha(sha)}`})
+            el('div', {class: 'history-diff-head', text: t('initial', {sha: shortSha(sha)})})
         );
         const pre = el('pre', {class: 'history-diff-body initial'});
 
@@ -318,7 +336,7 @@ export class HistoryPanel {
         );
 
         if (unified.length === 0) {
-            this.detailHost.appendChild(el('div', {class: 'history-empty', text: 'no changes'}));
+            this.detailHost.appendChild(el('div', {class: 'history-empty', text: t('noChanges')}));
             return;
         }
 

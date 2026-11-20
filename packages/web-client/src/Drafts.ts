@@ -1,9 +1,19 @@
+import {defineMessages} from './I18n.js';
+
 /**
  * Local-only unsaved-edit persistence. When the Editor detects a change
  * it writes a snapshot here (debounced); NotesPanel shows a ● marker on
  * notes that have a draft. Drafts are cleared on successful save and
  * survive tab switches / cancels so the user can resume.
  */
+const t = defineMessages('drafts', {
+    justNow: 'just now',
+    minutes: '{count} min ago',
+    hours: '{count} h ago',
+    yesterday: 'yesterday',
+    days: '{count} days ago'
+});
+
 export interface EditorDraft {
     title: string;
     tags: string;
@@ -73,9 +83,9 @@ export const formatDraftAge = (savedAt: number, now: number = Date.now()): strin
     const hour = 60 * min;
     const day = 24 * hour;
 
-    if (delta < min) return 'just now';
-    if (delta < hour) return `${Math.floor(delta / min)} min ago`;
-    if (delta < day) return `${Math.floor(delta / hour)} h ago`;
-    if (delta < 2 * day) return 'yesterday';
-    return `${Math.floor(delta / day)} days ago`;
+    if (delta < min) return t('justNow');
+    if (delta < hour) return t('minutes', {count: Math.floor(delta / min)});
+    if (delta < day) return t('hours', {count: Math.floor(delta / hour)});
+    if (delta < 2 * day) return t('yesterday');
+    return t('days', {count: Math.floor(delta / day)});
 };

@@ -6,6 +6,20 @@ import {clear, el, portalHost} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('markdownPreview', {
+    infographicError: 'Infographic render error: {message}',
+    mdfloorLoad: 'mdfloor failed to load: {message}',
+    floorplanError: 'Floorplan render error: {message}',
+    infographicLoad: 'Infographic library failed to load: {message}',
+    fullscreen: 'Click to view full-screen',
+    crossRefs: 'Frontmatter cross-references',
+    unresolvedTyped: '{kind} → {target} (unresolved)',
+    gdprMarker: 'GDPR marker ({kind}) — becomes [redact:{kind}] for external LLMs',
+    createNote: 'Create note “{title}”',
+    unresolvedLink: 'unresolved wikilink'
+});
 
 const KIND_GLYPH: Readonly<Record<TypedLinkKind, string>> = {
     supersedes: '→',
@@ -200,7 +214,7 @@ const openInfographicFullscreen = async (syntax: string): Promise<void> => {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'infographic-modal-close';
-    close.setAttribute('aria-label', 'Close');
+    close.setAttribute('aria-label', tc('close'));
     close.textContent = '×';
 
     const stage = document.createElement('div');
@@ -234,7 +248,7 @@ const openInfographicFullscreen = async (syntax: string): Promise<void> => {
         const infographic = new Ctor({container: stage, width, height, padding: 32});
         infographic.render(syntax);
     } catch (e) {
-        stage.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
+        stage.textContent = t('infographicError', {message: e instanceof Error ? e.message : String(e)});
         stage.classList.add('md-antv-infographic-error');
     }
 };
@@ -268,7 +282,7 @@ export const applyMdFloorTo = async (host: HTMLElement): Promise<void> => {
         mdfloor = await loadMdfloor();
     } catch (e) {
         for (const stub of stubs) {
-            stub.textContent = `mdfloor failed to load: ${e instanceof Error ? e.message : String(e)}`;
+            stub.textContent = t('mdfloorLoad', {message: e instanceof Error ? e.message : String(e)});
             stub.classList.add('md-floorplan-error');
         }
         return;
@@ -292,7 +306,7 @@ export const applyMdFloorTo = async (host: HTMLElement): Promise<void> => {
             stub.replaceChildren(svg);
             stub.dataset.rendered = 'true';
         } catch (e) {
-            stub.textContent = `Floorplan render error: ${e instanceof Error ? e.message : String(e)}`;
+            stub.textContent = t('floorplanError', {message: e instanceof Error ? e.message : String(e)});
             stub.classList.add('md-floorplan-error');
         }
     }
@@ -316,7 +330,7 @@ export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> 
         Infographic = await loadInfographic();
     } catch (e) {
         for (const stub of stubs) {
-            stub.textContent = `Infographic library failed to load: ${e instanceof Error ? e.message : String(e)}`;
+            stub.textContent = t('infographicLoad', {message: e instanceof Error ? e.message : String(e)});
             stub.classList.add('md-antv-infographic-error');
         }
         return;
@@ -340,12 +354,12 @@ export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> 
             infographic.render(syntax);
             stub.dataset.rendered = 'true';
             stub.classList.add('md-antv-infographic-clickable');
-            stub.title = 'Click to view full-screen';
+            stub.title = t('fullscreen');
             stub.addEventListener('click', () => {
                 void openInfographicFullscreen(syntax);
             });
         } catch (e) {
-            stub.textContent = `Infographic render error: ${e instanceof Error ? e.message : String(e)}`;
+            stub.textContent = t('infographicError', {message: e instanceof Error ? e.message : String(e)});
             stub.classList.add('md-antv-infographic-error');
         }
     }
@@ -448,7 +462,7 @@ export class MarkdownPreview {
     private renderTypedLinks(): HTMLElement {
         const host = el('div', {
             class: 'md-preview-typed-links',
-            attrs: {'aria-label': 'Frontmatter cross-references'}
+            attrs: {'aria-label': t('crossRefs')}
         });
 
         for (const link of this.typedLinks) {
@@ -464,7 +478,7 @@ export class MarkdownPreview {
         const klass = `typed-link-badge typed-link-${link.kind}${noteId === undefined ? ' typed-link-unresolved' : ''}`;
         const title = noteId !== undefined
             ? `${link.kind} → ${noteId}`
-            : `${link.kind} → ${link.target} (unresolved)`;
+            : t('unresolvedTyped', {kind: link.kind, target: link.target});
 
         if (noteId !== undefined && this.opts.onWikilinkClick !== undefined) {
             const onClick = this.opts.onWikilinkClick;
@@ -543,7 +557,7 @@ export class MarkdownPreview {
             const kind = title.slice('dsgvo:'.length);
             return el('span', {
                 class: 'dsgvo-pill',
-                attrs: {title: `DSGVO-Marker (${kind}) — wird bei externem LLM zu [redact:${kind}]`}
+                attrs: {title: t('gdprMarker', {kind})}
             },
                 el('span', {class: 'dsgvo-pill-icon', text: '🔒'}),
                 el('span', {class: 'dsgvo-pill-kind', text: kind}),
@@ -572,7 +586,7 @@ export class MarkdownPreview {
             const onUnresolved = this.opts.onUnresolvedClick;
             return el('button', {
                 class: 'wikilink unresolved unresolved-clickable',
-                attrs: {type: 'button', title: `Create note "${title}"`},
+                attrs: {type: 'button', title: t('createNote', {title})},
                 text: label,
                 on: {click: () => onUnresolved(title)}
             });
@@ -580,7 +594,7 @@ export class MarkdownPreview {
 
         return el('span', {
             class: noteId === undefined ? 'wikilink unresolved' : 'wikilink',
-            attrs: {title: noteId === undefined ? 'unresolved wikilink' : noteId},
+            attrs: {title: noteId === undefined ? t('unresolvedLink') : noteId},
             text: label
         });
     }
@@ -653,7 +667,7 @@ export class MarkdownPreview {
         clear(card);
 
         if (loading || snippet === null) {
-            card.appendChild(el('div', {class: 'hover-card-loading', text: 'loading…'}));
+            card.appendChild(el('div', {class: 'hover-card-loading', text: tc('loading')}));
         } else {
             card.appendChild(el('div', {class: 'hover-card-title', text: snippet.title}));
 

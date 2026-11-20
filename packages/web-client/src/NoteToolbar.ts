@@ -1,6 +1,18 @@
 import type {Note} from '@synaipse/core';
 import {tagColor} from './Colors.js';
 import {el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('noteToolbar', {
+    more: 'More actions',
+    summarize: 'Summarize',
+    summarizeTitle: 'Generate an LLM summary of this note',
+    history: 'History',
+    historyTitle: 'Show change history',
+    pdf: 'Export PDF',
+    pdfTitle: 'Download this note as a nicely formatted PDF',
+    deleteTitle: 'Delete this note'
+});
 
 export interface OverflowItem {
     label: string;
@@ -25,7 +37,7 @@ export class OverflowMenu {
 
         const trigger = el('button', {
             class: 'btn btn-overflow',
-            attrs: {type: 'button', 'aria-label': 'More actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false'},
+            attrs: {type: 'button', 'aria-label': t('more'), 'aria-haspopup': 'menu', 'aria-expanded': 'false'},
             text: '⋯'
         }) as HTMLButtonElement;
 
@@ -129,29 +141,29 @@ export const buildNoteHead = (note: Note, actions: NoteToolbarActions, overflow:
 
     if (actions.onSummarize !== undefined) {
         overflowItems.push({
-            label: 'Summarize',
-            title: 'Generate an LLM summary of this note',
+            label: t('summarize'),
+            title: t('summarizeTitle'),
             onSelect: actions.onSummarize
         });
     }
 
     if (actions.onHistory !== undefined) {
         overflowItems.push({
-            label: 'History',
-            title: 'Show change history',
+            label: t('history'),
+            title: t('historyTitle'),
             onSelect: actions.onHistory
         });
     }
 
     overflowItems.push({
-        label: 'Export PDF',
-        title: 'Download this note as a nicely formatted PDF',
+        label: t('pdf'),
+        title: t('pdfTitle'),
         onSelect: actions.onExportPdf
     });
 
     overflowItems.push({
-        label: 'Delete',
-        title: 'Delete this note',
+        label: tc('delete'),
+        title: t('deleteTitle'),
         danger: true,
         onSelect: actions.onDelete
     });
@@ -159,15 +171,15 @@ export const buildNoteHead = (note: Note, actions: NoteToolbarActions, overflow:
     const exportBtn = el('button', {
         class: 'btn',
         attrs: {type: 'button'},
-        text: 'Export PDF',
-        title: 'Download this note as a nicely formatted PDF',
+        text: t('pdf'),
+        title: t('pdfTitle'),
         on: {click: actions.onExportPdf}
     });
 
     const editBtn = el('button', {
         class: 'btn',
         attrs: {type: 'button'},
-        text: 'Edit',
+        text: tc('edit'),
         on: {click: actions.onEdit}
     });
 

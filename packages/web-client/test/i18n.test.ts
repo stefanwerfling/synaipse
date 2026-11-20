@@ -66,7 +66,10 @@ describe('locale state', () => {
  */
 const MIGRATED = [
     'ActivityLog', 'App', 'AppCommands', 'CommandPalette', 'ConsentInbox', 'Dialogs', 'Graph', 'Graph3D', 'GraphTab',
-    'Login', 'Search', 'Settings', 'Shortcuts', 'Tabs', 'TagBar', 'TagPicker', 'Toast', 'Topbar'
+    'Login', 'Search', 'Settings', 'Shortcuts', 'Tabs', 'TagBar', 'TagPicker', 'Toast', 'Topbar',
+    // S4b notes and editor
+    'Drafts', 'Editor', 'EditorToolbar', 'HistoryPanel', 'MarkdownPreview', 'NoteLinks', 'NoteToolbar', 'NotesPanel',
+    'NotesSidebar', 'NotesTree', 'PreviewDialog', 'SummarizeDialog', 'Toc'
 ];
 
 const placeholders = (message: string): string[] => [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort();
@@ -126,7 +129,9 @@ describe('migrated modules', () => {
     // A quoted literal with a word in it, in a spot the user reads.
     const UI_LITERAL = /\b(text|title|placeholder|label|subtitle|message|confirmLabel|cancelLabel|closeLabel|'aria-label')\s*:\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}/;
     const ASSIGNED = /\.(textContent|title)\s*=\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}/;
-    const TOAST = /\btoast\(\s*['`]/;
+    const TOAST = /\b(toast|toastError)\(\s*['`]/;
+    // A text child on a line of its own: el('label', {}, input, 'preview').
+    const BARE_CHILD = /^\s*['`][^'`]*[A-Za-zÄÖÜäöü]{3,}[^'`]*['`],?\s*$/;
     // Brand name; `demote` is a ranking-signal name like fulltext / semantic.
     const ALLOWED = [/text: 'Synaipse'/, /text: 'demote'/];
 
@@ -145,7 +150,7 @@ describe('migrated modules', () => {
                 const code = line.trim();
                 if (code.startsWith('//') || code.startsWith('*')) return;
                 const bare = line.replace(/\$\{[^}]*\}/g, '');
-                if (!(UI_LITERAL.test(bare) || ASSIGNED.test(bare) || TOAST.test(bare))) return;
+                if (!(UI_LITERAL.test(bare) || ASSIGNED.test(bare) || TOAST.test(bare) || BARE_CHILD.test(line))) return;
                 if (ALLOWED.some((ok) => ok.test(line))) return;
                 found.push(`${name}.ts:${i + 1}: ${code}`);
             });

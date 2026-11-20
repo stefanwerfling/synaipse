@@ -1,5 +1,19 @@
 import {el} from './Dom.js';
 import {openModal, type ModalHandle} from './Modal.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('previewDialog', {
+    title: 'GDPR preview before sending',
+    leadStart: 'You are about to send to an',
+    external: 'external',
+    leadMid: 'LLM provider:',
+    leadEnd: '. Synaipse prepared the following:',
+    hidden: '{count} note was hidden (privacy marker)|{count} notes were hidden (privacy marker)',
+    redacted: '{count} PII/secret matches will be redacted automatically:',
+    none: 'No privacy-relevant matches in the current source selection.',
+    skip: 'Don’t ask again (can be reset in the browser data).',
+    send: 'Send anyway'
+});
 
 export interface PreviewSummary {
     provider: string;
@@ -38,11 +52,11 @@ export class PreviewDialog {
             const dismiss = (): void => this.settle?.({confirmed: false, rememberSkip: false});
 
             const lead = el('p', {class: 'preview-lead'},
-                'Du sendest gleich an einen ',
-                el('strong', {text: 'externen'}),
-                ' LLM-Provider: ',
+                `${t('leadStart')} `,
+                el('strong', {text: t('external')}),
+                ` ${t('leadMid')} `,
                 el('code', {text: summary.provider}),
-                '. Synaipse hat das Folgende vorbereitet:'
+                t('leadEnd')
             );
 
             const stats = el('ul', {class: 'preview-stats'});
@@ -50,7 +64,7 @@ export class PreviewDialog {
             if (summary.filteredPrivate > 0) {
                 stats.appendChild(el('li', {},
                     el('span', {class: 'preview-stat-icon', attrs: {'aria-hidden': 'true'}, text: '🔒'}),
-                    ` ${summary.filteredPrivate} Notiz${summary.filteredPrivate === 1 ? '' : 'en'} wurde${summary.filteredPrivate === 1 ? '' : 'n'} ausgeblendet (Privacy-Marker)`
+                    ` ${t('hidden', {count: summary.filteredPrivate})}`
                 ));
             }
 
@@ -60,13 +74,13 @@ export class PreviewDialog {
                 const detail = summary.redactions.map((r) => `${r.count} ${r.kind}`).join(', ');
                 stats.appendChild(el('li', {},
                     el('span', {class: 'preview-stat-icon', attrs: {'aria-hidden': 'true'}, text: '🛡'}),
-                    ` ${redactTotal} PII/Secret-Treffer werden automatisch geschwärzt: `,
+                    ` ${t('redacted', {count: redactTotal})} `,
                     el('span', {class: 'preview-stat-detail', text: detail})
                 ));
             }
 
             if (summary.filteredPrivate === 0 && redactTotal === 0) {
-                stats.appendChild(el('li', {class: 'preview-stat-empty', text: 'Keine Privacy-relevanten Treffer in der aktuellen Source-Selektion.'}));
+                stats.appendChild(el('li', {class: 'preview-stat-empty', text: t('none')}));
             }
 
             const skipInput = el('input', {
@@ -76,26 +90,26 @@ export class PreviewDialog {
 
             const skipRow = el('label', {class: 'preview-skip'},
                 skipInput,
-                el('span', {text: 'Künftig nicht mehr nachfragen (kann in den Browser-Daten zurückgesetzt werden).'})
+                el('span', {text: t('skip')})
             );
 
             const cancelBtn = el('button', {
                 class: 'btn',
                 attrs: {type: 'button'},
-                text: 'Abbrechen',
+                text: tc('cancel'),
                 on: {click: dismiss}
             });
 
             const sendBtn = el('button', {
                 class: 'btn btn-primary',
                 attrs: {type: 'button'},
-                text: 'Trotzdem senden',
+                text: t('send'),
                 on: {click: () => this.settle?.({confirmed: true, rememberSkip: skipInput.checked})}
             }) as HTMLButtonElement;
 
             this.modal = openModal({
-                title: 'DSGVO-Vorschau vor dem Senden',
-                closeLabel: 'Schließen',
+                title: t('title'),
+                closeLabel: tc('close'),
                 size: 'md',
                 layout: 'sections',
                 className: 'preview-dialog',

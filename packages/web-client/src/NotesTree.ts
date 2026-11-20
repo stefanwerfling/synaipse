@@ -1,4 +1,5 @@
 import type {NoteSummary} from './Api.js';
+import {defineMessages} from './I18n.js';
 
 /**
  * Pure part of the notes sidebar (plan P7 / D2): grouping notes by
@@ -10,6 +11,17 @@ export type GroupMode = 'folder' | 'tag' | 'recent';
 
 export const RECENT_BUCKETS = ['Today', 'Yesterday', 'This week', 'This month', 'Earlier'] as const;
 const UNTAGGED_LABEL = 'untagged';
+/** Bucket ids stay English (group keys, collapse state); the label is translated. */
+const BUCKET_KEYS = {Today: 'today', Yesterday: 'yesterday', 'This week': 'week', 'This month': 'month', Earlier: 'earlier'} as const;
+
+const t = defineMessages('notesTree', {
+    today: 'Today',
+    yesterday: 'Yesterday',
+    week: 'This week',
+    month: 'This month',
+    earlier: 'Earlier',
+    untagged: 'untagged'
+});
 
 export interface NoteGroup {
     key: string;
@@ -152,30 +164,30 @@ export const buildGroups = (notes: NoteSummary[], mode: Exclude<GroupMode, 'fold
     if (mode === 'tag') {
         for (const note of notes) {
             const primary = note.tags[0] ?? UNTAGGED_LABEL;
-            ensure(primary, primary).notes.push(note);
+            ensure(primary, primary === UNTAGGED_LABEL ? t('untagged') : primary).notes.push(note);
         }
 
         return [...map.values()].sort((a, b) => {
-            if (a.label === UNTAGGED_LABEL) return 1;
-            if (b.label === UNTAGGED_LABEL) return -1;
+            if (a.key === UNTAGGED_LABEL) return 1;
+            if (b.key === UNTAGGED_LABEL) return -1;
             return b.notes.length - a.notes.length || a.label.localeCompare(b.label);
         });
     }
 
     for (const bucket of RECENT_BUCKETS) {
-        ensure(bucket, bucket);
+        ensure(bucket, t(BUCKET_KEYS[bucket]));
     }
 
     for (const note of notes) {
         const bucket = recencyBucket(note.mtime, now);
-        ensure(bucket, bucket).notes.push(note);
+        ensure(bucket, t(BUCKET_KEYS[bucket])).notes.push(note);
     }
 
     const order = new Map(RECENT_BUCKETS.map((b, i) => [b, i]));
 
     return [...map.values()]
         .filter((g) => g.notes.length > 0)
-        .sort((a, b) => (order.get(a.label as typeof RECENT_BUCKETS[number]) ?? 0) - (order.get(b.label as typeof RECENT_BUCKETS[number]) ?? 0));
+        .sort((a, b) => (order.get(a.key as typeof RECENT_BUCKETS[number]) ?? 0) - (order.get(b.key as typeof RECENT_BUCKETS[number]) ?? 0));
 };
 
 /**

@@ -1,5 +1,12 @@
 import {clear, el} from './Dom.js';
 import {slugify} from './Wikilinks.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('toc', {
+    toggle: 'Toggle outline',
+    onPage: 'On this page',
+    outline: 'Note outline'
+});
 
 export interface TocEntry {
     level: number;
@@ -57,14 +64,14 @@ export class TocPanel {
         this.list = el('ul', {class: 'viewer-toc-list'});
         this.head = el('button', {
             class: 'viewer-toc-head',
-            attrs: {type: 'button', 'aria-expanded': 'true', title: 'Toggle outline'}
+            attrs: {type: 'button', 'aria-expanded': 'true', title: t('toggle')}
         },
             el('span', {class: 'viewer-toc-caret', text: '▾'}),
-            el('span', {class: 'viewer-toc-head-label', text: 'On this page'})
+            el('span', {class: 'viewer-toc-head-label', text: t('onPage')})
         );
         this.head.addEventListener('click', () => this.toggle());
 
-        this.element = el('aside', {class: 'viewer-toc', attrs: {'aria-label': 'Note outline'}},
+        this.element = el('aside', {class: 'viewer-toc', attrs: {'aria-label': t('outline')}},
             this.head,
             this.list
         );

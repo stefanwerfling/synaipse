@@ -12,6 +12,7 @@ import {
     type InsertionResult
 } from './MarkdownInsertion.js';
 import {toast} from './Toast.js';
+import {defineMessages} from './I18n.js';
 
 /**
  * GitHub-style formatting toolbar that sits above the editor textarea.
@@ -74,13 +75,43 @@ const findFloorplanBlockAt = (text: string, cursor: number): FloorplanBlockRange
     return null;
 };
 
-const CONTAINER_TYPES: readonly {type: string; label: string; icon: string; color?: string}[] = [
-    {type: 'infographic', label: 'Infographic step', icon: '🚀', color: 'blue'},
-    {type: 'tip', label: 'Tip', icon: '💡'},
-    {type: 'warning', label: 'Warning', icon: '⚠️'},
-    {type: 'note', label: 'Note', icon: '📝'},
-    {type: 'success', label: 'Success', icon: '✅'},
-    {type: 'danger', label: 'Danger', icon: '🚨'}
+const t = defineMessages('editorToolbar', {
+    infographic: 'Infographic step',
+    tip: 'Tip',
+    warning: 'Warning',
+    note: 'Note',
+    success: 'Success',
+    danger: 'Danger',
+    bold: 'Bold (Ctrl+B)',
+    italic: 'Italic (Ctrl+I)',
+    strike: 'Strikethrough',
+    code: 'Inline code (Ctrl+E)',
+    h1: 'Heading 1',
+    h2: 'Heading 2',
+    h3: 'Heading 3',
+    link: 'Link (Ctrl+K)',
+    quote: 'Quote',
+    bullets: 'Bulleted list',
+    numbered: 'Numbered list',
+    tasks: 'Task list',
+    codeBlock: 'Code block',
+    rule: 'Horizontal rule',
+    table: 'Table',
+    floorplan: 'Insert / edit floorplan (mdfloor)',
+    gdpr: 'Mark selection as GDPR-sensitive (Ctrl+Shift+D)',
+    container: 'Insert container block (infographic / tip / warning / note / …)',
+    gdprSelect: 'Select the text you want to mark as GDPR-sensitive first.',
+    gdprOneLine: 'GDPR markers only support single-line selections.'
+});
+
+/** The menu shows t(labelKey). */
+const CONTAINER_TYPES: readonly {type: string; labelKey: 'infographic' | 'tip' | 'warning' | 'note' | 'success' | 'danger'; icon: string; color?: string}[] = [
+    {type: 'infographic', labelKey: 'infographic', icon: '🚀', color: 'blue'},
+    {type: 'tip', labelKey: 'tip', icon: '💡'},
+    {type: 'warning', labelKey: 'warning', icon: '⚠️'},
+    {type: 'note', labelKey: 'note', icon: '📝'},
+    {type: 'success', labelKey: 'success', icon: '✅'},
+    {type: 'danger', labelKey: 'danger', icon: '🚨'}
 ];
 
 export class EditorToolbar {
@@ -101,31 +132,31 @@ export class EditorToolbar {
     private build(): void {
         const groups: SimpleButton[][] = [
             [
-                {label: 'B', title: 'Bold (Ctrl+B)', action: () => this.wrap('**', '**', 'bold')},
-                {label: 'I', title: 'Italic (Ctrl+I)', action: () => this.wrap('*', '*', 'italic')},
-                {label: 'S̶', title: 'Strikethrough', action: () => this.wrap('~~', '~~', 'strikethrough')},
-                {label: '</>', title: 'Inline code (Ctrl+E)', action: () => this.wrap('`', '`', 'code')}
+                {label: 'B', title: t('bold'), action: () => this.wrap('**', '**', 'bold')},
+                {label: 'I', title: t('italic'), action: () => this.wrap('*', '*', 'italic')},
+                {label: 'S̶', title: t('strike'), action: () => this.wrap('~~', '~~', 'strikethrough')},
+                {label: '</>', title: t('code'), action: () => this.wrap('`', '`', 'code')}
             ],
             [
-                {label: 'H1', title: 'Heading 1', action: () => this.prefix('# ')},
-                {label: 'H2', title: 'Heading 2', action: () => this.prefix('## ')},
-                {label: 'H3', title: 'Heading 3', action: () => this.prefix('### ')}
+                {label: 'H1', title: t('h1'), action: () => this.prefix('# ')},
+                {label: 'H2', title: t('h2'), action: () => this.prefix('## ')},
+                {label: 'H3', title: t('h3'), action: () => this.prefix('### ')}
             ],
             [
-                {label: '🔗', title: 'Link (Ctrl+K)', action: () => this.insertLink()},
-                {label: '"', title: 'Quote', action: () => this.prefix('> ')},
-                {label: '•', title: 'Bulleted list', action: () => this.prefix('- ')},
-                {label: '1.', title: 'Numbered list', action: () => this.prefix('1. ')},
-                {label: '☐', title: 'Task list', action: () => this.prefix('- [ ] ')}
+                {label: '🔗', title: t('link'), action: () => this.insertLink()},
+                {label: '"', title: t('quote'), action: () => this.prefix('> ')},
+                {label: '•', title: t('bullets'), action: () => this.prefix('- ')},
+                {label: '1.', title: t('numbered'), action: () => this.prefix('1. ')},
+                {label: '☐', title: t('tasks'), action: () => this.prefix('- [ ] ')}
             ],
             [
-                {label: '{ }', title: 'Code block', action: () => this.insertCodeBlock()},
-                {label: '—', title: 'Horizontal rule', action: () => this.insertAtCursor('\n\n---\n\n')},
-                {label: '⊞', title: 'Table', action: () => this.insertTable()}
+                {label: '{ }', title: t('codeBlock'), action: () => this.insertCodeBlock()},
+                {label: '—', title: t('rule'), action: () => this.insertAtCursor('\n\n---\n\n')},
+                {label: '⊞', title: t('table'), action: () => this.insertTable()}
             ],
             [
-                {label: '🏠', title: 'Grundriss einfügen / bearbeiten (mdfloor)', action: () => this.openFloorplan()},
-                {label: '🔒', title: 'Mark selection as DSGVO (Ctrl+Shift+D)', action: () => this.openDsgvo()}
+                {label: '🏠', title: t('floorplan'), action: () => this.openFloorplan()},
+                {label: '🔒', title: t('gdpr'), action: () => this.openDsgvo()}
             ]
         ];
 
@@ -156,7 +187,7 @@ export class EditorToolbar {
 
         const btn = el('button', {
             class: 'editor-toolbar-btn',
-            attrs: {type: 'button', title: 'Insert container block (infographic / tip / warning / note / …)', 'aria-label': 'Insert container block (infographic / tip / warning / note / …)', 'aria-haspopup': 'true'},
+            attrs: {type: 'button', title: t('container'), 'aria-label': t('container'), 'aria-haspopup': 'true'},
             text: '::: ▾',
             on: {click: (e) => {
                 e.preventDefault();
@@ -196,7 +227,7 @@ export class EditorToolbar {
                 }}
             },
                 el('span', {class: 'editor-toolbar-menu-icon', text: opt.icon}),
-                el('span', {text: opt.label})
+                el('span', {text: t(opt.labelKey)})
             ));
         }
 
@@ -350,13 +381,13 @@ export class EditorToolbar {
     private openDsgvo(): void {
         const {start, end} = this.sel();
         if (end <= start) {
-            toast('Erst Text markieren, den du als DSGVO-relevant kennzeichnen willst.');
+            toast(t('gdprSelect'));
             this.textarea.focus();
             return;
         }
         const selection = this.textarea.value.slice(start, end);
         if (selection.includes('\n')) {
-            toast('DSGVO-Marker unterstützen nur einzeilige Markierungen.');
+            toast(t('gdprOneLine'));
             this.textarea.focus();
             return;
         }

@@ -8,8 +8,30 @@ import {EditorToolbar} from './EditorToolbar.js';
 import {MarkdownPreview, NoteSnippet} from './MarkdownPreview.js';
 import {PersistentValue} from './Persistence.js';
 import {WikilinkAutocomplete, type WikilinkMatch} from './WikilinkAutocomplete.js';
+import {defineMessages, tc} from './I18n.js';
 
 const STORAGE_SHOW_PREVIEW = 'synaipse.editor.showPreview';
+
+const t = defineMessages('editor', {
+    restoreTitle: 'Restore draft?',
+    restoreMessage: 'You have an unsaved draft of “{title}” from {age}.',
+    restore: 'Restore',
+    discardDraft: 'Discard draft',
+    unsavedTitle: 'Unsaved changes',
+    discardFollow: 'Discard your changes and follow the link?',
+    discardCreate: 'Discard your changes and create the new note?',
+    discard: 'Discard',
+    title: 'Title',
+    tags: 'Tags',
+    tagsHint: '(comma separated)',
+    write: 'Write',
+    preview: 'Preview',
+    unsavedHint: 'Unsaved changes — auto-saved as draft in this browser',
+    unsavedBadge: '● unsaved',
+    saving: 'Saving…',
+    saved: 'Saved ✓',
+    uploadFailed: 'Upload failed: {message}'
+});
 
 export interface EditorCallbacks {
     onSave: (input: {content: string; frontmatter: Frontmatter}) => Promise<void>;
@@ -166,10 +188,10 @@ export class Editor {
         }
 
         const ok = await confirmDialog({
-            title: 'Restore draft?',
-            message: `You have an unsaved draft of "${this.note.title}" from ${formatDraftAge(draft.savedAt)}.`,
-            confirmLabel: 'Restore',
-            cancelLabel: 'Discard draft'
+            title: t('restoreTitle'),
+            message: t('restoreMessage', {title: this.note.title, age: formatDraftAge(draft.savedAt)}),
+            confirmLabel: t('restore'),
+            cancelLabel: t('discardDraft')
         });
         // The editor may be gone (note switched) or typed into meanwhile.
         if (!this.element.isConnected || this.isDirty) return;
@@ -265,9 +287,9 @@ export class Editor {
 
             void (async () => {
                 if (this.isDirty && !await confirmDialog({
-                    title: 'Unsaved changes',
-                    message: 'Discard your changes and follow the link?',
-                    confirmLabel: 'Discard',
+                    title: t('unsavedTitle'),
+                    message: t('discardFollow'),
+                    confirmLabel: t('discard'),
                     danger: true
                 })) {
                     return;
@@ -282,9 +304,9 @@ export class Editor {
         return (title) => {
             void (async () => {
                 if (this.isDirty && !await confirmDialog({
-                    title: 'Unsaved changes',
-                    message: 'Discard your changes and create the new note?',
-                    confirmLabel: 'Discard',
+                    title: t('unsavedTitle'),
+                    message: t('discardCreate'),
+                    confirmLabel: t('discard'),
                     danger: true
                 })) {
                     return;
@@ -314,11 +336,11 @@ export class Editor {
 
         const fields = el('div', {class: 'editor-fields'},
             el('label', {class: 'field'},
-                el('span', {text: 'Title'}),
+                el('span', {text: t('title')}),
                 this.titleInput
             ),
             el('label', {class: 'field'},
-                el('span', {}, 'Tags ', el('em', {text: '(comma separated)'})),
+                el('span', {}, `${t('tags')} `, el('em', {text: t('tagsHint')})),
                 this.tagsField
             )
         );
@@ -374,14 +396,14 @@ export class Editor {
         this.tabWriteBtn = el('button', {
             class: 'editor-tab-btn',
             attrs: {type: 'button'},
-            text: 'Write',
+            text: t('write'),
             on: {click: () => this.setActiveTab('write')}
         }) as HTMLButtonElement;
 
         this.tabPreviewBtn = el('button', {
             class: 'editor-tab-btn',
             attrs: {type: 'button'},
-            text: 'Preview',
+            text: t('preview'),
             on: {click: () => this.setActiveTab('preview')}
         }) as HTMLButtonElement;
 
@@ -395,14 +417,14 @@ export class Editor {
         const saveBtn = el('button', {
             class: 'btn btn-primary',
             attrs: {type: 'button'},
-            text: 'Save',
+            text: tc('save'),
             on: {click: () => void this.save(saveBtn)}
         });
 
         const cancelBtn = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Cancel',
+            text: tc('cancel'),
             on: {click: () => this.cb.onCancel()}
         });
 
@@ -414,14 +436,14 @@ export class Editor {
                     showPreviewStore.set(next);
                 }}
             }),
-            'preview'
+            t('preview')
         );
 
         this.dirtyBadge = el('span', {
             class: 'editor-dirty-badge',
-            attrs: {title: 'Unsaved changes — auto-saved as draft in this browser', 'aria-label': 'Unsaved changes'},
+            attrs: {title: t('unsavedHint'), 'aria-label': t('unsavedTitle')},
             style: {visibility: 'hidden'},
-            text: '● unsaved'
+            text: t('unsavedBadge')
         });
 
         this.actionsHost = el('div', {class: 'editor-actions'}, this.dirtyBadge, saveBtn, cancelBtn, previewToggle);
@@ -485,18 +507,18 @@ export class Editor {
     private setSaving(saving: boolean, saveBtn: HTMLButtonElement): void {
         this.saving = saving;
         saveBtn.disabled = saving;
-        saveBtn.textContent = saving ? 'Saving…' : 'Save';
+        saveBtn.textContent = saving ? t('saving') : tc('save');
         this.titleInput.disabled = saving;
         this.tagsField.disabled = saving;
         this.textarea.disabled = saving;
     }
 
     private flashSaved(saveBtn: HTMLButtonElement): void {
-        saveBtn.textContent = 'Saved ✓';
+        saveBtn.textContent = t('saved');
         saveBtn.classList.add('btn-saved');
 
         window.setTimeout(() => {
-            saveBtn.textContent = 'Save';
+            saveBtn.textContent = tc('save');
             saveBtn.classList.remove('btn-saved');
         }, 1200);
     }
@@ -590,7 +612,7 @@ export class Editor {
                 const alt = file.name.replace(/\.[^.]+$/, '');
                 inserts.push(`![${alt}](${result.relativePath})`);
             } catch (e) {
-                this.error = `Upload failed: ${e instanceof Error ? e.message : String(e)}`;
+                this.error = t('uploadFailed', {message: e instanceof Error ? e.message : String(e)});
                 this.renderError();
                 return;
             }

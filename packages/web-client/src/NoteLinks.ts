@@ -1,6 +1,14 @@
 import type {NoteSummary} from './Api.js';
 import {el} from './Dom.js';
 import type {WikilinkResolver} from './Wikilinks.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('noteLinks', {
+    linkedFrom: 'Linked from',
+    linksTo: 'Links to',
+    create: 'Create “{title}”',
+    unresolved: 'unresolved — click to create'
+});
 
 export interface NoteLinkActions {
     open: (noteId: string) => void;
@@ -35,7 +43,7 @@ const linksBlock = (heading: string, count: number): {block: HTMLElement; list: 
 
 /** "Linked from": notes that wikilink the open note. */
 export const renderBacklinks = (backlinks: readonly string[], lookup: ReadonlyMap<string, NoteSummary>, actions: NoteLinkActions): HTMLElement => {
-    const {block, list} = linksBlock('Linked from', backlinks.length);
+    const {block, list} = linksBlock(t('linkedFrom'), backlinks.length);
 
     for (const id of backlinks) {
         list.appendChild(linkRow('←', lookup.get(id)?.title ?? id, id, actions));
@@ -59,7 +67,7 @@ export const renderOutgoing = (wikilinks: readonly string[], resolve: WikilinkRe
         }
     }
 
-    const {block, list} = linksBlock('Links to', wikilinks.length);
+    const {block, list} = linksBlock(t('linksTo'), wikilinks.length);
 
     for (const {title, noteId} of resolved) {
         list.appendChild(linkRow('→', title, noteId, actions));
@@ -69,13 +77,13 @@ export const renderOutgoing = (wikilinks: readonly string[], resolve: WikilinkRe
         list.appendChild(el('li', {class: 'viewer-link-row unresolved'},
             el('button', {
                 class: 'viewer-link-btn unresolved',
-                attrs: {type: 'button', title: `Create '${title}'`},
+                attrs: {type: 'button', title: t('create', {title})},
                 on: {click: () => actions.create(title)}
             },
                 el('span', {class: 'viewer-link-icon', text: '?'}),
                 el('span', {class: 'viewer-link-title', text: title})
             ),
-            el('span', {class: 'viewer-link-path', text: 'unresolved — click to create'})
+            el('span', {class: 'viewer-link-path', text: t('unresolved')})
         ));
     }
 
