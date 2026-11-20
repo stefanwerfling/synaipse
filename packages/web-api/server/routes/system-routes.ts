@@ -1,8 +1,14 @@
+import {SynaipseEventSchema} from '@synaipse/core';
+import {readValidated} from '../body.js';
 import type {SynaipseEvent} from '../events.js';
 import type {JobParams} from '../jobs.js';
 import {ALLOWED_JOB_TYPES, isJobType, validateJobParams} from '../job-validation.js';
 import {badRequest, json, notFoundError, type Router} from '../router.js';
 import {readJson, type RouteDeps} from './shared.js';
+
+/** An MCP event names a handful of notes; this is far above what a tool call touches. */
+const MAX_EVENT_TOUCHED = 1000;
+const EVENT_BODY_LIMIT = 256 * 1024;
 
 /** Live events, server info and background jobs. */
 export const registerSystemRoutes = (router: Router, {service, broadcaster, jobs}: RouteDeps): void => {
@@ -11,7 +17,16 @@ export const registerSystemRoutes = (router: Router, {service, broadcaster, jobs
     });
 
     router.post('/api/events', async ({req, res}) => {
-        broadcaster.publish(await readJson<SynaipseEvent>(req));
+        const event: SynaipseEvent = await readValidated(req, SynaipseEventSchema, {maxBytes: EVENT_BODY_LIMIT});
+        if (event.touched.length > MAX_EVENT_TOUCHED) throw badRequest(`field 'touched' holds at most ${MAX_EVENT_TOUCHED} ids`);
+        // Only the known fields go out to the browsers.
+        broadcaster.publish({
+            tool: event.tool,
+            kind: event.kind,
+            touched: event.touched,
+            ...(event.query !== undefined ? {query: event.query} : {}),
+            ts: event.ts
+        });
         json(res, 200, {ok: true, clients: broadcaster.clientCount()});
     });
 

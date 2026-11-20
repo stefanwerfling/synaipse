@@ -31,7 +31,7 @@ export const registerProjectRoutes = (router: Router, {service}: RouteDeps): voi
 
     router.put('/api/canvas', async ({req, res, url}) => {
         const id = requiredParam(url, 'path');
-        const body = await readJson<unknown>(req);
+        const body = await readJson<object>(req);
         try {
             // Re-parse via the same defensive path as reads: malformed
             // nodes/edges get dropped instead of persisted, so a buggy

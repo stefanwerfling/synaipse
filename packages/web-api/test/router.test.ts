@@ -197,3 +197,33 @@ describe('API routes', () => {
         expect((await call(handler, 'GET', '/api/does-not-exist')).status).toBe(404);
     });
 });
+
+describe('request body checks', () => {
+    const published: unknown[] = [];
+    const broadcaster = {publish: (e: unknown) => published.push(e), clientCount: () => 1} as unknown as EventBroadcaster;
+    const service = {writeNoteUnscoped: async () => ({id: 'a.md'})} as unknown as SynaipseService;
+    const handler = routes(service, broadcaster, {} as JobManager);
+
+    it('a body that is not a JSON object is a 400, not a crash', async () => {
+        for (const body of ['null', '[]', '"text"', '42']) {
+            const out = await call(handler, 'PUT', '/api/notes/a.md', body);
+            expect(out.status, body).toBe(400);
+            expect(out.body).toEqual({error: 'body must be a JSON object'});
+        }
+        expect((await call(handler, 'PUT', '/api/notes/a.md', '{"content":"x"}')).status).toBe(200);
+    });
+
+    it('POST /api/events checks the event and forwards only its known fields', async () => {
+        published.length = 0;
+        const bad = await call(handler, 'POST', '/api/events', JSON.stringify({tool: 't', kind: 'write', touched: ['a.md', 3], ts: 1}));
+        expect(bad.status).toBe(400);
+        expect(String((bad.body as {error: string}).error)).toContain('touched');
+        expect((await call(handler, 'POST', '/api/events', JSON.stringify({tool: 't', kind: 'hack', touched: [], ts: 1}))).status).toBe(400);
+        expect((await call(handler, 'POST', '/api/events', JSON.stringify({tool: 't', kind: 'read', touched: Array(1001).fill('x'), ts: 1}))).status).toBe(400);
+        expect(published).toHaveLength(0);
+
+        const ok = await call(handler, 'POST', '/api/events', JSON.stringify({tool: 't', kind: 'write', touched: ['a.md'], ts: 5, html: '<script>'}));
+        expect(ok.status).toBe(200);
+        expect(published).toEqual([{tool: 't', kind: 'write', touched: ['a.md'], ts: 5}]);
+    });
+});

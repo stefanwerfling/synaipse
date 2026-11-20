@@ -208,3 +208,24 @@ export const ConfigSchema = Vts.object({
     }))
 });
 export type ConfigSchemaT = ExtractSchemaResultType<typeof ConfigSchema>;
+/**
+ * A UI event as the MCP server posts it to the web API (`POST /api/events`),
+ * which fans it out to every browser over SSE. Checked on arrival so a
+ * malformed post cannot reach the clients' handlers.
+ */
+export const SynaipseEventSchema = Vts.object({
+    tool: Vts.string(),
+    kind: Vts.or([
+        Vts.equal('read' as const),
+        Vts.equal('write' as const),
+        Vts.equal('delete' as const),
+        Vts.equal('search' as const),
+        Vts.equal('list' as const),
+        Vts.equal('graph' as const),
+        Vts.equal('tags' as const)
+    ]),
+    touched: Vts.array(Vts.string()),
+    query: Vts.optional(Vts.string()),
+    ts: Vts.number()
+}, {objectSchema: {ignoreAdditionalItems: true}});
+export type SynaipseEventT = ExtractSchemaResultType<typeof SynaipseEventSchema>;

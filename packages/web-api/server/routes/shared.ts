@@ -5,7 +5,7 @@ import type {AuthContext} from '../auth-routes.js';
 import type {EventBroadcaster} from '../events.js';
 import type {JobManager} from '../jobs.js';
 import type {Scheduler} from '../scheduler.js';
-import {readJsonBody} from '../body.js';
+import {readJsonObject} from '../body.js';
 import {badRequest} from '../router.js';
 
 export interface RoutesOptions {
@@ -40,7 +40,8 @@ export interface RouteDeps {
     opts: RoutesOptions;
 }
 
-export const readJson = <T>(req: IncomingMessage): Promise<T> => readJsonBody<T>(req);
+/** A JSON object body; anything else (null, array, scalar) is a 400, so handlers can read fields safely. */
+export const readJson = <T extends object>(req: IncomingMessage): Promise<T> => readJsonObject<T>(req);
 
 export const asString = (value: unknown, field: string): string => {
     if (typeof value !== 'string') {

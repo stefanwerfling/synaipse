@@ -75,3 +75,43 @@ export const readJsonBody = async <T>(
         throw new InvalidBodyError('body is not valid JSON');
     }
 };
+
+/** Like {@link readJsonBody}, but the body must be a JSON object (not null, an array or a scalar). */
+export const readJsonObject = async <T extends object>(req: IncomingMessage, opts: {maxBytes?: number} = {}): Promise<T> => {
+    const value = await readJsonBody<unknown>(req, opts);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new InvalidBodyError('body must be a JSON object');
+    }
+    return value as T;
+};
+
+/** Minimal schema shape (VTS and anything alike): a type guard that collects errors. */
+export interface BodySchema<T> {
+    validate(value: unknown, errors: unknown[]): value is T;
+}
+
+/** Read a JSON body and check it against `schema`; a mismatch is a 400 naming the first problem. */
+export const readValidated = async <T>(req: IncomingMessage, schema: BodySchema<T>, opts: {maxBytes?: number} = {}): Promise<T> => {
+    const value = await readJsonBody<unknown>(req, opts);
+    const errors: unknown[] = [];
+    if (!schema.validate(value, errors)) {
+        throw new InvalidBodyError(`body does not match the expected shape${describeFirst(errors)}`);
+    }
+    return value;
+};
+
+/** First problem of a VTS error tree (`string | {key: errors}`) as "path: message". */
+export const describeFirst = (errors: readonly unknown[], path: string[] = []): string => {
+    for (const entry of errors) {
+        if (typeof entry === 'string') return path.length > 0 ? `: ${path.join('.')}: ${entry}` : `: ${entry}`;
+        if (typeof entry === 'object' && entry !== null) {
+            for (const [key, nested] of Object.entries(entry)) {
+                if (Array.isArray(nested)) {
+                    const found = describeFirst(nested, [...path, key]);
+                    if (found !== '') return found;
+                }
+            }
+        }
+    }
+    return '';
+};
