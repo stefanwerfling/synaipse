@@ -115,12 +115,12 @@ describe('aggregate tools respect the path-prefix scope', () => {
         expect(res.hits.map((h) => h.noteId)).toEqual(['Memory/a/one.md']);
     });
 
-    it('list_notes / recent / notes_by_tag', async () => {
-        const list = await callScoped<{notes: Array<{id: string}>}>('synaipse_list_notes', {});
+    it('list (by modified, by title, by tag)', async () => {
+        const list = await callScoped<{notes: Array<{id: string}>}>('synaipse_list', {});
         expect(list.notes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
-        const recent = await callScoped<{notes: Array<{id: string}>}>('synaipse_recent', {});
-        expect(recent.notes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
-        const byTag = await callScoped<{notes: Array<{id: string}>}>('synaipse_notes_by_tag', {tag: 'shared'});
+        const byTitle = await callScoped<{notes: Array<{id: string}>}>('synaipse_list', {sort: 'title'});
+        expect(byTitle.notes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
+        const byTag = await callScoped<{notes: Array<{id: string}>}>('synaipse_list', {tag: 'shared'});
         expect(byTag.notes.map((n) => n.id)).toEqual(['Memory/a/one.md']);
     });
 
@@ -142,12 +142,12 @@ describe('aggregate tools respect the path-prefix scope', () => {
     it('todos and backlinks', async () => {
         const todos = await callScoped<{todos: Array<{noteId: string}>}>('synaipse_todos', {});
         expect(new Set(todos.todos.map((t) => t.noteId))).toEqual(new Set(['Memory/a/one.md']));
-        const back = await callScoped<{backlinks: string[]}>('synaipse_backlinks', {id: 'Memory/a/one.md'});
-        expect(back.backlinks).toEqual([]);
+        const back = await callScoped<{in: string[]}>('synaipse_links', {id: 'Memory/a/one.md', direction: 'in'});
+        expect(back.in).toEqual([]);
     });
 
     it('unscoped callers still see everything', async () => {
-        const outcome = await tool('synaipse_list_notes').handle({}, EMPTY_CTX);
+        const outcome = await tool('synaipse_list').handle({}, EMPTY_CTX);
         const res = JSON.parse(outcome.response.content[0]!.text) as {notes: unknown[]};
         expect(res.notes).toHaveLength(2);
     });

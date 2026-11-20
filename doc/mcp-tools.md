@@ -461,14 +461,17 @@ Idempotent: already-linked notes are skipped.
 
 ---
 
-## Deprecated aliases
+## Removed tools
 
-These names still work for one version but are no longer listed in `tools/list`:
+These tools were merged into `synaipse_list` and `synaipse_links` and removed on 2026-11-20. A call by the old name fails with a message naming the replacement:
 
 | Old | Use instead |
 |---|---|
-| `synaipse_list_notes`, `synaipse_recent`, `synaipse_notes_by_tag` | `synaipse_list` |
-| `synaipse_backlinks`, `synaipse_outgoing_links` | `synaipse_links` |
+| `synaipse_list_notes` | `synaipse_list` |
+| `synaipse_recent` | `synaipse_list` (sorted by modified by default) |
+| `synaipse_notes_by_tag` | `synaipse_list` with `tag` |
+| `synaipse_backlinks` | `synaipse_links` with `direction: "in"` |
+| `synaipse_outgoing_links` | `synaipse_links` with `direction: "out"` |
 
 ---
 

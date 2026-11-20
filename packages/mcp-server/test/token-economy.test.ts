@@ -135,8 +135,8 @@ describe('link_note', () => {
 });
 
 describe('list times', () => {
-    it('recent and list_notes carry modified + age', async () => {
-        const {notes} = await call('synaipse_recent', {limit: 1});
+    it('list carries modified + age', async () => {
+        const {notes} = await call('synaipse_list', {limit: 1});
         expect(notes[0]).toMatchObject({modified: expect.stringMatching(/T/), age: expect.any(String)});
         expect(notes[0].mtime).toBeUndefined();
     });

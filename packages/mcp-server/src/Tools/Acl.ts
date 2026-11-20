@@ -46,23 +46,21 @@ const ACL_TABLE: Record<string, AclEntry> = {
     synaipse_read_note:    {mode: 'read',  pathArg: 'id'},
     synaipse_note_history: {mode: 'read',  pathArg: 'id'},
     synaipse_links:        {mode: 'read',  pathArg: 'id'},
-    synaipse_backlinks:    {mode: 'read',  pathArg: 'id'},
-    synaipse_outgoing_links: {mode: 'read', pathArg: 'id'},
     synaipse_related:      {mode: 'read',  pathArg: 'id'},
     synaipse_verify_history: {mode: 'read', unscopedOnly: true},
     synaipse_snapshot_list:   {mode: 'read', unscopedOnly: true}
 };
 
 /**
- * Deprecated tool → replacement. The old name stays callable (hidden from
- * tools/list) for one version so existing prompts and hooks keep working.
+ * Tools merged in plan P2 / B2 and removed (decision #3, 2026-11-20): a
+ * call by the old name is answered with how to reach the replacement.
  */
-export const DEPRECATED_TOOLS: Readonly<Record<string, string>> = {
+export const REMOVED_TOOLS: Readonly<Record<string, string>> = {
     synaipse_list_notes: 'synaipse_list',
-    synaipse_recent: 'synaipse_list',
-    synaipse_notes_by_tag: 'synaipse_list',
-    synaipse_backlinks: 'synaipse_links',
-    synaipse_outgoing_links: 'synaipse_links'
+    synaipse_recent: 'synaipse_list (sorted by modified by default)',
+    synaipse_notes_by_tag: 'synaipse_list with tag',
+    synaipse_backlinks: 'synaipse_links with direction "in"',
+    synaipse_outgoing_links: 'synaipse_links with direction "out"'
 };
 
 /** "synaipse_roadmap_update_step" → "Roadmap update step" */
@@ -122,7 +120,6 @@ const applyAcl = (tools: readonly ToolHandler[]): ToolHandler[] => tools.map((t)
             }
         },
         mode: entry.mode,
-        ...(DEPRECATED_TOOLS[t.definition.name] !== undefined ? {hidden: true} : {}),
         ...(entry.pathArg !== undefined ? {pathArg: entry.pathArg} : {}),
         ...(entry.unscopedOnly === true ? {unscopedOnly: true} : {})
     };

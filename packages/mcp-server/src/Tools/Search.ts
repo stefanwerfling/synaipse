@@ -113,37 +113,6 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
     },
     {
         definition: {
-            name: 'synaipse_list_notes',
-            description: 'Deprecated: use synaipse_list.',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    pathPrefix: {type: 'string', description: 'Filter by path prefix, e.g. "Memory/decisions/"'},
-                    limit: {type: 'number'}
-                }
-            }
-        },
-        handle: async (args) => {
-            const prefix = typeof args.pathPrefix === 'string' ? args.pathPrefix : '';
-            const limit = asLimit(args.limit, 200);
-
-            const raw = service.listNotes().filter((n) => n.id.startsWith(prefix));
-            const filtered = filterNotesByConsent(raw);
-            const notes = filtered.items
-                .slice(0, limit)
-                .map((n) => ({id: n.id, title: n.title, tags: n.tags, ...modifiedOf(n.mtime)}));
-
-            return {
-                response: ok({
-                    notes,
-                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
-                }),
-                event: {kind: 'list', touched: []}
-            };
-        }
-    },
-    {
-        definition: {
             name: 'synaipse_list_tags',
             description: 'List all tags in the vault with note counts.',
             inputSchema: {type: 'object', properties: {}}
@@ -154,63 +123,6 @@ export const searchTools = (service: SynaipseService): ToolHandler[] => [
                 .filter((t) => t.count > 0)
                 .sort((a, b) => b.count - a.count);
             return {response: ok({tags}), event: {kind: 'tags', touched: []}};
-        }
-    },
-    {
-        definition: {
-            name: 'synaipse_notes_by_tag',
-            description: 'Deprecated: use synaipse_list with tag.',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    tag: {type: 'string'}
-                },
-                required: ['tag']
-            }
-        },
-        handle: async (args) => {
-            const tag = asString(args.tag, 'tag');
-            const ids = service.tags().get(tag) ?? [];
-            const raw = ids
-                .map((id) => service.tryReadNote(id))
-                .filter((n): n is NonNullable<typeof n> => n !== undefined);
-            const filtered = filterNotesByConsent(raw);
-            const notes = filtered.items.map((n) => ({id: n.id, title: n.title, tags: n.tags}));
-            return {
-                response: ok({
-                    notes,
-                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
-                }),
-                event: {kind: 'list', touched: ids.slice(0, 10)}
-            };
-        }
-    },
-    {
-        definition: {
-            name: 'synaipse_recent',
-            description: 'Deprecated: use synaipse_list (sorted by modified by default).',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    limit: {type: 'number'}
-                }
-            }
-        },
-        handle: async (args) => {
-            const limit = asLimit(args.limit, 20);
-            const sorted = [...service.listNotes()]
-                .sort((a, b) => b.mtime - a.mtime);
-            const filtered = filterNotesByConsent(sorted);
-            const notes = filtered.items
-                .slice(0, limit)
-                .map((n) => ({id: n.id, title: n.title, ...modifiedOf(n.mtime)}));
-            return {
-                response: ok({
-                    notes,
-                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
-                }),
-                event: {kind: 'list', touched: notes.slice(0, 5).map((n) => n.id)}
-            };
         }
     },
     {

@@ -5,11 +5,11 @@ import path from 'node:path';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {SynaipseService} from '@synaipse/service';
-import {buildTools, DEPRECATED_TOOLS, resolveToolsets, TOOLSETS, type ToolHandler} from '../src/Tools.js';
+import {buildTools, REMOVED_TOOLS, resolveToolsets, TOOLSETS, type ToolHandler} from '../src/Tools.js';
 import {buildMcpServer} from '../src/Server.js';
 import {EventPublisher} from '../src/EventPublisher.js';
 
-/** Plan P2 / B2: consolidated list/links/graph, hidden aliases, toolsets. */
+/** Plan P2 / B2: consolidated list/links/graph, removed old names, toolsets. */
 
 const buildConfig = (vaultPath: string) => ({
     vaultPath,
@@ -111,20 +111,22 @@ describe('synaipse_graph', () => {
     });
 });
 
-describe('deprecated aliases and toolsets', () => {
-    it('keeps deprecated tools callable but out of tools/list', async () => {
+describe('removed old names and toolsets', () => {
+    it('old names are gone and answer with their replacement (decision #3)', async () => {
         const server = buildMcpServer(buildConfig(vaultDir), [...tools.values()], new EventPublisher(null), null);
         const [a, b] = InMemoryTransport.createLinkedPair();
         const client = new Client({name: 't', version: '0'});
         await Promise.all([server.connect(b), client.connect(a)]);
 
         const listed = new Set((await client.listTools()).tools.map((t) => t.name));
-        for (const [old, replacement] of Object.entries(DEPRECATED_TOOLS)) {
+        for (const [old, replacement] of Object.entries(REMOVED_TOOLS)) {
             expect(listed.has(old), old).toBe(false);
-            expect(listed.has(replacement), replacement).toBe(true);
+            expect(listed.has(replacement.split(' ')[0]!), replacement).toBe(true);
+            expect(buildTools(service, {toolsets: TOOLSETS}).some((t) => t.definition.name === old), old).toBe(false);
         }
         const result = await client.callTool({name: 'synaipse_backlinks', arguments: {id: 'n/c.md'}});
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
+        expect((result.content as Array<{text: string}>)[0]?.text).toBe('synaipse_backlinks was removed; use synaipse_links with direction "in".');
         await client.close();
     });
 

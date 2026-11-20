@@ -62,7 +62,7 @@ describe('createSynaipseRegistrar', () => {
     it('lists every visible Synaipse tool beside the host tools, with converted schemas', async () => {
         const client = await gateway(createSynaipseRegistrar(service, {project: 'demo', toolsets: ['core']}));
         const listed = (await client.listTools()).tools;
-        const own = buildTools(service, {toolsets: ['core']}).filter((t) => t.hidden !== true);
+        const own = buildTools(service, {toolsets: ['core']});
 
         expect(listed.map((t) => t.name)).toContain('host_ping');
         expect(listed.filter((t) => t.name.startsWith('synaipse_')).map((t) => t.name).sort()).toEqual(own.map((t) => t.definition.name).sort());

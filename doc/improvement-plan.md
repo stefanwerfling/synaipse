@@ -96,7 +96,7 @@ Suite 1108 grün. Tool-Liste von ca. 7k auf ca. 4,5k Tokens (31 sichtbare Tools)
 |---|---|
 | B1 SDK, `instructions`, Annotations, kompaktes JSON, `isError` statt Protokollfehler, Enums ablehnen, `Tools/`-Split | erledigt. **Abweichung:** kein Umstieg auf `McpServer.registerTool`; der Low-Level-`Server` kann `instructions`, Annotations und `title` genauso, ohne alle Schemas nach zod zu portieren |
 | B1 `outputSchema`/`structuredContent`, `resource_link` | offen → P8 (zusammen mit Resources) |
-| B2 `synaipse_list`, `synaipse_links`, begrenzter `synaipse_graph`, `link_note` mit NoteRef-Validierung | erledigt. Alte Namen bleiben aufrufbar, sind aber aus `tools/list` versteckt (`DEPRECATED_TOOLS`) |
+| B2 `synaipse_list`, `synaipse_links`, begrenzter `synaipse_graph`, `link_note` mit NoteRef-Validierung | erledigt. Alte Namen am 2026-11-20 entfernt (Entscheidung #3); ein Aufruf nennt den Nachfolger (`REMOVED_TOOLS`) |
 | B2 Admin-Gruppe hinter Flag | erledigt als `SYNAIPSE_MCP_TOOLSETS` (`core`, `roadmap`, `benchmark`, `admin`; `admin` default aus). `list_changed` entfällt, weil die Toolsets pro Prozess feststehen |
 | B3 schlanke Write-Antworten mit Dead-Link-Warnungen, `read_note` mit Titel/Alias, `section`, Paging, Vorschlägen; ISO-Zeit plus Alter; Roadmap-Writes nur Gliederung | erledigt |
 | B3 `search`-Filter und Treffer-Anker, globales `verbosity` | offen → P8. `verbosity` scheint nach den schlanken Defaults überflüssig |
@@ -481,7 +481,7 @@ Aus 36 Tools werden ca. 22, ohne Funktion zu verlieren:
 | `synaipse_link_note` | mit derselben Auflösung und Validierung wie `roadmap_link_note` (`NoteRef.ts`), keine toten Links mehr |
 | Admin-Gruppe (`verify_history`, `snapshot_list`, `benchmark_*`) | nur sichtbar per Env-Flag oder Token-Scope. Danach `notifications/tools/list_changed` senden |
 
-Die alten Namen bleiben eine Version lang als Aliase mit Deprecation-Hinweis bestehen.
+Die alten Namen sind entfernt (Entscheidung #3, 2026-11-20); ein Aufruf liefert einen Fehler mit dem Nachfolger.
 
 ### B3. Token-Ökonomie *(hoch)*
 - Write-Tools (`write_note`, `update_note`, `edit_note`, `roadmap_*`) antworten nur mit `{id, hash, mtime, changed, warnings[]}` statt mit der vollen Note bzw. dem ganzen Step-Baum.
@@ -765,6 +765,6 @@ Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größ
 
 1. ~~**SQLite-State:** `node:sqlite` oder `better-sqlite3`?~~ Entschieden: `node:sqlite` (2026-11-18), `engines >=22.13`.
 2. ~~**MCP im Embed:** Tools beim PKG-Studio-Gateway registrieren (E2) oder `/synaipse/mcp` beibehalten?~~ Entschieden (2026-11-18): beides. Synaipse liefert einen Registrar für das Gateway (Projekt fest aus der Host-Config, volle Rechte); `/synaipse/mcp` bleibt für Clients mit Projekt-URL oder Token-ACL.
-3. **Tool-Konsolidierung (B2):** Wie lange bleiben die alten Tool-Namen als Aliase bestehen (eine Version oder dauerhaft)?
+3. ~~**Tool-Konsolidierung (B2):** Wie lange bleiben die alten Tool-Namen als Aliase bestehen (eine Version oder dauerhaft)?~~ Entschieden (2026-11-20): sofort entfernt. In Claude Code waren sie als versteckte Tools ohnehin nicht aufrufbar; ein Aufruf liefert jetzt einen Fehler mit dem Nachfolger. Verweise in den CLAUDE.md der anderen Projekte und in den Vault-Notizen sind angepasst.
 4. ~~**Shared Tokens (E3):** eigenes Paket `pkg-tokens` oder Teil des PKG-Studio-Shells?~~ Entschieden (2026-11-18): Teil des PKG-Studio-Shells. Synaipse liest `var(--sh-*, eigener Wert)`; das vollständige `--sh-*`-Set definiert der Gegenplan im PKG-Studio-Repo.
 5. ~~**i18n-Default:** UI-Default Deutsch oder Englisch?~~ Entschieden (2026-11-20): Englisch. Deutsch per Umschalter in der Kopfleiste oder Mount-Option `locale`.

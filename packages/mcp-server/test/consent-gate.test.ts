@@ -127,14 +127,14 @@ describe('MCP consent gate — synaipse_read_note', () => {
 });
 
 describe('MCP consent filter — aggregate tools', () => {
-    it('synaipse_list_notes skips pending/denied notes and reports skip count', async () => {
+    it('synaipse_list skips pending/denied notes and reports skip count', async () => {
         await writeNote(vaultDir, 'ok.md', '---\ntitle: OK\n---\nbody');
         await writeNote(vaultDir, 'granted.md', '---\ntitle: Granted\nmcp_consent: granted\n---\nbody');
         await writeNote(vaultDir, 'pending.md', '---\ntitle: Pending\nmcp_consent: pending\n---\nbody');
         await writeNote(vaultDir, 'denied.md', '---\ntitle: Denied\nmcp_consent: denied\n---\nbody');
         await setup();
 
-        const outcome = await findTool('synaipse_list_notes').handle({}, EMPTY_CTX);
+        const outcome = await findTool('synaipse_list').handle({}, EMPTY_CTX);
         const payload = parse<{notes: Array<{id: string}>; skippedByConsent?: number}>(
             outcome.response.content[0]!.text
         );
@@ -161,7 +161,7 @@ describe('MCP consent filter — aggregate tools', () => {
         await writeNote(vaultDir, 'a.md', '---\ntitle: A\n---\nbody');
         await setup();
 
-        const outcome = await findTool('synaipse_list_notes').handle({}, EMPTY_CTX);
+        const outcome = await findTool('synaipse_list').handle({}, EMPTY_CTX);
         const payload = parse<{skippedByConsent?: number}>(outcome.response.content[0]!.text);
         expect(payload.skippedByConsent).toBeUndefined();
     });

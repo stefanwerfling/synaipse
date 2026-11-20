@@ -10,7 +10,7 @@ import type {ToolHandler} from './Tools/Shared.js';
 import {createLogger} from '@synaipse/core';
 
 export {EMPTY_CTX} from './Tools/Shared.js';
-export {DEPRECATED_TOOLS} from './Tools/Acl.js';
+export {REMOVED_TOOLS} from './Tools/Acl.js';
 export type {ToolCall, ToolContext, ToolEventInfo, ToolHandler, ToolOutcome, ToolResponse} from './Tools/Shared.js';
 
 /**

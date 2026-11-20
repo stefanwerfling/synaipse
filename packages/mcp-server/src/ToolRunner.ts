@@ -5,6 +5,7 @@ import {auditContextStorage} from '@synaipse/service';
 import {checkScope, type TokenScope} from './Auth.js';
 import type {EventPublisher} from './EventPublisher.js';
 import type {ToolCall, ToolContext, ToolHandler, ToolResponse} from './Tools.js';
+import {REMOVED_TOOLS} from './Tools/Acl.js';
 
 /**
  * The one way a Synaipse tool runs — shared by Synaipse's own MCP endpoint
@@ -39,7 +40,6 @@ export const resolvePathArg = (tool: ToolHandler, args: Record<string, unknown>)
  * doesn't see write tools even though it couldn't call them anyway.
  */
 export const isToolVisible = (tool: ToolHandler, scope: TokenScope): boolean => {
-    if (tool.hidden === true) return false;
     if (scope.tools.length > 0 && !scope.tools.includes(tool.definition.name)) return false;
     if ((tool.mode ?? 'read') === 'write' && !scope.write) return false;
     if ((tool.mode ?? 'read') === 'read' && !scope.read) return false;
@@ -62,7 +62,9 @@ export const createToolRunner = (deps: {
     if (!tool) {
         return {
             isError: true,
-            content: [{type: 'text', text: `Unknown tool: ${name}. Call tools/list for the available synaipse_* tools.`}]
+            content: [{type: 'text', text: REMOVED_TOOLS[name] !== undefined
+                ? `${name} was removed; use ${REMOVED_TOOLS[name]}.`
+                : `Unknown tool: ${name}. Call tools/list for the available synaipse_* tools.`}]
         };
     }
 

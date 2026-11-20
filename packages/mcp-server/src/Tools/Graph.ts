@@ -115,53 +115,6 @@ export const graphTools = (service: SynaipseService): ToolHandler[] => [
     },
     {
         definition: {
-            name: 'synaipse_backlinks',
-            description: 'Deprecated: use synaipse_links with direction "in".',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    id: {type: 'string'}
-                },
-                required: ['id']
-            }
-        },
-        handle: async (args) => {
-            const id = asString(args.id, 'id');
-            const backlinks = service.backlinks(id);
-            const filtered = filterByConsent(service, backlinks, (b) => b);
-            return {
-                response: ok({
-                    backlinks: filtered.items,
-                    ...(filtered.skipped > 0 ? {skippedByConsent: filtered.skipped} : {})
-                }),
-                event: {kind: 'list', touched: [id, ...backlinks.slice(0, 5)]}
-            };
-        }
-    },
-    {
-        definition: {
-            name: 'synaipse_outgoing_links',
-            description: 'Deprecated: use synaipse_links with direction "out".',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    id: {type: 'string'}
-                },
-                required: ['id']
-            }
-        },
-        handle: async (args, ctx) => {
-            const id = asString(args.id, 'id');
-            const note = await enforceReadConsent(service, id, ctx?.call);
-            const typed = extractTypedLinks(note.frontmatter);
-            return {
-                response: ok({wikilinks: note.wikilinks, typed}),
-                event: {kind: 'list', touched: [id]}
-            };
-        }
-    },
-    {
-        definition: {
             name: 'synaipse_graph',
             description: 'Wikilink graph around a note: nodes + edges within `depth` hops of `center`. Without center: the best-connected notes. Bounded by limit — never the whole vault.',
             inputSchema: {

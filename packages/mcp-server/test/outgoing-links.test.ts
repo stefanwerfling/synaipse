@@ -38,23 +38,23 @@ afterEach(async () => {
 
 const setupTool = async (): Promise<void> => {
     await service.start();
-    const tool = buildTools(service).find((t) => t.definition.name === 'synaipse_outgoing_links');
-    if (tool === undefined) throw new Error('synaipse_outgoing_links tool not registered');
+    const tool = buildTools(service).find((t) => t.definition.name === 'synaipse_links');
+    if (tool === undefined) throw new Error('synaipse_links tool not registered');
     outgoing = tool;
 };
 
-describe('synaipse_outgoing_links tool', () => {
-    it('returns body wikilinks and empty typed list when no frontmatter links', async () => {
+describe('synaipse_links direction "out"', () => {
+    it('returns body wikilinks and no typed list when there are no frontmatter links', async () => {
         await writeNote(vaultDir, 'src.md', '---\ntitle: Src\n---\nrefs [[Foo]] and [[Bar]]');
         await writeNote(vaultDir, 'foo.md', '---\ntitle: Foo\n---\nbody');
         await writeNote(vaultDir, 'bar.md', '---\ntitle: Bar\n---\nbody');
         await setupTool();
 
-        const outcome = await outgoing.handle({id: 'src.md'}, EMPTY_CTX);
+        const outcome = await outgoing.handle({id: 'src.md', direction: 'out'}, EMPTY_CTX);
         const payload = JSON.parse(outcome.response.content[0]!.text);
 
-        expect(payload.wikilinks.sort()).toEqual(['Bar', 'Foo']);
-        expect(payload.typed).toEqual([]);
+        expect(payload.out.sort()).toEqual(['Bar', 'Foo']);
+        expect(payload.typed).toBeUndefined();
     });
 
     it('surfaces well-formed typed links from frontmatter', async () => {
@@ -65,7 +65,7 @@ describe('synaipse_outgoing_links tool', () => {
         await writeNote(vaultDir, 'related.md', '---\ntitle: Related\n---\nbody');
         await setupTool();
 
-        const outcome = await outgoing.handle({id: 'new.md'}, EMPTY_CTX);
+        const outcome = await outgoing.handle({id: 'new.md', direction: 'out'}, EMPTY_CTX);
         const payload = JSON.parse(outcome.response.content[0]!.text);
 
         expect(payload.typed).toEqual([
@@ -81,7 +81,7 @@ describe('synaipse_outgoing_links tool', () => {
         );
         await setupTool();
 
-        const outcome = await outgoing.handle({id: 'mix.md'}, EMPTY_CTX);
+        const outcome = await outgoing.handle({id: 'mix.md', direction: 'out'}, EMPTY_CTX);
         const payload = JSON.parse(outcome.response.content[0]!.text);
 
         expect(payload.typed).toEqual([{target: 'Good', kind: 'replies_to'}]);
@@ -93,10 +93,10 @@ describe('synaipse_outgoing_links tool', () => {
         );
         await setupTool();
 
-        const outcome = await outgoing.handle({id: 'both.md'}, EMPTY_CTX);
+        const outcome = await outgoing.handle({id: 'both.md', direction: 'out'}, EMPTY_CTX);
         const payload = JSON.parse(outcome.response.content[0]!.text);
 
-        expect(payload.wikilinks).toEqual(['InlineOnly']);
+        expect(payload.out).toEqual(['InlineOnly']);
         expect(payload.typed).toEqual([{target: 'Other', kind: 'supersedes'}]);
     });
 });
