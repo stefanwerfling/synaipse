@@ -33,3 +33,5 @@ packages/*/benchmark/results/*.json
 
 .idea/
 *.iml
+bench-result.json
+bench-baseline.json

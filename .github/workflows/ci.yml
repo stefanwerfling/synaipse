@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      rebaseline:
+        description: 'Bench gate: record a new baseline without comparing (after an accepted regression)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -58,3 +64,42 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npx vitest run packages/server-storage
+
+  bench:
+    # Scale gate (plan A7): 10k and 50k synthetic notes; cold/warm start,
+    # layout, RSS, search p95, write p95. Fails on a regression over 20 %
+    # (and over a per-metric absolute slack) against the last green main run,
+    # whose result is kept in the actions cache.
+    name: scale bench gate
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: restore baseline (last green main)
+        if: ${{ !inputs.rebaseline }}
+        uses: actions/cache/restore@v4
+        with:
+          path: bench-baseline.json
+          key: bench-baseline-${{ runner.os }}-none
+          restore-keys: bench-baseline-${{ runner.os }}-
+      - run: npm run bench:gate -- --sizes=10000,50000 --out=bench-result.json --baseline=bench-baseline.json --machine=gha-${{ runner.os }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-result
+          path: bench-result.json
+          if-no-files-found: ignore
+      - name: keep as baseline
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: cp bench-result.json bench-baseline.json
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: bench-baseline.json
+          key: bench-baseline-${{ runner.os }}-${{ github.run_id }}

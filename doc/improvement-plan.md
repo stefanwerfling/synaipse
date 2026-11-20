@@ -114,7 +114,7 @@ Suite 1127 grün (25 übersprungen), Lint ohne Fehler.
 
 | Punkt | Stand |
 |---|---|
-| G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bundle-Budget seit D4 drin; Bench-Gate und Playwright kommen mit A7 und P4 |
+| G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bundle-Budget seit D4 drin; Bench-Gate seit A7 als eigener Job `bench`; Playwright kommt mit P4 |
 | G5 Pinning | erledigt: `ngit`, `vts` und `mdfloor` auf die Commit-SHAs aus dem Lockfile gepinnt; `engines.node >=22.13`, `.nvmrc`. **Offen:** vitest-Major-Update und Ersatz von `gray-matter` (braucht Round-Trip-Tests, eigener Slice) |
 | A1 `LinkIndex` und Bulk-Write | erledigt: Backlinks werden inkrementell gepflegt, Tag-Index ebenso. `service.batch()` macht einen ngit-Commit, embeddet in Gruppen und flusht einmal. Crawler-CLI und Jobs (gitea, devto, github-stars, code) nutzen es |
 | A1 persistente Titel/Alias-Indizes | offen. Die O(N)-Rescans in `related`, `prime`, `todos` usw. bleiben vorerst; sie sind erst ab ca. 50k Notes spürbar → mit A7-Bench messen, dann entscheiden |
@@ -378,6 +378,24 @@ Mehrere Prozesse (`da36bda`): Jeder Write und Delete erhöht in derselben Transa
 History (`05a5c87`): Mit `SYNAIPSE_HISTORY_DIR` umhüllt `VersionedNoteAdapter` den MariaDB-Adapter und committet jeden Write und Delete (pro Write-Batch einen Commit) in ein eigenständiges ngit-Repo (`RepoHistory`), aus dem Speicher, als die Markdown-Datei, die lokal auf der Platte läge. Damit funktionieren History, Versionen, Diffs, Snapshots, Activity und Roadmap-Rollback unverändert über den bestehenden `HistoryService`. Statt des früher angedachten Commit-Workers mit `pending_commits`-Tabelle: ngit aktualisiert den Branch unter Lock und nur, wenn HEAD noch der gelesene Parent ist; bei Konflikt baut `RepoHistory` den Commit auf dem neuen HEAD neu (Test: zwei Prozesse, 13 Commits, keiner verloren). Voraussetzung: Prozesse auf einer Datenbank teilen das Verzeichnis. Ohne Verzeichnis oder mit `SYNAIPSE_GIT_AUTOCOMMIT=false` bleibt die History aus wie bisher. Ende-zu-Ende geprüft mit zwei Web-Servern: zwei Writes auf A, B liefert History, alte Version mit Frontmatter, Diff und Activity.
 
 Integrationstests mit `SYNAIPSE_TEST_MARIADB=1` (39 grün); die Testdateien trennen sich jetzt über die `vault_id` und laufen parallel.
+
+### Status A7 Benchmark-Gate (2026-11-20): erledigt
+
+`scripts/bench-gate.mjs` (`npm run bench:gate`) erzeugt pro Größe einen deterministischen Vault (`bench-gen-vault.mjs`, Seed 1), startet den gebauten Web-Server zweimal isoliert (Temp-cwd, explizite Env, keine Embeddings/Git/Qdrant) und misst Kaltstart, Warmstart, Layout-Zeit (aus dem Log `layout warmed`), RSS, Search-p95 (60 Volltext-Abfragen nach einem Aufwärmdurchgang) und Write-p95 (60 PUTs, abwechselnd Update und Neuanlage). Gemeinsame Helfer in `scripts/bench-lib.mjs`; `bench-scale.mjs` nutzt sie jetzt auch und erbt nicht mehr die Entwickler-Env.
+
+Gate: Ein Wert gilt als Regression, wenn er die Baseline um mehr als 20 % *und* um eine absolute Mindestspanne übersteigt (Start 400 ms, Layout 200 ms, RSS 64 MiB, p95 15 ms), damit Millisekunden-Rauschen auf geteilten Runnern nicht anschlägt; dann exit 1. CI-Job `bench` (nach `check`) vergleicht gegen das Ergebnis des letzten grünen main-Laufs aus dem Actions-Cache und speichert auf main das neue; ohne Baseline wird nur berichtet. Eine gewollte Verschlechterung wird per `workflow_dispatch` mit `rebaseline` übernommen. `--record-url` + `--project` hängt die Werte an das Benchmark-Feature eines Projekts an (gleicher Speicher wie `synaipse_benchmark_add`, Dimensionen `suite/notes/machine`, `higherIsBetter: false`).
+
+Messung lokal (8 Kerne, Node 24), zwei Läufe, beide Größen zusammen unter 1 Minute:
+
+| | 10k | 50k |
+|---|---|---|
+| Kaltstart | 3,0 s | 11,8–12,2 s |
+| Layout | 0,88 s | 5,4 s |
+| RSS | 590 MiB | 1,4–1,5 GiB |
+| Search p95 | 9–12 ms | 46 ms |
+| Write p95 | 11 ms | 44 ms |
+
+Zweiter Lauf gegen den ersten: größte Abweichung +10 % (RSS 50k), kein Fehlalarm. Eine präparierte Baseline mit halbierter Layout-Zeit schlägt an. Warmstart ≈ Kaltstart ist erwartbar: Der Hash-Cache in `state.db` spart nur Embeddings, die im Gate aus sind. Auffällig für A1: Write-p95 und Search-p95 wachsen bei 5-mal so vielen Notes etwa 4-fach, also nahezu linear.
 
 ## 3. Säule A: Performance und Skalierung (Backend)
 
