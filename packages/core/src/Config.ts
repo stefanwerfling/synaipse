@@ -44,6 +44,7 @@ const buildMariaDbConfig = (env: NodeJS.ProcessEnv): {
     password: string;
     database: string;
     vaultId?: number;
+    accessFlushMs?: number;
 } => {
     const host = env.SYNAIPSE_MARIADB_HOST?.trim();
     const user = env.SYNAIPSE_MARIADB_USER?.trim();
@@ -71,6 +72,9 @@ const buildMariaDbConfig = (env: NodeJS.ProcessEnv): {
         database,
         ...(env.SYNAIPSE_MARIADB_VAULT_ID !== undefined && env.SYNAIPSE_MARIADB_VAULT_ID !== ''
             ? {vaultId: int('SYNAIPSE_MARIADB_VAULT_ID', env.SYNAIPSE_MARIADB_VAULT_ID, 1)}
+            : {}),
+        ...(env.SYNAIPSE_MARIADB_ACCESS_FLUSH_MS !== undefined && env.SYNAIPSE_MARIADB_ACCESS_FLUSH_MS !== ''
+            ? {accessFlushMs: int('SYNAIPSE_MARIADB_ACCESS_FLUSH_MS', env.SYNAIPSE_MARIADB_ACCESS_FLUSH_MS, 30_000)}
             : {})
     };
 };

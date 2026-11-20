@@ -177,3 +177,116 @@ describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter (integration)', () => {
         await expect(adapter.syncEntries()).resolves.toBe(false);
     });
 });
+describe.skipIf(!integrationEnabled)('MariaDBNoteAdapter access journal (A6)', () => {
+    let pool: Pool;
+    let cfg: ResolvedMariaDBConfig;
+
+    beforeAll(async () => {
+        ({pool, cfg} = await connectAndMigrate());
+    });
+
+    afterAll(async () => {
+        await pool.end();
+    });
+
+    beforeEach(async () => {
+        await pool.query('TRUNCATE TABLE notes');
+    });
+
+    const counts = async (id: string) => {
+        const rows = await pool.query<{access_count: number; referenced_count: number; last_accessed: number | null}[]>(
+            'SELECT access_count, referenced_count, last_accessed FROM notes WHERE vault_id = ? AND note_path = ?', [cfg.vaultId, id]);
+        return rows[0];
+    };
+
+    it('two processes add up their access counts instead of overwriting each other', async () => {
+        const a = new MariaDBNoteAdapter(pool, {...cfg, accessFlushMs: 0});
+        await a.load();
+        await a.write({path: 'N/x.md', content: 'x'});
+        const b = new MariaDBNoteAdapter(pool, {...cfg, accessFlushMs: 0});
+        await b.load();
+
+        a.recordAccess('N/x.md');
+        a.recordAccess('N/x.md');
+        b.recordAccess('N/x.md');
+        b.recordReference('N/x.md');
+        await Promise.all([a.flushEntries(), b.flushEntries()]);
+
+        const row = await counts('N/x.md');
+        expect(row?.access_count).toBe(3);
+        expect(row?.referenced_count).toBe(1);
+        expect(row?.last_accessed).toBeGreaterThan(0);
+    });
+
+    it('flushes more rows than one chunk in a single call and skips deleted notes', async () => {
+        const a = new MariaDBNoteAdapter(pool, {...cfg, accessFlushMs: 0});
+        await a.load();
+        const ids: string[] = [];
+        for (let i = 0; i < 1100; i++) {
+            ids.push(`Bulk/n${i}.md`);
+        }
+        const conn = await pool.getConnection();
+        try {
+            await conn.batch(
+                'INSERT INTO notes (vault_id, note_path, title, frontmatter, body, hash, mtime_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                ids.map((id) => [cfg.vaultId, id, id, '{}', 'b', 'h'.repeat(40), 1])
+            );
+        } finally {
+            await conn.release();
+        }
+        await a.load();
+
+        for (const id of ids) a.recordAccess(id);
+        a.recordAccess('Bulk/n0.md');
+        await pool.query('DELETE FROM notes WHERE note_path = ?', ['Bulk/n5.md']);
+        await a.flushEntries();
+
+        expect((await counts('Bulk/n0.md'))?.access_count).toBe(2);
+        expect((await counts('Bulk/n1099.md'))?.access_count).toBe(1);
+        expect(await counts('Bulk/n5.md')).toBeUndefined();
+        const total = await pool.query<{c: number}[]>('SELECT COUNT(*) AS c FROM notes');
+        expect(Number(total[0]?.c)).toBe(1099);
+    });
+
+    it('keeps a failed batch and merges it with changes made meanwhile', async () => {
+        const a = new MariaDBNoteAdapter(pool, {...cfg, accessFlushMs: 0});
+        await a.load();
+        await a.write({path: 'N/y.md', content: 'y'});
+        a.recordAccess('N/y.md');
+
+        const realGet = pool.getConnection.bind(pool);
+        let fail = true;
+        (pool as {getConnection: () => Promise<unknown>}).getConnection = async () => {
+            const conn = await realGet();
+            if (fail) {
+                fail = false;
+                a.recordAccess('N/y.md');
+                return {...conn, beginTransaction: () => conn.beginTransaction(), rollback: () => conn.rollback(),
+                    release: () => conn.release(), commit: () => conn.commit(),
+                    query: () => Promise.reject(new Error('boom'))};
+            }
+            return conn;
+        };
+        try {
+            await expect(a.flushEntries()).rejects.toThrow('boom');
+            await a.flushEntries();
+        } finally {
+            (pool as {getConnection: unknown}).getConnection = realGet;
+        }
+        expect((await counts('N/y.md'))?.access_count).toBe(2);
+    });
+
+    it('flushes on its own timer and stops with closeLocal()', async () => {
+        const a = new MariaDBNoteAdapter(pool, {...cfg, accessFlushMs: 50});
+        await a.load();
+        await a.write({path: 'N/t.md', content: 't'});
+        a.recordAccess('N/t.md');
+        await new Promise((r) => setTimeout(r, 200));
+        expect((await counts('N/t.md'))?.access_count).toBe(1);
+
+        a.closeLocal();
+        a.recordAccess('N/t.md');
+        await new Promise((r) => setTimeout(r, 150));
+        expect((await counts('N/t.md'))?.access_count).toBe(1);
+    });
+});

@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {Pool} from 'mariadb';
 import {
+    createLogger,
     extractTags,
     extractWikilinks,
     LinkIndex,
@@ -69,16 +70,76 @@ const rowToNote = (row: NoteRow): Note => {
     };
 };
 
+const log = createLogger('mariadb-notes');
+
+/**
+ * Pending journal changes for one note. Counters are deltas, not totals,
+ * so several processes sharing a vault add up instead of overwriting each
+ * other; timestamps only ever move forward (GREATEST).
+ */
 interface DirtyEntry {
     hash?: string;
     mtime?: number;
-    accessCount?: number;
+    accessDelta?: number;
     lastAccessed?: number;
-    referencedCount?: number;
+    referencedDelta?: number;
     lastReferenced?: number;
     embeddedHash?: string;
     embedModel?: string;
 }
+
+/** Rows per multi-row UPDATE (keeps the statement well below max_allowed_packet). */
+export const FLUSH_CHUNK = 500;
+
+/** `newer` on top of `older`: latest values win, deltas add up. */
+export const mergeDirty = (older: DirtyEntry, newer: DirtyEntry): DirtyEntry => {
+    const out: DirtyEntry = {...older, ...newer};
+    const access = (older.accessDelta ?? 0) + (newer.accessDelta ?? 0);
+    const referenced = (older.referencedDelta ?? 0) + (newer.referencedDelta ?? 0);
+    if (access > 0) out.accessDelta = access;
+    if (referenced > 0) out.referencedDelta = referenced;
+    return out;
+};
+
+/**
+ * One UPDATE … JOIN over a derived table of all rows in `chunk`. An
+ * UPDATE (not INSERT … ON DUPLICATE KEY) so a note deleted in the
+ * meantime is not resurrected as an empty row. The first SELECT casts
+ * every column, which fixes the derived table's column types even when
+ * the first row's values are NULL.
+ */
+export const buildFlushStatement = (vaultId: number, chunk: ReadonlyArray<readonly [string, DirtyEntry]>): {sql: string; params: unknown[]} => {
+    const first = 'SELECT CAST(? AS CHAR(1024)) AS p, CAST(? AS CHAR(40)) AS h, CAST(? AS SIGNED) AS m, '
+        + 'CAST(? AS SIGNED) AS ad, CAST(? AS SIGNED) AS la, CAST(? AS SIGNED) AS rd, CAST(? AS SIGNED) AS lr, '
+        + 'CAST(? AS CHAR(64)) AS eh, CAST(? AS CHAR(255)) AS em';
+    const rest = ' UNION ALL SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?';
+    const params: unknown[] = [];
+    for (const [id, d] of chunk) {
+        params.push(
+            id,
+            d.hash ?? null,
+            d.mtime ?? null,
+            d.accessDelta ?? null,
+            d.lastAccessed ?? null,
+            d.referencedDelta ?? null,
+            d.lastReferenced ?? null,
+            d.embeddedHash ?? null,
+            d.embedModel ?? null
+        );
+    }
+    params.push(vaultId);
+    const sql = `UPDATE notes n JOIN (${first}${rest.repeat(chunk.length - 1)}) d
+        ON n.vault_id = ? AND n.note_path = d.p
+        SET n.hash = COALESCE(d.h, n.hash),
+            n.mtime_ms = COALESCE(d.m, n.mtime_ms),
+            n.access_count = n.access_count + COALESCE(d.ad, 0),
+            n.last_accessed = CASE WHEN d.la IS NULL THEN n.last_accessed ELSE GREATEST(COALESCE(n.last_accessed, 0), d.la) END,
+            n.referenced_count = n.referenced_count + COALESCE(d.rd, 0),
+            n.last_referenced = CASE WHEN d.lr IS NULL THEN n.last_referenced ELSE GREATEST(COALESCE(n.last_referenced, 0), d.lr) END,
+            n.embedded_hash = COALESCE(d.eh, n.embedded_hash),
+            n.embed_model = COALESCE(d.em, n.embed_model)`;
+    return {sql, params};
+};
 
 /**
  * MariaDB-backed NoteAdapter. The Service treats this identically to
@@ -104,6 +165,9 @@ export class MariaDBNoteAdapter implements NoteAdapter {
     private tagIndex = new Map<string, Set<NoteId>>();
     private dirtyEntries = new Map<NoteId, DirtyEntry>();
     private loaded = false;
+    /** Serialises flushes: the timer and explicit flushEntries() calls never interleave. */
+    private flushing: Promise<void> = Promise.resolve();
+    private flushTimer: ReturnType<typeof setInterval> | null = null;
 
     public constructor(
         private readonly pool: Pool,
@@ -147,6 +211,29 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         }
 
         this.loaded = true;
+        this.startFlushTimer();
+    }
+
+    /**
+     * Searches bump the access journal in memory; without a periodic
+     * flush those counters only reached the DB at index time or on a
+     * clean stop and were lost on a crash (plan A6).
+     */
+    private startFlushTimer(): void {
+        if (this.flushTimer !== null || this.cfg.accessFlushMs <= 0) return;
+        this.flushTimer = setInterval(() => {
+            this.flushEntries().catch((error: unknown) => {
+                log.warn('periodic access-journal flush failed; retried on the next tick', {error});
+            });
+        }, this.cfg.accessFlushMs);
+        this.flushTimer.unref();
+    }
+
+    public closeLocal(): void {
+        if (this.flushTimer !== null) {
+            clearInterval(this.flushTimer);
+            this.flushTimer = null;
+        }
     }
 
     public isLoaded(): boolean {
@@ -311,7 +398,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             existing.accessCount = (existing.accessCount ?? 0) + 1;
             existing.lastAccessed = now;
             const dirty = this.dirtyEntries.get(id) ?? {};
-            dirty.accessCount = existing.accessCount;
+            dirty.accessDelta = (dirty.accessDelta ?? 0) + 1;
             dirty.lastAccessed = now;
             this.dirtyEntries.set(id, dirty);
             return;
@@ -331,7 +418,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         this.dirtyEntries.set(id, {
             hash: hashSeed,
             mtime: mtimeSeed,
-            accessCount: 1,
+            accessDelta: 1,
             lastAccessed: now
         });
     }
@@ -344,7 +431,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
             existing.referencedCount = (existing.referencedCount ?? 0) + 1;
             existing.lastReferenced = now;
             const dirty = this.dirtyEntries.get(id) ?? {};
-            dirty.referencedCount = existing.referencedCount;
+            dirty.referencedDelta = (dirty.referencedDelta ?? 0) + 1;
             dirty.lastReferenced = now;
             this.dirtyEntries.set(id, dirty);
             return;
@@ -364,7 +451,7 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         this.dirtyEntries.set(id, {
             hash: hashSeed,
             mtime: mtimeSeed,
-            referencedCount: 1,
+            referencedDelta: 1,
             lastReferenced: now
         });
     }
@@ -374,44 +461,42 @@ export class MariaDBNoteAdapter implements NoteAdapter {
         this.dirtyEntries.delete(id);
     }
 
-    public async flushEntries(): Promise<void> {
+    public flushEntries(): Promise<void> {
+        const run = this.flushing.then(() => this.flushNow());
+        // Keep the chain alive after a failure; the caller still sees the error.
+        this.flushing = run.catch(() => undefined);
+        return run;
+    }
+
+    /**
+     * Writes all pending journal changes in multi-row UPDATEs of
+     * {@link FLUSH_CHUNK} rows inside one transaction. Changes recorded
+     * while the flush runs go to a fresh map; on failure the taken batch
+     * is merged back so nothing is lost.
+     */
+    private async flushNow(): Promise<void> {
         if (this.dirtyEntries.size === 0) {
             return;
         }
 
+        const batch = this.dirtyEntries;
+        this.dirtyEntries = new Map();
+        const rows = [...batch];
+
         const conn = await this.pool.getConnection();
         try {
             await conn.beginTransaction();
-            for (const [id, dirty] of this.dirtyEntries) {
-                await conn.query(
-                    `UPDATE notes
-                     SET hash = COALESCE(?, hash),
-                         mtime_ms = COALESCE(?, mtime_ms),
-                         access_count = COALESCE(?, access_count),
-                         last_accessed = COALESCE(?, last_accessed),
-                         referenced_count = COALESCE(?, referenced_count),
-                         last_referenced = COALESCE(?, last_referenced),
-                         embedded_hash = COALESCE(?, embedded_hash),
-                         embed_model = COALESCE(?, embed_model)
-                     WHERE vault_id = ? AND note_path = ?`,
-                    [
-                        dirty.hash ?? null,
-                        dirty.mtime ?? null,
-                        dirty.accessCount ?? null,
-                        dirty.lastAccessed ?? null,
-                        dirty.referencedCount ?? null,
-                        dirty.lastReferenced ?? null,
-                        dirty.embeddedHash ?? null,
-                        dirty.embedModel ?? null,
-                        this.cfg.vaultId,
-                        id
-                    ]
-                );
+            for (let i = 0; i < rows.length; i += FLUSH_CHUNK) {
+                const {sql, params} = buildFlushStatement(this.cfg.vaultId, rows.slice(i, i + FLUSH_CHUNK));
+                await conn.query(sql, params);
             }
             await conn.commit();
-            this.dirtyEntries.clear();
         } catch (err) {
-            await conn.rollback();
+            await conn.rollback().catch(() => undefined);
+            for (const [id, older] of batch) {
+                const newer = this.dirtyEntries.get(id);
+                this.dirtyEntries.set(id, newer === undefined ? older : mergeDirty(older, newer));
+            }
             throw err;
         } finally {
             await conn.release();

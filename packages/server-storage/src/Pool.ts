@@ -15,11 +15,14 @@ export interface MariaDBConfig {
      * Multi-vault deployments assign distinct ids per vault root.
      */
     vaultId?: number;
+    /** Interval of the access-journal flush in ms; 0 disables it (flush only on index runs and stop). Default 30 000. */
+    accessFlushMs?: number;
 }
 
 export interface ResolvedMariaDBConfig extends MariaDBConfig {
     connectionLimit: number;
     vaultId: number;
+    accessFlushMs: number;
 }
 
 // `dist/Pool.js` lives one level below the package root; migrations
@@ -80,7 +83,8 @@ export const createPool = (cfg: MariaDBConfig): Pool => {
 export const resolveConfig = (cfg: MariaDBConfig): ResolvedMariaDBConfig => ({
     ...cfg,
     connectionLimit: cfg.connectionLimit ?? 10,
-    vaultId: cfg.vaultId ?? 1
+    vaultId: cfg.vaultId ?? 1,
+    accessFlushMs: cfg.accessFlushMs ?? 30_000
 });
 
 /**
