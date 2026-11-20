@@ -5276,6 +5276,30 @@ body.synaipse-sidebar-resizing {
     border-color: var(--border);
 }
 
+/* Infographic-Light (P10 S7): column/bar/line charts on jsNGraph RectCharts. */
+.synaipse-root .md-ig-light-host { display: block; padding: var(--space-3) var(--space-4); min-height: 0; }
+.synaipse-root .md-ig-light { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.synaipse-root .md-ig-caption { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-2); }
+.synaipse-root .md-ig-title { font-size: 14px; color: var(--text-0); }
+.synaipse-root .md-ig-desc { font-size: 12px; color: var(--text-2); }
+.synaipse-root .md-ig-axis { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.4px; }
+.synaipse-root .md-ig-xtitle { text-align: center; }
+.synaipse-root .md-ig-light .md-ig-bars { display: block; width: 100%; height: 180px; }
+.synaipse-root .md-ig-light .md-ig-line { display: block; width: 100%; height: auto; }
+.synaipse-root .md-ig-light .md-ig-line path { vector-effect: non-scaling-stroke; }
+.synaipse-root .md-ig-cols { display: grid; gap: 4px; }
+.synaipse-root .md-ig-col { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
+.synaipse-root .md-ig-value { font-size: 13px; font-weight: 600; color: var(--text-0); font-variant-numeric: tabular-nums; }
+.synaipse-root .md-ig-label { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.synaipse-root .md-ig-hbars { display: flex; flex-direction: column; gap: 6px; }
+.synaipse-root .md-ig-hbar { display: grid; grid-template-columns: minmax(80px, 30%) 1fr auto; gap: var(--space-2); align-items: center; }
+.synaipse-root .md-ig-track { height: 12px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+.synaipse-root .md-ig-fill { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.synaipse-root .md-ig-points { position: relative; height: 40px; }
+.synaipse-root .md-ig-point { position: absolute; top: 2px; display: flex; flex-direction: column; align-items: center; max-width: 22%; transform: translateX(-50%); text-align: center; }
+.synaipse-root .md-ig-point.md-ig-start { transform: none; align-items: flex-start; text-align: left; }
+.synaipse-root .md-ig-point.md-ig-end { transform: translateX(-100%); align-items: flex-end; text-align: right; }
+
 .synaipse-root .md-antv-infographic-error {
     padding: var(--space-3) var(--space-4);
     color: var(--red);

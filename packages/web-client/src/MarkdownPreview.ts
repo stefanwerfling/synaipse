@@ -6,6 +6,7 @@ import {clear, el, portalHost} from './Dom.js';
 import {positionHoverCard} from './HoverCard.js';
 import {setupContainerExtension} from './MarkdownContainer.js';
 import {splitWikilinkTarget} from './Wikilinks.js';
+import {lightChartKind, parseChartData, type LightChartData, type LightChartKind} from './InfographicData.js';
 import {defineMessages, tc} from './I18n.js';
 
 const t = defineMessages('markdownPreview', {
@@ -313,6 +314,40 @@ export const applyMdFloorTo = async (host: HTMLElement): Promise<void> => {
 };
 
 /**
+ * Infographic-Light (plan P10 / S7): simple column/bar/line charts are drawn
+ * with jsNGraph RectCharts (lazy chunk) instead of @antv/infographic. A block
+ * whose data the parser does not understand is left for antv.
+ */
+const applyLightCharts = async (stubs: Iterable<HTMLDivElement>): Promise<void> => {
+    const light: Array<{stub: HTMLDivElement; kind: LightChartKind; data: LightChartData}> = [];
+    for (const stub of stubs) {
+        if (stub.dataset.rendered === 'true') continue;
+        const kind = lightChartKind(stub.dataset.infographicLayout ?? '');
+        const syntaxJson = stub.dataset.infographicSyntax;
+        if (kind === null || syntaxJson === undefined) continue;
+        try {
+            const data = parseChartData(JSON.parse(syntaxJson) as string);
+            if (data !== null) light.push({stub, kind, data});
+        } catch {
+            // unreadable stub: antv reports the error
+        }
+    }
+    if (light.length === 0) return;
+
+    let render: typeof import('./InfographicLight.js').renderLightChart;
+    try {
+        render = (await import('./InfographicLight.js')).renderLightChart;
+    } catch {
+        return; // chunk failed to load: antv takes over
+    }
+    for (const {stub, kind, data} of light) {
+        stub.replaceChildren(render(kind, data));
+        stub.dataset.rendered = 'true';
+        stub.classList.add('md-ig-light-host');
+    }
+};
+
+/**
  * Post-render pass for antv-infographic stubs. Exported so the chat /
  * hover / standalone-render call sites can reuse the same SVG hydration
  * pipeline as the editor preview. Stubs are marked `dataset.rendered`
@@ -322,7 +357,12 @@ export const applyMdFloorTo = async (host: HTMLElement): Promise<void> => {
  * each rendered stub becomes click-to-fullscreen for the extreme cases.
  */
 export const applyAntvInfographicsTo = async (host: HTMLElement): Promise<void> => {
-    const stubs = host.querySelectorAll<HTMLDivElement>('.md-antv-infographic');
+    const all = host.querySelectorAll<HTMLDivElement>('.md-antv-infographic');
+    if (all.length === 0) return;
+
+    await applyLightCharts(all);
+    // Only blocks the light renderer could not take load @antv/infographic.
+    const stubs = [...all].filter((stub) => stub.dataset.rendered !== 'true');
     if (stubs.length === 0) return;
 
     let Infographic: typeof import('@antv/infographic').Infographic;

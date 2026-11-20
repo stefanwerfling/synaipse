@@ -77,7 +77,7 @@ const MIGRATED = [
     'AdminPanel', 'Auth', 'ChatgptImport', 'DsgvoDialog', 'FloorplanDialog', 'ImportDialog', 'LocalGraphPanel', 'SelectionAsk',
     'TokensPanel',
     // P10
-    'RoadmapGraph'
+    'RoadmapGraph', 'InfographicLight'
 ];
 
 const placeholders = (message: string): string[] => [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort();
