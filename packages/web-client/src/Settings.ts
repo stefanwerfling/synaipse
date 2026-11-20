@@ -1,5 +1,6 @@
 import {logout} from './Auth.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
 import {openModal, type ModalHandle} from './Modal.js';
 import {TokensPanel} from './TokensPanel.js';
 import {AdminPanel} from './AdminPanel.js';
@@ -12,6 +13,16 @@ export interface SettingsOptions {
 }
 
 type TabKey = 'tokens' | 'admin';
+
+const t = defineMessages('settings', {
+    signOut: 'Sign out',
+    hostManaged: 'Signed in through the host application; sign out there.',
+    staySignedIn: 'You stay signed in across browser sessions until you sign out.',
+    title: 'Account settings',
+    sections: 'Settings sections',
+    myTokens: 'My tokens',
+    admin: 'Admin'
+});
 
 /**
  * Account settings modal. Hosts tabbed panels and a logout footer.
@@ -42,7 +53,7 @@ export class Settings {
         const logoutBtn = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Sign out',
+            text: t('signOut'),
             on: {
                 click: () => {
                     void (async () => {
@@ -56,16 +67,16 @@ export class Settings {
         });
 
         const footer = this.opts.account.managedByHost === true
-            ? [el('span', {class: 'settings-footer-hint', text: 'Signed in through the host application; sign out there.'})]
+            ? [el('span', {class: 'settings-footer-hint', text: t('hostManaged')})]
             : [
-                el('span', {class: 'settings-footer-hint', text: 'You stay signed in across browser sessions until you sign out.'}),
+                el('span', {class: 'settings-footer-hint', text: t('staySignedIn')}),
                 logoutBtn
             ];
 
         this.modal = openModal({
-            title: 'Account settings',
+            title: t('title'),
             subtitle: this.opts.account.email,
-            closeLabel: 'Close',
+            closeLabel: tc('close'),
             size: 'lg',
             layout: 'sections',
             className: 'settings-dialog',
@@ -109,9 +120,9 @@ export class Settings {
             return btn;
         };
 
-        const nav = el('nav', {class: 'settings-tabs', attrs: {role: 'tablist', 'aria-label': 'Settings sections'}},
-            tab('tokens', 'My tokens'),
-            tab('admin', 'Admin')
+        const nav = el('nav', {class: 'settings-tabs', attrs: {role: 'tablist', 'aria-label': t('sections')}},
+            tab('tokens', t('myTokens')),
+            tab('admin', t('admin'))
         );
         // Arrow keys move between tabs (WAI-ARIA tabs pattern).
         nav.addEventListener('keydown', (ev) => {

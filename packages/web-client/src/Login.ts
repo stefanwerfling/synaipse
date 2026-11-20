@@ -1,5 +1,17 @@
 import {el} from './Dom.js';
 import {login} from './Auth.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('login', {
+    hostSignIn: 'Sign in through the host application to use Synaipse.',
+    noAccount: 'No Synaipse account for {user}. Ask a Synaipse admin to create one with this e-mail.',
+    subtitle: 'Sign in to continue',
+    email: 'Email',
+    password: 'Password',
+    signIn: 'Sign in',
+    required: 'Email and password are required',
+    signingIn: 'Signing in…'
+});
 
 export interface LoginScreenOptions {
     /** Called after successful login so the caller can mount the app. */
@@ -16,8 +28,8 @@ export const mountHostSignInNotice = (host: HTMLElement, hostUser: string | unde
     const card = el('div', {class: 'login-card'},
         el('h1', {class: 'login-title', text: 'Synaipse'}),
         el('p', {class: 'login-subtitle', text: hostUser === undefined
-            ? 'Sign in through the host application to use Synaipse.'
-            : `No Synaipse account for ${hostUser}. Ask a Synaipse admin to create one with this e-mail.`})
+            ? t('hostSignIn')
+            : t('noAccount', {user: hostUser})})
     );
     host.appendChild(el('div', {class: 'login-screen'}, card));
 };
@@ -34,23 +46,23 @@ export const mountLoginScreen = (host: HTMLElement, opts: LoginScreenOptions): v
     const card = el('form', {class: 'login-card', attrs: {novalidate: 'true'}});
 
     const title = el('h1', {class: 'login-title', text: 'Synaipse'});
-    const subtitle = el('p', {class: 'login-subtitle', text: 'Sign in to continue'});
+    const subtitle = el('p', {class: 'login-subtitle', text: t('subtitle')});
 
     const emailInput = el('input', {
         class: 'login-input',
-        attrs: {type: 'email', name: 'email', placeholder: 'Email', autocomplete: 'username', required: 'true'}
+        attrs: {type: 'email', name: 'email', placeholder: t('email'), autocomplete: 'username', required: 'true'}
     });
 
     const passwordInput = el('input', {
         class: 'login-input',
-        attrs: {type: 'password', name: 'password', placeholder: 'Password', autocomplete: 'current-password', required: 'true'}
+        attrs: {type: 'password', name: 'password', placeholder: t('password'), autocomplete: 'current-password', required: 'true'}
     });
 
     const errorMsg = el('div', {class: 'login-error', attrs: {'aria-live': 'polite'}});
     const submitBtn = el('button', {
         class: 'login-submit',
         attrs: {type: 'submit'},
-        text: 'Sign in'
+        text: t('signIn')
     });
 
     card.appendChild(title);
@@ -68,12 +80,12 @@ export const mountLoginScreen = (host: HTMLElement, opts: LoginScreenOptions): v
         const password = passwordInput.value;
 
         if (email.length === 0 || password.length === 0) {
-            errorMsg.textContent = 'Email and password are required';
+            errorMsg.textContent = t('required');
             return;
         }
 
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Signing in…';
+        submitBtn.textContent = t('signingIn');
         errorMsg.textContent = '';
 
         void (async () => {
@@ -88,7 +100,7 @@ export const mountLoginScreen = (host: HTMLElement, opts: LoginScreenOptions): v
                 errorMsg.textContent = err instanceof Error ? err.message : String(err);
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Sign in';
+                submitBtn.textContent = t('signIn');
             }
         })();
     });

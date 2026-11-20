@@ -6,6 +6,7 @@ import type {ChatPanel} from './ChatPanel.js';
 import type {InboxPanel} from './InboxPanel.js';
 import type {JobsPanel} from './JobsPanel.js';
 import type {RoadmapPanel} from './RoadmapPanel.js';
+import {defineMessages} from './I18n.js';
 
 /**
  * Tab registry (plan P3 / D1). The topbar is generated from TAB_DEFS, and
@@ -17,22 +18,56 @@ export type Tab = typeof TABS[number];
 
 export interface TabDef {
     id: Tab;
-    label: string;
-    title?: string;
+    /** Read at render time, so it follows the UI language. */
+    readonly label: string;
+    readonly title?: string;
 }
 
+const t = defineMessages('tabs', {
+    notes: 'Notes',
+    graph: 'Graph',
+    canvas: 'Canvas',
+    inbox: 'Inbox',
+    inboxTitle: 'remember entries from agents: merge into notes or discard',
+    roadmap: 'Roadmap',
+    roadmapTitle: 'Per-project roadmap — AI-planned implementation steps',
+    benchmarks: 'Benchmarks',
+    benchmarksTitle: 'Per-project benchmarks — speed and quality comparisons by machine, backend, technique',
+    chat: 'Chat',
+    jobs: 'Jobs',
+    activity: 'Activity',
+    audit: 'Audit',
+    auditTitle: 'GDPR layer 4 — audit log of external LLM calls',
+    consent: 'Consent',
+    consentTitle: 'Just-in-time consent requests from MCP note reads'
+});
+
+type TitleKey = 'inboxTitle' | 'roadmapTitle' | 'benchmarksTitle' | 'auditTitle' | 'consentTitle';
+
+const tab = (id: Tab, titleKey?: TitleKey): TabDef => {
+    const def = {
+        id,
+        get label() {
+            return t(id);
+        }
+    };
+    // A getter, not a spread: spreading would read the title once, now.
+    if (titleKey !== undefined) Object.defineProperty(def, 'title', {get: () => t(titleKey), enumerable: true});
+    return def;
+};
+
 export const TAB_DEFS: readonly TabDef[] = [
-    {id: 'notes', label: 'Notes'},
-    {id: 'graph', label: 'Graph'},
-    {id: 'canvas', label: 'Canvas'},
-    {id: 'inbox', label: 'Inbox', title: 'remember-Einträge der Agenten: in Notizen übernehmen oder verwerfen'},
-    {id: 'roadmap', label: 'Roadmap', title: 'Per-Projekt Roadmap — KI-geplante Umsetzungsschritte'},
-    {id: 'benchmarks', label: 'Benchmarks', title: 'Per-Projekt Benchmarks — Speed-/Qualitäts-Vergleiche nach Maschine, Backend, Technik'},
-    {id: 'chat', label: 'Chat'},
-    {id: 'jobs', label: 'Jobs'},
-    {id: 'activity', label: 'Activity'},
-    {id: 'audit', label: 'Audit', title: 'DSGVO Layer 4 — Audit-Log externer LLM-Aufrufe'},
-    {id: 'consent', label: 'Consent', title: 'Just-in-time consent requests from MCP note reads'}
+    tab('notes'),
+    tab('graph'),
+    tab('canvas'),
+    tab('inbox', 'inboxTitle'),
+    tab('roadmap', 'roadmapTitle'),
+    tab('benchmarks', 'benchmarksTitle'),
+    tab('chat'),
+    tab('jobs'),
+    tab('activity'),
+    tab('audit', 'auditTitle'),
+    tab('consent', 'consentTitle')
 ];
 
 /** What every tab panel offers the app shell. */

@@ -1,4 +1,5 @@
 import {el} from './Dom.js';
+import {defineMessages} from './I18n.js';
 import type {EventKind, SynaipseEvent} from './Events.js';
 
 export interface ActivityLogOptions {
@@ -10,20 +11,25 @@ export interface ActivityLogOptions {
 const MAX_ENTRIES = 8;
 const ENTRY_TTL_MS = 12_000;
 
-const KIND_LABEL: Record<EventKind, string> = {
+const t = defineMessages('activityLog', {
     read: 'read',
     write: 'write',
     delete: 'delete',
     search: 'search',
     list: 'list',
     graph: 'graph',
-    tags: 'tags'
-};
+    tags: 'tags',
+    now: 'now',
+    close: 'Close activity log',
+    title: 'MCP activity'
+});
+
+const kindLabel = (kind: EventKind): string => t(kind);
 
 const formatRelative = (ts: number, now: number): string => {
     const diff = Math.max(0, now - ts);
 
-    if (diff < 1000) return 'now';
+    if (diff < 1000) return t('now');
     if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
     return `${Math.floor(diff / 3_600_000)}h`;
@@ -90,13 +96,13 @@ export class ActivityLog {
     private build(): void {
         const closeBtn = el('button', {
             class: 'activity-log-close',
-            attrs: {type: 'button', 'aria-label': 'Close activity log'},
+            attrs: {type: 'button', 'aria-label': t('close')},
             text: '×',
             on: {click: () => this.toggle()}
         });
 
         const header = el('div', {class: 'activity-log-head'},
-            el('span', {class: 'activity-log-title', text: 'MCP activity'}),
+            el('span', {class: 'activity-log-title', text: t('title')}),
             closeBtn
         );
 
@@ -116,7 +122,7 @@ export class ActivityLog {
             attrs: {role: 'button', tabindex: '0'},
             on: {click: () => this.opts.onClick?.(event)}
         },
-            el('span', {class: 'activity-kind', text: KIND_LABEL[event.kind]}),
+            el('span', {class: 'activity-kind', text: kindLabel(event.kind)}),
             el('span', {class: 'activity-target'},
                 el('span', {class: 'activity-title', text: title}),
                 restCount > 0 ? el('span', {class: 'activity-more', text: ` +${restCount}`}) : ''

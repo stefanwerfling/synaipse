@@ -5,6 +5,7 @@ import type {EventKind} from './Events.js';
 import {ClusterForce} from './Graph3DCluster.js';
 import {flyTo, Orbit3D, Trails3D, Waves3D} from './Graph3DEffects.js';
 import {LeanLayer, LeanTooltip, SPHERE_SEGMENTS_LEAN} from './Graph3DLean.js';
+import {tg} from './GraphMessages.js';
 import {
     buildAdjacency,
     buildNodeRecords,
@@ -314,7 +315,7 @@ export class GraphView3D implements GraphRenderer {
     private rebuild(): void {
         const {nodes, edges, visibleNodeCount, visibleEdgeCount} = filterGraph(this.state);
 
-        this.stats.textContent = `${visibleNodeCount} nodes · ${visibleEdgeCount} edges`;
+        this.stats.textContent = `${tg('nodes', {count: visibleNodeCount})} · ${tg('edges', {count: visibleEdgeCount})}`;
 
         this.nodes = buildNodeRecords(nodes, this.nodeById, loadSavedPositions());
         this.nodeById = new Map(this.nodes.map((n) => [n.id, n]));

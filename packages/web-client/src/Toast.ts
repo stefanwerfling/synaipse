@@ -1,4 +1,5 @@
 import {el, portalHost} from './Dom.js';
+import {tc} from './I18n.js';
 
 /**
  * Non-blocking notices (plan P7 / C2) for what used to be window.alert:
@@ -42,7 +43,7 @@ export const toast = (message: string, opts: ToastOptions = {}): (() => void) =>
     };
     const item = el('div', {class: `toast toast-${kind}`, attrs: kind === 'error' ? {role: 'alert'} : {role: 'status'}},
         el('span', {class: 'toast-text', text: message}),
-        el('button', {class: 'toast-close', attrs: {type: 'button', 'aria-label': 'Close'}, text: '×', on: {click: close}})
+        el('button', {class: 'toast-close', attrs: {type: 'button', 'aria-label': tc('close')}, text: '×', on: {click: close}})
     );
     container.appendChild(item);
     while (container.children.length > MAX_TOASTS) container.firstElementChild?.remove();

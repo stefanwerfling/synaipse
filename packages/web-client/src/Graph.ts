@@ -3,6 +3,7 @@ import type {Graph as GraphData} from '@synaipse/core';
 import {colorForNode, tagColor} from './Colors.js';
 import {communityColor, detectCommunities, type CommunityResult} from './Communities.js';
 import {el} from './Dom.js';
+import {tg} from './GraphMessages.js';
 import type {EventKind} from './Events.js';
 import type {GraphRenderer, GraphRendererCallbacks, GraphRendererState} from './GraphRenderer.js';
 import {CONCENTRATE_COLOR, PULSE_COLORS, filterGraph} from './GraphRenderer.js';
@@ -276,7 +277,7 @@ export class GraphView implements GraphRenderer {
 
         graph.on('clusterClick', (id) => this.graph?.focusCluster(id));
         graph.on('viewportChange', () => this.renderServerStats());
-        this.stats.textContent = `computing layout for ${this.state.data.nodes.length} nodes / ${this.state.data.edges.length} edges…`;
+        this.stats.textContent = tg('computing', {nodes: this.state.data.nodes.length, edges: this.state.data.edges.length});
         this.feed = new ServerLayoutFeed({
             onLayout: (layout, ms) => {
                 this.layout = layout;
@@ -284,7 +285,7 @@ export class GraphView implements GraphRenderer {
                 this.applyServerLayout();
             },
             onError: (cause) => {
-                this.stats.textContent = `layout failed: ${String(cause)}`;
+                this.stats.textContent = tg('layoutFailed', {cause: String(cause)});
             }
         });
         void this.feed.refresh();
@@ -396,10 +397,10 @@ export class GraphView implements GraphRenderer {
 
         this.notes = new Map(this.state.data.nodes.map((n) => [n.id, n]));
         const built = buildGraph(this.state, this.getCommunities());
-        const statsParts = [`${built.nodes.length} nodes`, `${built.edges.length} edges`];
+        const statsParts = [tg('nodes', {count: built.nodes.length}), tg('edges', {count: built.edges.length})];
 
         if (this.state.showCommunities && built.communityCount > 0) {
-            statsParts.push(`${built.communityCount} communities`);
+            statsParts.push(tg('communities', {count: built.communityCount}));
         }
 
         this.stats.textContent = statsParts.join(' · ');
@@ -480,12 +481,13 @@ export class GraphView implements GraphRenderer {
 
         const zoom = graph.getViewport().scale;
         const parts = graph.isClustered()
-            ? [`overview · ${layout.communities.length} communities`, `mod ${layout.modularity.toFixed(2)}`, `zoom ${zoom.toFixed(2)}× (click a community)`]
-            : [`${layout.nodes.length} nodes`, `${this.state.data.edges.length} edges`, `${layout.communities.length} communities`,
-                `zoom ${zoom.toFixed(2)}×`];
+            ? [tg('overview', {count: layout.communities.length}), tg('modularity', {value: layout.modularity.toFixed(2)}),
+                tg('zoomClick', {zoom: zoom.toFixed(2)})]
+            : [tg('nodes', {count: layout.nodes.length}), tg('edges', {count: this.state.data.edges.length}),
+                tg('communities', {count: layout.communities.length}), tg('zoom', {zoom: zoom.toFixed(2)})];
 
-        parts.push(`layout ${this.layoutMs}ms`);
-        if (layout.stale === true) parts.push('updating…');
+        parts.push(tg('layoutMs', {ms: this.layoutMs}));
+        if (layout.stale === true) parts.push(tg('updating'));
 
         this.stats.textContent = parts.join(' · ');
     }

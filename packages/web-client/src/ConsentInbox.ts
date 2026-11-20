@@ -1,5 +1,17 @@
 import {consentApi, type ConsentRequestSummary} from './Api.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, formatDateTime} from './I18n.js';
+
+const t = defineMessages('consentInbox', {
+    title: 'Consent Inbox',
+    hint: 'Claude has asked to read these notes via MCP. Approve or deny each request. '
+        + 'The decision is written into the note\'s frontmatter (mcp_consent) so subsequent reads pass through without another prompt.',
+    empty: 'No pending requests. When Claude asks to read a note whose frontmatter carries "mcp_consent: pending", it will show up here.',
+    openNote: 'Open note in the notes panel',
+    requester: 'requester: {name}',
+    approve: 'Approve',
+    deny: 'Deny'
+});
 
 export interface ConsentInboxOptions {
     /** Called whenever the pending count changes so App can update its badge. */
@@ -28,12 +40,10 @@ export class ConsentInbox {
     public constructor(private readonly opts: ConsentInboxOptions = {}) {
         this.element = el('div', {class: 'consent-panel'});
         this.element.appendChild(el('div', {class: 'consent-head'},
-            el('h2', {text: 'Consent Inbox'}),
+            el('h2', {text: t('title')}),
             el('p', {
                 class: 'consent-hint',
-                text: 'Claude has asked to read these notes via MCP. Approve or deny each request. '
-                    + 'The decision is written into the note\'s frontmatter (mcp_consent) so subsequent '
-                    + 'reads pass through without another prompt.'
+                text: t('hint')
             })
         ));
 
@@ -114,8 +124,7 @@ export class ConsentInbox {
         if (this.requests.size === 0) {
             this.listHost.appendChild(el('p', {
                 class: 'consent-empty',
-                text: 'No pending requests. When Claude asks to read a note whose frontmatter carries '
-                    + '"mcp_consent: pending", it will show up here.'
+                text: t('empty')
             }));
             return;
         }
@@ -133,27 +142,27 @@ export class ConsentInbox {
 
         const noteLink = el('button', {
             class: 'consent-note-link',
-            attrs: {type: 'button', title: 'Open note in the notes panel'},
+            attrs: {type: 'button', title: t('openNote')},
             text: req.noteId,
             on: {click: openNote}
         });
 
         const meta = el('div', {class: 'consent-meta'},
-            el('span', {class: 'consent-requester', text: `requester: ${req.requester}`}),
-            el('span', {class: 'consent-time', text: new Date(req.createdAt).toLocaleString()})
+            el('span', {class: 'consent-requester', text: t('requester', {name: req.requester})}),
+            el('span', {class: 'consent-time', text: formatDateTime(req.createdAt)})
         );
 
         const approveBtn = el('button', {
             class: 'btn consent-approve',
             attrs: {type: 'button'},
-            text: 'Approve',
+            text: t('approve'),
             on: {click: () => void this.decide(req.id, 'approve')}
         }) as HTMLButtonElement;
 
         const denyBtn = el('button', {
             class: 'btn consent-deny',
             attrs: {type: 'button'},
-            text: 'Deny',
+            text: t('deny'),
             on: {click: () => void this.decide(req.id, 'deny')}
         }) as HTMLButtonElement;
 

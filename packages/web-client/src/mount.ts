@@ -2,6 +2,7 @@ import './Styles.css';
 import {App} from './App.js';
 import {setApiBase} from './ApiBase.js';
 import {fetchAuthMode} from './Auth.js';
+import {getLocale, initLocale, onLocaleChange, setLocale, type Locale} from './I18n.js';
 import {mountHostSignInNotice, mountLoginScreen} from './Login.js';
 import {getTheme, initTheme, onThemeChange, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
 
@@ -49,12 +50,20 @@ export interface SynaipseMountOptions {
      * shell tokens (--sh-*) along — Synaipse reads them first (plan P9 / E3).
      */
     onThemeChange?: (theme: Theme) => void;
+    /**
+     * UI language (plan P7 / C3); later changes via handle.setLocale().
+     * Default: the user's stored choice, else English.
+     */
+    locale?: Locale;
 }
 
 export interface SynaipseMountHandle {
     unmount(): Promise<void>;
     setTheme(theme: Theme): void;
     getTheme(): Theme;
+    /** Switch the UI language; the view is rebuilt on the same route. */
+    setLocale(locale: Locale): Promise<void>;
+    getLocale(): Locale;
     /** Go to a route (see SynaipseMountOptions.route); resolves when the view is shown. */
     navigate(route: string): Promise<void>;
     /** Host tab became visible / hidden. */
@@ -74,19 +83,29 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
     const notify = opts.onThemeChange;
     const offTheme = notify === undefined ? undefined : onThemeChange(notify);
     notify?.(getTheme());
+    // German text is its own chunk; load it before anything renders.
+    await initLocale(opts.locale);
+    container.setAttribute('lang', getLocale());
 
     let app: App | null = null;
     let unmounted = false;
+    /** Last route the app reported; a language switch rebuilds the view there. */
+    let lastRoute: string | null = null;
+    let resumeRoute: string | null = null;
 
     const showApp = async (account: Account | null): Promise<void> => {
         container.replaceChildren();
         app = new App(account, {
             onSignedOut: () => void boot(),
             routing: opts.routing ?? 'none',
-            ...(opts.onRouteChange !== undefined ? {onRouteChange: opts.onRouteChange} : {})
+            onRouteChange: (route) => {
+                lastRoute = route;
+                opts.onRouteChange?.(route);
+            }
         });
         await app.mount(container);
-        const initial = opts.route ?? (opts.routing === 'hash' ? window.location.hash : '');
+        const initial = resumeRoute ?? opts.route ?? (opts.routing === 'hash' ? window.location.hash : '');
+        resumeRoute = null;
         await app.navigate(initial, {replace: true});
     };
 
@@ -133,16 +152,26 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
 
     await boot();
 
+    // Text is built once per view, so a language switch rebuilds the app
+    // (and the login screen) on the route it was showing.
+    const offLocale = onLocaleChange((locale) => {
+        container.setAttribute('lang', locale);
+        resumeRoute = lastRoute;
+        void boot();
+    });
+
     return {
         unmount: async () => {
             unmounted = true;
             offTheme?.();
+            offLocale();
             app?.destroy();
             app = null;
             container.replaceChildren();
             container.classList.remove(ROOT_CLASS);
             container.removeAttribute('data-theme');
             container.removeAttribute('data-brand');
+            container.removeAttribute('lang');
             // Overlays left open (dialogs, menus) live in the portal layer.
             if (document.querySelector(`.${ROOT_CLASS}:not(.synaipse-portal)`) === null) {
                 document.querySelector('body > .synaipse-portal')?.remove();
@@ -150,6 +179,8 @@ export async function mount(container: HTMLElement, opts: SynaipseMountOptions =
         },
         setTheme: (theme) => setTheme(theme),
         getTheme: () => getTheme(),
+        setLocale: (locale) => setLocale(locale),
+        getLocale: () => getLocale(),
         navigate: async (route) => {
             await app?.navigate(route);
         },

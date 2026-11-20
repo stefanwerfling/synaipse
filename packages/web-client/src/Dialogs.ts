@@ -1,4 +1,5 @@
 import {el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
 import {openModal} from './Modal.js';
 
 /**
@@ -7,9 +8,12 @@ import {openModal} from './Modal.js';
  * Studio) every other module too — ignore the theme and can't be styled
  * or labelled. These run in the shared modal frame instead.
  *
- * Labels default to English; German call sites pass their own until the
- * UI gets t() (plan C3).
+ * Button labels default to the shared Cancel / OK in the UI language.
  */
+
+const t = defineMessages('dialogs', {
+    invalidProject: 'Invalid project name: only a-z, 0-9, . _ -'
+});
 
 export interface ConfirmOptions {
     title: string;
@@ -22,11 +26,11 @@ export interface ConfirmOptions {
 
 /** Resolves true on confirm, false on cancel, Escape or backdrop click. */
 export const confirmDialog = (opts: ConfirmOptions): Promise<boolean> => new Promise((resolve) => {
-    const cancel = el('button', {class: 'btn', attrs: {type: 'button'}, text: opts.cancelLabel ?? 'Cancel'});
+    const cancel = el('button', {class: 'btn', attrs: {type: 'button'}, text: opts.cancelLabel ?? tc('cancel')});
     const ok = el('button', {
         class: opts.danger === true ? 'btn btn-danger' : 'btn btn-primary',
         attrs: {type: 'button'},
-        text: opts.confirmLabel ?? 'OK'
+        text: opts.confirmLabel ?? tc('ok')
     });
     const modal = openModal({
         title: opts.title,
@@ -95,8 +99,8 @@ export const formDialog = (opts: FormOptions): Promise<Record<string, string> | 
     if (opts.message !== undefined) body.push(el('p', {class: 'modal-text', text: opts.message}));
     body.push(form);
 
-    const cancel = el('button', {class: 'btn', attrs: {type: 'button'}, text: opts.cancelLabel ?? 'Cancel'});
-    const ok = el('button', {class: 'btn btn-primary', attrs: {type: 'button'}, text: opts.confirmLabel ?? 'OK'});
+    const cancel = el('button', {class: 'btn', attrs: {type: 'button'}, text: opts.cancelLabel ?? tc('cancel')});
+    const ok = el('button', {class: 'btn btn-primary', attrs: {type: 'button'}, text: opts.confirmLabel ?? tc('ok')});
     const first = inputs.get(opts.fields[0]?.name ?? '');
     const modal = openModal({
         title: opts.title,
@@ -159,4 +163,4 @@ export const promptDialog = async (opts: PromptOptions): Promise<string | null> 
 
 /** Validator for roadmap / benchmark project names (a-z, 0-9, . _ -). */
 export const validProjectName = (name: string): string | null =>
-    name === '' || /^[A-Za-z0-9_.-]+$/.test(name) ? null : 'Ungültiger Projektname: nur a-z, 0-9, . _ -';
+    name === '' || /^[A-Za-z0-9_.-]+$/.test(name) ? null : t('invalidProject');

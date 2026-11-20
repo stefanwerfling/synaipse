@@ -1,6 +1,7 @@
 import {clear, el} from './Dom.js';
 import type {SynaipseEvent} from './Events.js';
 import {GraphPrefs, viewModeOverride, tagEntries} from './GraphPrefs.js';
+import {tg} from './GraphMessages.js';
 import type {GraphRenderer} from './GraphRenderer.js';
 import {bumpedScore, currentHeatMap} from './Heat.js';
 import {TagBar, type ViewMode} from './TagBar.js';
@@ -71,14 +72,14 @@ export class GraphTab {
     public async show(): Promise<void> {
         if (this.store.graph === null) {
             clear(this.element);
-            const loadingMsg = el('p', {class: 'loading', text: 'fetching graph…'});
+            const loadingMsg = el('p', {class: 'loading', text: tg('fetching')});
             this.element.appendChild(loadingMsg);
 
             const started = Date.now();
 
             try {
                 const graph = await this.store.loadGraph();
-                loadingMsg.textContent = `fetched ${graph.nodes.length} nodes / ${graph.edges.length} edges in ${Date.now() - started}ms`;
+                loadingMsg.textContent = tg('fetched', {nodes: graph.nodes.length, edges: graph.edges.length, ms: Date.now() - started});
             } catch (error) {
                 console.error('failed to load graph', error);
                 return;

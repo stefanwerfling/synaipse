@@ -1,10 +1,36 @@
 import {clear, el} from './Dom.js';
+import {defineMessages, formatNumber} from './I18n.js';
 import {tagColor} from './Colors.js';
 import type {StorageCodec} from './Persistence.js';
 import {TagPicker} from './TagPicker.js';
 import type {TagEntry} from './TagGroups.js';
 
 export type {TagEntry};
+
+const t = defineMessages('tagBar', {
+    viewOptions: 'view options',
+    view: 'view',
+    heat: 'heat',
+    hulls: 'hulls',
+    room: 'room',
+    cluster: 'cluster',
+    communities: 'communities',
+    filter: 'filter',
+    isolated: 'isolated',
+    viewMode: 'view mode',
+    tooMany3d: 'Graph has {nodes} nodes — too many for 3D, showing 2D.',
+    slow3d: 'Graph has {nodes} nodes — 3D will be slow, 2D recommended.',
+    note3dOff: '{nodes} nodes · 3D off',
+    note2dRecommended: '{nodes} nodes · 2D recommended',
+    noProjectTitle: 'No project pinned — viewing the whole vault',
+    allProjects: 'all projects',
+    pinnedTo: 'Pinned to project {name}',
+    tagsSelected: 'Tags · {selected}/{total}',
+    tags: 'Tags · {total}',
+    clearTitle: 'Clear tag filter',
+    clear: 'clear',
+    removeFromFilter: 'Remove from filter'
+});
 
 /** 2D (jsNGraph, every vault size) or 3D (three.js). */
 export type ViewMode = '2d' | '3d';
@@ -87,18 +113,18 @@ export class TagBar {
             selectedChips
         );
 
-        const viewGroup = el('div', {class: 'control-group', attrs: {role: 'group', 'aria-label': 'view options'}},
-            el('span', {class: 'control-group-label', text: 'view'}),
-            this.segmentToggle('heat', this.state.showHeat, () => this.cb.onToggleHeat()),
-            this.segmentToggle('hulls', this.state.showHulls, () => this.cb.onToggleHulls()),
-            this.segmentToggle('room', this.state.showRoomGrid, () => this.cb.onToggleRoomGrid()),
-            this.segmentToggle('cluster', this.state.showCluster, () => this.cb.onToggleCluster()),
-            this.segmentToggle('communities', this.state.showCommunities, () => this.cb.onToggleCommunities())
+        const viewGroup = el('div', {class: 'control-group', attrs: {role: 'group', 'aria-label': t('viewOptions')}},
+            el('span', {class: 'control-group-label', text: t('view')}),
+            this.segmentToggle(t('heat'), this.state.showHeat, () => this.cb.onToggleHeat()),
+            this.segmentToggle(t('hulls'), this.state.showHulls, () => this.cb.onToggleHulls()),
+            this.segmentToggle(t('room'), this.state.showRoomGrid, () => this.cb.onToggleRoomGrid()),
+            this.segmentToggle(t('cluster'), this.state.showCluster, () => this.cb.onToggleCluster()),
+            this.segmentToggle(t('communities'), this.state.showCommunities, () => this.cb.onToggleCommunities())
         );
 
-        const filterGroup = el('div', {class: 'control-group', attrs: {role: 'group', 'aria-label': 'filter'}},
-            el('span', {class: 'control-group-label', text: 'filter'}),
-            this.segmentToggle('isolated', this.state.hideIsolated, () => this.cb.onToggleIsolated())
+        const filterGroup = el('div', {class: 'control-group', attrs: {role: 'group', 'aria-label': t('filter')}},
+            el('span', {class: 'control-group-label', text: t('filter')}),
+            this.segmentToggle(t('isolated'), this.state.hideIsolated, () => this.cb.onToggleIsolated())
         );
 
         const override = this.state.modeOverride ?? null;
@@ -106,17 +132,18 @@ export class TagBar {
         // 2D scales to any vault size (it switches to the server layout and
         // a community overview on its own). 3D is locked out past the hard
         // cap; the softer 'warned' state keeps it clickable with a tooltip.
+        const nodes = override === null ? '' : formatNumber(override.nodeCount);
         const title3d = forced
-            ? `Graph has ${override!.nodeCount.toLocaleString()} nodes — too many for 3D, showing 2D.`
+            ? t('tooMany3d', {nodes})
             : override !== null
-                ? `Graph has ${override.nodeCount.toLocaleString()} nodes — 3D will be slow, 2D recommended.`
+                ? t('slow3d', {nodes})
                 : undefined;
 
         // "Active" reflects what's actually being rendered, which differs
         // from the user's preference when 3D was replaced by 2D.
         const activeMode = this.state.effectiveViewMode ?? this.state.viewMode;
 
-        const modeToggle = el('div', {class: 'mode-switch', attrs: {role: 'group', 'aria-label': 'view mode'}},
+        const modeToggle = el('div', {class: 'mode-switch', attrs: {role: 'group', 'aria-label': t('viewMode')}},
             this.modeButton('2D', activeMode === '2d', false, undefined, () => {
                 if (this.state.viewMode !== '2d') this.cb.onSetViewMode('2d');
             }),
@@ -127,9 +154,7 @@ export class TagBar {
 
         // Visible note when 3D was replaced, so it is clear why it is off.
         if (override !== null && (!forced || this.state.viewMode === '3d')) {
-            const noteText = forced
-                ? `${override.nodeCount.toLocaleString()} nodes · 3D off`
-                : `${override.nodeCount.toLocaleString()} nodes · 2D recommended`;
+            const noteText = forced ? t('note3dOff', {nodes}) : t('note2dRecommended', {nodes});
             const note = el('span', {
                 class: forced ? 'mode-switch-note forced' : 'mode-switch-note warned',
                 attrs: {title: title3d ?? ''},
@@ -148,13 +173,13 @@ export class TagBar {
         const name = this.state.project;
 
         if (name === null) {
-            return el('span', {class: 'project-pin scope-global', attrs: {title: 'No project pinned — viewing the whole vault'}},
+            return el('span', {class: 'project-pin scope-global', attrs: {title: t('noProjectTitle')}},
                 el('span', {class: 'project-pin-icon', text: '◌'}),
-                el('span', {class: 'project-pin-label', text: 'all projects'})
+                el('span', {class: 'project-pin-label', text: t('allProjects')})
             );
         }
 
-        return el('span', {class: 'project-pin scope-project', attrs: {title: `Pinned to project ${name}`}},
+        return el('span', {class: 'project-pin scope-project', attrs: {title: t('pinnedTo', {name})}},
             el('span', {class: 'project-pin-icon', text: '●'}),
             el('span', {class: 'project-pin-label', text: name})
         );
@@ -163,7 +188,7 @@ export class TagBar {
     private renderPickerButton(): HTMLElement {
         const total = this.state.tags.length;
         const selected = this.state.selected.size;
-        const label = selected > 0 ? `Tags · ${selected}/${total}` : `Tags · ${total}`;
+        const label = selected > 0 ? t('tagsSelected', {selected, total}) : t('tags', {total});
 
         const button = el('button', {
             class: this.pickerHost !== null ? 'picker-btn active' : 'picker-btn',
@@ -195,9 +220,9 @@ export class TagBar {
         host.appendChild(
             el('button', {
                 class: 'clear-btn',
-                attrs: {type: 'button', title: 'Clear tag filter'},
+                attrs: {type: 'button', title: t('clearTitle')},
                 on: {click: () => this.cb.onClear()},
-                text: 'clear'
+                text: t('clear')
             })
         );
 
@@ -288,7 +313,7 @@ export class TagBar {
 
         return el('button', {
             class: 'chip active',
-            attrs: {type: 'button', title: 'Remove from filter'},
+            attrs: {type: 'button', title: t('removeFromFilter')},
             on: {click: () => this.cb.onToggleTag(entry.tag)},
             style: {background: color, borderColor: color, color: '#0f1115'}
         },

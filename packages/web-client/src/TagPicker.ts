@@ -1,6 +1,16 @@
 import {clear, el} from './Dom.js';
 import {tagColor} from './Colors.js';
-import {filterEntries, groupLabel, groupTags, isUngrouped, type TagEntry, type TagGroup} from './TagGroups.js';
+import {defineMessages} from './I18n.js';
+import {filterEntries, groupTags, isUngrouped, type TagEntry, type TagGroup} from './TagGroups.js';
+
+const t = defineMessages('tagPicker', {
+    selectTags: 'select tags',
+    filterPlaceholder: 'Filter tags…',
+    filterLabel: 'filter tags',
+    clear: 'clear ({count})',
+    noMatch: 'no tags match',
+    other: 'other'
+});
 
 export interface TagPickerCallbacks {
     onToggleTag: (tag: string) => void;
@@ -24,7 +34,7 @@ export class TagPicker {
 
     public constructor(initial: TagPickerState, private readonly cb: TagPickerCallbacks) {
         this.state = initial;
-        this.element = el('div', {class: 'tag-picker', attrs: {role: 'dialog', 'aria-label': 'select tags'}});
+        this.element = el('div', {class: 'tag-picker', attrs: {role: 'dialog', 'aria-label': t('selectTags')}});
         this.render();
 
         this.onDocClick = (event) => {
@@ -65,7 +75,7 @@ export class TagPicker {
         const header = el('div', {class: 'tag-picker-header'},
             el('input', {
                 class: 'tag-picker-search',
-                attrs: {type: 'search', placeholder: 'Filter tags…', 'aria-label': 'filter tags'},
+                attrs: {type: 'search', placeholder: t('filterPlaceholder'), 'aria-label': t('filterLabel')},
                 on: {
                     input: (event) => {
                         this.query = (event.target as HTMLInputElement).value;
@@ -82,7 +92,7 @@ export class TagPicker {
                     class: 'tag-picker-clear',
                     attrs: {type: 'button'},
                     on: {click: () => this.cb.onClearSelection()},
-                    text: `clear (${this.state.selected.size})`
+                    text: t('clear', {count: this.state.selected.size})
                 })
             );
         }
@@ -101,7 +111,7 @@ export class TagPicker {
         const filtered = filterEntries(this.state.tags, this.query);
 
         if (filtered.length === 0) {
-            this.list.appendChild(el('div', {class: 'tag-picker-empty', text: 'no tags match'}));
+            this.list.appendChild(el('div', {class: 'tag-picker-empty', text: t('noMatch')}));
             return;
         }
 
@@ -114,7 +124,7 @@ export class TagPicker {
 
     private renderGroup(group: TagGroup): HTMLElement {
         const heading = el('div', {class: 'tag-picker-group-head'},
-            el('span', {class: 'tag-picker-group-name', text: groupLabel(group.name)}),
+            el('span', {class: 'tag-picker-group-name', text: isUngrouped(group.name) ? t('other') : group.name}),
             el('span', {class: 'tag-picker-group-count', text: String(group.total)})
         );
 

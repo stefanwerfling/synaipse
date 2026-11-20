@@ -2528,7 +2528,8 @@ body.synaipse-sidebar-resizing {
     border-color: var(--accent);
 }
 
-.synaipse-root .theme-toggle {
+.synaipse-root .theme-toggle,
+.synaipse-root .language-toggle {
     background: transparent;
     border: 1px solid var(--border-soft);
     color: var(--text-2);
@@ -2545,7 +2546,17 @@ body.synaipse-sidebar-resizing {
     transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
 }
 
-.synaipse-root .theme-toggle:hover {
+.synaipse-root .language-toggle {
+    width: auto;
+    min-width: 30px;
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.synaipse-root .theme-toggle:hover,
+.synaipse-root .language-toggle:hover {
     color: var(--accent);
     border-color: var(--accent);
 }

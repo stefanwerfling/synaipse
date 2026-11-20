@@ -15,6 +15,7 @@ import {RouteSync} from './RouteSync.js';
 import {Search} from './Search.js';
 import {openShortcutsDialog} from './Shortcuts.js';
 import {getTheme, toggleTheme} from './Theme.js';
+import {defineMessages} from './I18n.js';
 import {Disposables} from './Disposables.js';
 import type {ChatPanel} from './ChatPanel.js';
 import type {RoadmapPanel} from './RoadmapPanel.js';
@@ -30,6 +31,11 @@ import {VaultStore} from './VaultStore.js';
  * RouteSync (URL/host route), AppCommands (palette), VaultStore (notes,
  * graph, deltas) and GraphTab (graph view, tag bar, heat, event effects).
  */
+
+const t = defineMessages('app', {
+    excerpt: 'Excerpt from {note}',
+    noteNotFound: 'No note found for “{ref}”. Link the note by its exact title, an alias or its path (e.g. Memory/project/note.md).'
+});
 
 export interface AppOptions {
     onSignedOut?: () => void;
@@ -79,7 +85,7 @@ export class App {
             onActiveNoteChange: () => this.routes.record(),
             onAskAboutSelection: (noteId, selection) => {
                 void this.panel('chat').then((chat) => {
-                    chat.attachContextForQuestion(`Auszug aus ${noteId}`, selection);
+                    chat.attachContextForQuestion(t('excerpt', {note: noteId}), selection);
                     void this.go({tab: 'chat'});
                 });
             }
@@ -229,7 +235,7 @@ export class App {
             openRef: (ref) => {
                 const id = resolveNoteRefCore(ref, this.store.notes);
                 if (id === null) {
-                    toast(`Keine Notiz gefunden für „${ref}". Verlinke die Notiz mit ihrem exakten Titel, einem Alias oder ihrem Pfad (z. B. Memory/projekt/notiz.md).`, {kind: 'error'});
+                    toast(t('noteNotFound', {ref}), {kind: 'error'});
                     return;
                 }
                 this.openNote(id);

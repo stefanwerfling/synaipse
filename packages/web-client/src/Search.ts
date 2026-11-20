@@ -1,6 +1,21 @@
 import type {SearchHit, SearchHitComponents, SearchMode} from '@synaipse/core';
 import {api} from './Api.js';
 import {clear, el, isAppVisible, isTypingTarget} from './Dom.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('search', {
+    placeholder: 'Search…  (/)',
+    label: 'Search notes',
+    fulltext: 'fulltext',
+    semantic: 'semantic',
+    hybrid: 'hybrid',
+    searching: 'searching…',
+    error: 'error: {message}',
+    noResults: 'no results',
+    breakdown: 'click for signal breakdown',
+    rank: 'rank {rank}',
+    demoteWhy: '— crawler index / heavy wikilinks'
+});
 
 export interface SearchOptions {
     semanticEnabled: boolean;
@@ -54,7 +69,7 @@ export class Search {
     private build(): void {
         this.input = el('input', {
             class: 'search-input',
-            attrs: {type: 'search', placeholder: 'Search…  (/)', 'aria-label': 'Search notes', 'aria-keyshortcuts': '/', autocomplete: 'off', spellcheck: 'false'},
+            attrs: {type: 'search', placeholder: t('placeholder'), 'aria-label': t('label'), 'aria-keyshortcuts': '/', autocomplete: 'off', spellcheck: 'false'},
             on: {
                 input: (e) => this.onInput((e.target as HTMLInputElement).value),
                 focus: () => {
@@ -76,9 +91,9 @@ export class Search {
                 }
             }}
         },
-            el('option', {attrs: {value: 'fulltext'}, text: 'fulltext'}),
-            el('option', {attrs: {value: 'semantic', ...(this.opts.semanticEnabled ? {} : {disabled: ''})}, text: 'semantic'}),
-            el('option', {attrs: {value: 'hybrid', ...(this.opts.semanticEnabled ? {} : {disabled: ''})}, text: 'hybrid'})
+            el('option', {attrs: {value: 'fulltext'}, text: t('fulltext')}),
+            el('option', {attrs: {value: 'semantic', ...(this.opts.semanticEnabled ? {} : {disabled: ''})}, text: t('semantic')}),
+            el('option', {attrs: {value: 'hybrid', ...(this.opts.semanticEnabled ? {} : {disabled: ''})}, text: t('hybrid')})
         ) as HTMLSelectElement;
         this.modeSelect.value = this.mode;
 
@@ -134,21 +149,21 @@ export class Search {
 
     private renderLoading(): void {
         clear(this.dropdown);
-        this.dropdown.appendChild(el('div', {class: 'search-empty', text: 'searching…'}));
+        this.dropdown.appendChild(el('div', {class: 'search-empty', text: t('searching')}));
         this.showDropdown();
     }
 
     private renderError(error: unknown): void {
         clear(this.dropdown);
         const message = error instanceof Error ? error.message : String(error);
-        this.dropdown.appendChild(el('div', {class: 'search-empty', text: `error: ${message}`}));
+        this.dropdown.appendChild(el('div', {class: 'search-empty', text: t('error', {message})}));
     }
 
     private renderResults(): void {
         clear(this.dropdown);
 
         if (this.results.length === 0) {
-            this.dropdown.appendChild(el('div', {class: 'search-empty', text: 'no results'}));
+            this.dropdown.appendChild(el('div', {class: 'search-empty', text: t('noResults')}));
             return;
         }
 
@@ -161,7 +176,7 @@ export class Search {
                 class: 'search-result-score',
                 text: hit.score.toFixed(2),
                 ...(hit.components !== undefined ? {
-                    attrs: {title: 'click for signal breakdown', role: 'button'},
+                    attrs: {title: t('breakdown'), role: 'button'},
                     on: {
                         click: (event) => {
                             event.stopPropagation();
@@ -216,7 +231,7 @@ export class Search {
 
             rows.push(el('div', {class: 'search-result-component'},
                 el('span', {class: 'search-result-component-name', text: name}),
-                el('span', {class: 'search-result-component-rank', text: `rank ${sig.rank}`}),
+                el('span', {class: 'search-result-component-rank', text: t('rank', {rank: sig.rank})}),
                 el('span', {class: 'search-result-component-score', text: sig.score.toFixed(3)})
             ));
         }
@@ -224,7 +239,7 @@ export class Search {
         if (components.demote !== undefined && components.demote < 1) {
             rows.push(el('div', {class: 'search-result-component demote'},
                 el('span', {class: 'search-result-component-name', text: 'demote'}),
-                el('span', {class: 'search-result-component-rank', text: '— crawler index / heavy wikilinks'}),
+                el('span', {class: 'search-result-component-rank', text: t('demoteWhy')}),
                 el('span', {class: 'search-result-component-score', text: `×${components.demote.toFixed(2)}`})
             ));
         }

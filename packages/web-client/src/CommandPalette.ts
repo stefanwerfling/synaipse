@@ -1,6 +1,15 @@
 import {clear, el, isAppVisible} from './Dom.js';
 import {searchNotes, type NoteCandidate, type NoteRanked} from './Fuzzy.js';
+import {defineMessages} from './I18n.js';
 import {PersistentValue} from './Persistence.js';
+
+const t = defineMessages('commandPalette', {
+    placeholder: 'Type a command or search notes… (esc to close)',
+    label: 'Command palette',
+    results: 'Results',
+    noMatches: 'No matches',
+    via: 'via {field}'
+});
 
 const STORAGE_RECENT = 'synaipse.palette.recent';
 const RECENT_MAX = 8;
@@ -109,8 +118,8 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
             class: 'palette-input',
             attrs: {
                 type: 'search',
-                placeholder: 'Type a command or search notes… (esc to close)',
-                'aria-label': 'Command palette',
+                placeholder: t('placeholder'),
+                'aria-label': t('label'),
                 role: 'combobox',
                 'aria-expanded': 'true',
                 'aria-controls': 'synaipse-palette-list',
@@ -124,9 +133,9 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
             }
         }) as HTMLInputElement;
 
-        this.list = el('div', {class: 'palette-list', attrs: {role: 'listbox', id: 'synaipse-palette-list', 'aria-label': 'Results'}});
+        this.list = el('div', {class: 'palette-list', attrs: {role: 'listbox', id: 'synaipse-palette-list', 'aria-label': t('results')}});
 
-        const panel = el('div', {class: 'palette-panel', attrs: {role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Command palette'}},
+        const panel = el('div', {class: 'palette-panel', attrs: {role: 'dialog', 'aria-modal': 'true', 'aria-label': t('label')}},
             this.input,
             this.list
         );
@@ -189,7 +198,7 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
 
         if (this.items.length === 0) {
             this.input.removeAttribute('aria-activedescendant');
-            this.list.appendChild(el('div', {class: 'palette-empty', text: 'No matches'}));
+            this.list.appendChild(el('div', {class: 'palette-empty', text: t('noMatches')}));
             return;
         }
 
@@ -220,7 +229,7 @@ export class CommandPalette<T extends NoteCandidate = NoteCandidate> {
 
         const r = item.rank;
         const title = this.renderHighlight(r.matchedText, r.via === 'title' ? r.indices : []);
-        const via = r.via === 'title' ? '' : `via ${r.via}`;
+        const via = r.via === 'title' ? '' : t('via', {field: r.via});
 
         return el('div', {
             class: active ? 'palette-row note active' : 'palette-row note',

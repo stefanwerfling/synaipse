@@ -1,4 +1,5 @@
 import {el} from './Dom.js';
+import {defineMessages, getLocale, LOCALE_NAMES, setLocale} from './I18n.js';
 import logoSvg from './Logo.svg?raw';
 import {Settings} from './Settings.js';
 import {TAB_DEFS, type Tab} from './Tabs.js';
@@ -26,6 +27,20 @@ export interface TopbarOptions {
     onImport: () => void;
     onActivity: () => void;
 }
+
+const t = defineMessages('topbar', {
+    activityTitle: 'Activity log',
+    activityToggle: 'Toggle activity log',
+    activity: 'Activity',
+    paletteTitle: 'Open command palette (Ctrl/Cmd+K)',
+    search: 'Search',
+    importTitle: 'Import notes from external source',
+    import: 'Import',
+    accountTitle: 'Signed in as {email} — open account settings',
+    toDark: 'Switch to dark theme',
+    toLight: 'Switch to light theme',
+    language: 'Language: {name} — switch to {other}'
+});
 
 /** Badge text for an unread count; hidden at zero. */
 const setBadge = (badge: HTMLElement, owner: HTMLElement | undefined, count: number): void => {
@@ -71,27 +86,27 @@ export class Topbar {
         this.activityBadge = el('span', {class: 'activity-btn-badge', style: {display: 'none'}, text: '0'});
         this.activityBtn = el('button', {
             class: 'activity-btn',
-            attrs: {type: 'button', title: 'Activity log', 'aria-label': 'Toggle activity log'},
+            attrs: {type: 'button', title: t('activityTitle'), 'aria-label': t('activityToggle')},
             on: {click: () => opts.onActivity()}
         },
             el('span', {class: 'activity-btn-icon', text: '●'}),
-            el('span', {class: 'activity-btn-label', text: 'Activity'}),
+            el('span', {class: 'activity-btn-label', text: t('activity')}),
             this.activityBadge
         ) as HTMLButtonElement;
 
         const paletteBtn = el('button', {
             class: 'palette-trigger',
-            attrs: {type: 'button', title: 'Open command palette (Ctrl/Cmd+K)'},
+            attrs: {type: 'button', title: t('paletteTitle')},
             on: {click: () => opts.onPalette()}
         },
-            el('span', {text: 'Search'}),
+            el('span', {text: t('search')}),
             el('kbd', {text: '⌘K'})
         );
 
         const importBtn = el('button', {
             class: 'topbar-import',
-            attrs: {type: 'button', title: 'Import notes from external source'},
-            text: 'Import',
+            attrs: {type: 'button', title: t('importTitle')},
+            text: t('import'),
             on: {click: () => opts.onImport()}
         });
 
@@ -103,7 +118,22 @@ export class Topbar {
         this.updateThemeToggle(getTheme());
         this.offTheme = onThemeChange((theme) => this.updateThemeToggle(theme));
 
-        const trailing: HTMLElement[] = [importBtn, this.themeToggleBtn, this.activityBtn];
+        // Language switch: shows the current language, a click flips it and
+        // remembers the choice; the app rebuilds itself on the same view.
+        const locale = getLocale();
+        const other = locale === 'en' ? 'de' : 'en';
+        const languageBtn = el('button', {
+            class: 'language-toggle',
+            attrs: {
+                type: 'button',
+                title: t('language', {name: LOCALE_NAMES[locale], other: LOCALE_NAMES[other]}),
+                'aria-label': t('language', {name: LOCALE_NAMES[locale], other: LOCALE_NAMES[other]})
+            },
+            text: locale.toUpperCase(),
+            on: {click: () => void setLocale(other, true)}
+        });
+
+        const trailing: HTMLElement[] = [importBtn, languageBtn, this.themeToggleBtn, this.activityBtn];
 
         if (opts.account !== null) {
             const account = opts.account;
@@ -114,7 +144,7 @@ export class Topbar {
             this.settings = settings;
             trailing.push(el('button', {
                 class: 'topbar-account',
-                attrs: {type: 'button', title: `Signed in as ${account.email} — open account settings`},
+                attrs: {type: 'button', title: t('accountTitle', {email: account.email})},
                 text: account.email,
                 on: {click: () => settings.open()}
             }));
@@ -155,7 +185,7 @@ export class Topbar {
         const isLight = theme === 'light';
 
         this.themeToggleBtn.textContent = isLight ? '☾' : '☀';
-        this.themeToggleBtn.title = isLight ? 'Switch to dark theme' : 'Switch to light theme';
+        this.themeToggleBtn.title = isLight ? t('toDark') : t('toLight');
         this.themeToggleBtn.setAttribute('aria-label', this.themeToggleBtn.title);
     }
 }

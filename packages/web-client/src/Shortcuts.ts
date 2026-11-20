@@ -1,4 +1,5 @@
 import {el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
 import {openModal} from './Modal.js';
 
 /**
@@ -11,32 +12,52 @@ export interface ShortcutGroup {
     items: ReadonlyArray<{keys: readonly string[]; label: string}>;
 }
 
-export const SHORTCUTS: readonly ShortcutGroup[] = [
+const t = defineMessages('shortcuts', {
+    title: 'Keyboard shortcuts',
+    everywhere: 'Everywhere',
+    palette: 'Command palette: commands, tabs, notes',
+    search: 'Focus the search field',
+    overview: 'This overview',
+    escape: 'Close dialog, palette or menu',
+    back: 'Back to the previous view (browser history)',
+    dialogs: 'Dialogs',
+    nextField: 'Next field (stays inside the dialog)',
+    confirm: 'Confirm (GDPR marker, floorplan)',
+    editor: 'Note editor',
+    bold: 'Bold',
+    italic: 'Italic',
+    code: 'Inline code',
+    link: 'Insert link (inside the editor)',
+    gdpr: 'Mark selection as GDPR-sensitive'
+});
+
+/** The shortcut list in the current UI language. */
+export const shortcutGroups = (): readonly ShortcutGroup[] => [
     {
-        title: 'Everywhere',
+        title: t('everywhere'),
         items: [
-            {keys: ['Ctrl', 'K'], label: 'Command palette: commands, tabs, notes'},
-            {keys: ['/'], label: 'Focus the search field'},
-            {keys: ['?'], label: 'This overview'},
-            {keys: ['Esc'], label: 'Close dialog, palette or menu'},
-            {keys: ['Alt', '←'], label: 'Back to the previous view (browser history)'}
+            {keys: ['Ctrl', 'K'], label: t('palette')},
+            {keys: ['/'], label: t('search')},
+            {keys: ['?'], label: t('overview')},
+            {keys: ['Esc'], label: t('escape')},
+            {keys: ['Alt', '←'], label: t('back')}
         ]
     },
     {
-        title: 'Dialogs',
+        title: t('dialogs'),
         items: [
-            {keys: ['Tab'], label: 'Next field (stays inside the dialog)'},
-            {keys: ['Ctrl', 'Enter'], label: 'Confirm (DSGVO marker, floorplan)'}
+            {keys: ['Tab'], label: t('nextField')},
+            {keys: ['Ctrl', 'Enter'], label: t('confirm')}
         ]
     },
     {
-        title: 'Note editor',
+        title: t('editor'),
         items: [
-            {keys: ['Ctrl', 'B'], label: 'Bold'},
-            {keys: ['Ctrl', 'I'], label: 'Italic'},
-            {keys: ['Ctrl', 'E'], label: 'Inline code'},
-            {keys: ['Ctrl', 'K'], label: 'Insert link (inside the editor)'},
-            {keys: ['Ctrl', 'Shift', 'D'], label: 'Mark selection as DSGVO'}
+            {keys: ['Ctrl', 'B'], label: t('bold')},
+            {keys: ['Ctrl', 'I'], label: t('italic')},
+            {keys: ['Ctrl', 'E'], label: t('code')},
+            {keys: ['Ctrl', 'K'], label: t('link')},
+            {keys: ['Ctrl', 'Shift', 'D'], label: t('gdpr')}
         ]
     }
 ];
@@ -45,7 +66,7 @@ const isMac = (): boolean => typeof navigator !== 'undefined' && /Mac|iPhone|iPa
 
 export const openShortcutsDialog = (): void => {
     const mac = isMac();
-    const body = SHORTCUTS.map((group) => el('section', {class: 'shortcuts-group'},
+    const body = shortcutGroups().map((group) => el('section', {class: 'shortcuts-group'},
         el('h3', {class: 'shortcuts-title', text: group.title}),
         el('dl', {class: 'shortcuts-list'},
             ...group.items.flatMap((item) => [
@@ -55,10 +76,10 @@ export const openShortcutsDialog = (): void => {
             ])
         )
     ));
-    const close = el('button', {class: 'btn btn-primary', attrs: {type: 'button'}, text: 'Close'});
+    const close = el('button', {class: 'btn btn-primary', attrs: {type: 'button'}, text: tc('close')});
     const modal = openModal({
-        title: 'Keyboard shortcuts',
-        closeLabel: 'Close',
+        title: t('title'),
+        closeLabel: tc('close'),
         size: 'md',
         className: 'shortcuts-dialog',
         body,
