@@ -1,5 +1,5 @@
 import type {NoteSummary} from './Api.js';
-import {tagColor} from './Colors.js';
+import {applyTagText, tagColor} from './Colors.js';
 import {clear, el} from './Dom.js';
 import {listDraftIds} from './Drafts.js';
 import {GROUP_ROW_H, firstRowAt, layoutRows, noteRowHeight, type GroupMode, type VirtualRow} from './NotesTree.js';
@@ -488,11 +488,11 @@ export class NotesSidebar {
 
             for (const tag of n.tags.slice(0, 3)) {
                 const color = tagColor(tag);
-                chipHost.appendChild(el('span', {
+                chipHost.appendChild(applyTagText(el('span', {
                     class: 'note-list-tag',
                     text: tag,
-                    style: {borderColor: color, color}
-                }));
+                    style: {borderColor: color}
+                }), tag));
             }
 
             if (n.tags.length > 3) {

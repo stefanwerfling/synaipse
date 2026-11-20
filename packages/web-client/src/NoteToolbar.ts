@@ -1,5 +1,5 @@
 import type {Note} from '@synaipse/core';
-import {tagColor} from './Colors.js';
+import {applyTagText, tagColor} from './Colors.js';
 import {el} from './Dom.js';
 import {defineMessages, tc} from './I18n.js';
 
@@ -199,13 +199,13 @@ export const buildNoteHead = (note: Note, actions: NoteToolbarActions, overflow:
 
     for (const tag of note.tags) {
         const color = tagColor(tag);
-        tagHost.appendChild(el('span', {
+        tagHost.appendChild(applyTagText(el('span', {
             class: 'viewer-tag',
-            style: {borderColor: color, color}
+            style: {borderColor: color}
         },
             el('span', {class: 'viewer-tag-swatch', style: {background: color}}),
             el('span', {class: 'viewer-tag-label', text: tag})
-        ));
+        ), tag));
     }
 
     return [head, tagHost];

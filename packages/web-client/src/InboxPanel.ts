@@ -3,6 +3,8 @@ import {clear, el} from './Dom.js';
 import {defineMessages, tc} from './I18n.js';
 
 const t = defineMessages('inboxPanel', {
+    a11yProject: 'Project',
+    a11yTarget: 'Target note',
     title: 'Inbox',
     subtitle: 'What agents noted in passing via remember. Accept appends the text to a note or creates a new one, Discard removes the entry. Both are recorded in the version history.',
     project: 'Project',
@@ -64,7 +66,7 @@ export class InboxPanel {
     private error: {key: string; message: string} | null = null;
 
     public constructor(private readonly opts: InboxPanelOptions) {
-        this.picker = el('select', {class: 'rm-picker-select', on: {change: () => void this.pick(this.picker.value || null)}});
+        this.picker = el('select', {class: 'rm-picker-select', attrs: {'aria-label': t('a11yProject')}, on: {change: () => void this.pick(this.picker.value || null)}});
         this.summary = el('p', {class: 'rm-sub'});
         this.listHost = el('div', {class: 'ib-list'});
 
@@ -271,7 +273,7 @@ export class InboxPanel {
             ));
         }
 
-        const select = el('select', {class: 'rm-picker-select ib-target', on: {change: (e) => { state.target = (e.target as HTMLSelectElement).value; this.render(); }}});
+        const select = el('select', {class: 'rm-picker-select ib-target', attrs: {'aria-label': t('a11yTarget')}, on: {change: (e) => { state.target = (e.target as HTMLSelectElement).value; this.render(); }}});
         const seen = new Set<string>();
         for (const n of [...entry.alreadyIn, ...entry.targets]) {
             if (seen.has(n.id)) continue;

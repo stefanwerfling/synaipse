@@ -1,6 +1,6 @@
 import {clear, el} from './Dom.js';
 import {defineMessages, formatNumber} from './I18n.js';
-import {tagColor} from './Colors.js';
+import {applyTagFill} from './Colors.js';
 import type {StorageCodec} from './Persistence.js';
 import {TagPicker} from './TagPicker.js';
 import type {TagEntry} from './TagGroups.js';
@@ -309,16 +309,13 @@ export class TagBar {
     }
 
     private chip(entry: TagEntry): HTMLElement {
-        const color = tagColor(entry.tag);
-
-        return el('button', {
+        return applyTagFill(el('button', {
             class: 'chip active',
             attrs: {type: 'button', title: t('removeFromFilter')},
-            on: {click: () => this.cb.onToggleTag(entry.tag)},
-            style: {background: color, borderColor: color, color: '#0f1115'}
+            on: {click: () => this.cb.onToggleTag(entry.tag)}
         },
             el('span', {class: 'chip-tag', text: entry.tag}),
             el('span', {class: 'chip-count', text: String(entry.count)})
-        );
+        ), entry.tag);
     }
 }

@@ -3,6 +3,8 @@ import {clear, el} from './Dom.js';
 import {defineMessages, tc} from './I18n.js';
 
 const t = defineMessages('auditPanel', {
+    a11yProvider: 'Filter by provider',
+    a11yKind: 'Filter by kind',
     kindChat: 'Chat',
     kindSummarize: 'Summarize',
     kindCompile: 'Compile',
@@ -112,12 +114,14 @@ export class AuditPanel {
 
         this.providerFilter = el('select', {
             class: 'audit-filter',
+            attrs: {'aria-label': t('a11yProvider')},
             on: {change: () => void this.refresh()}
         }) as HTMLSelectElement;
         this.providerFilter.appendChild(el('option', {attrs: {value: ''}, text: t('allProviders')}));
 
         this.kindFilter = el('select', {
             class: 'audit-filter',
+            attrs: {'aria-label': t('a11yKind')},
             on: {change: () => void this.refresh()}
         }) as HTMLSelectElement;
         this.kindFilter.appendChild(el('option', {attrs: {value: ''}, text: t('allKinds')}));

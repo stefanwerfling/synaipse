@@ -17,6 +17,9 @@ import {toast} from './Toast.js';
 import {defineMessages, formatDateTime, formatNumber, tc} from './I18n.js';
 
 const t = defineMessages('benchmarksPanel', {
+    a11yProject: 'Project',
+    a11yMetric: 'Filter by metric',
+    a11yDimension: 'Filter by {key}',
     newProjectTitle: 'Create a benchmark set for a new project',
     newProject: '＋ Project',
     subtitle: 'Speed/quality comparisons per project — machine, backend, technique: freely definable dimensions, no fixed schema.',
@@ -125,7 +128,7 @@ export class BenchmarksPanel {
     public constructor(opts: BenchmarksPanelOptions = {}) {
         this.opts = opts;
 
-        this.picker = el('select', {class: 'rm-picker-select', on: {change: () => void this.onPickProject()}}) as HTMLSelectElement;
+        this.picker = el('select', {class: 'rm-picker-select', attrs: {'aria-label': t('a11yProject')}, on: {change: () => void this.onPickProject()}}) as HTMLSelectElement;
 
         const newBtn = el('button', {
             class: 'rm-btn ghost',
@@ -314,6 +317,7 @@ export class BenchmarksPanel {
         const metrics = [...new Set(base.map((e) => e.metric))].sort();
         const metricSel = el('select', {
             class: 'rm-picker-select',
+            attrs: {'aria-label': t('a11yMetric')},
             on: {change: (e) => { this.metricFilter = (e.target as HTMLSelectElement).value; this.render(); }}
         }) as HTMLSelectElement;
         metricSel.appendChild(el('option', {text: t('allMetrics'), attrs: {value: ''}}));
@@ -351,6 +355,7 @@ export class BenchmarksPanel {
             const values = [...new Set(base.map((e) => e.dimensions[key]).filter((v): v is string => v !== undefined))].sort();
             const sel = el('select', {
                 class: 'rm-picker-select',
+                attrs: {'aria-label': t('a11yDimension', {key})},
                 on: {change: (e) => { this.dimFilters[key] = (e.target as HTMLSelectElement).value; this.render(); }}
             }) as HTMLSelectElement;
             sel.appendChild(el('option', {text: t('all'), attrs: {value: ''}}));

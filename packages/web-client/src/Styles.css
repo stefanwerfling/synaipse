@@ -25,7 +25,8 @@
     --text-0: var(--sh-text-strong, #f5f6f8);
     --text-1: var(--sh-text, #d6d9e1);
     --text-2: var(--sh-muted, #9aa0ac);
-    --text-3: var(--sh-faint, #6b7280);
+    /* AA (4.5:1) on every surface incl. the selected row (#20293d). */
+    --text-3: var(--sh-faint, #8b92a0);
 
     --accent: var(--sh-accent, #6c9aff);
     --accent-hover: var(--sh-accent-hover, #84acff);
@@ -35,6 +36,8 @@
 
     --gold: var(--sh-warn, #ffd166);
     --gold-soft: color-mix(in srgb, var(--gold) 14%, transparent);
+    /* Gold as text colour; the light theme needs a darker one than the fill. */
+    --gold-text: var(--sh-warn-text, var(--gold));
     --green: var(--sh-ok, #34d399);
     --red: var(--sh-down, #f87171);
     --purple: #a78bfa;
@@ -94,16 +97,19 @@
     --text-0: var(--sh-text-strong, #0f172a);
     --text-1: var(--sh-text, #1f2937);
     --text-2: var(--sh-muted, #4b5563);
-    --text-3: var(--sh-faint, #6b7280);
+    /* AA (4.5:1) on every surface incl. the selected row (#d7dfef). */
+    --text-3: var(--sh-faint, #5a6170);
 
-    --accent: var(--sh-accent, #2f5fcc);
-    --accent-hover: var(--sh-accent-hover, #2b55ba);
-    --accent-press: var(--sh-accent-press, #244aa3);
+    /* Darker than the dark theme's: also text on --accent-soft (AA). */
+    --accent: var(--sh-accent, #2b57bd);
+    --accent-hover: var(--sh-accent-hover, #244aa3);
+    --accent-press: var(--sh-accent-press, #1f4194);
     --accent-soft: var(--sh-accent-soft, color-mix(in srgb, var(--accent) 10%, transparent));
     --accent-glow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 
     --gold: var(--sh-warn, #b8860b);
     --gold-soft: color-mix(in srgb, var(--gold) 12%, transparent);
+    --gold-text: var(--sh-warn-text, #7d5a06);
     --green: var(--sh-ok, #047857);
     --red: var(--sh-down, #b91c1c);
     --purple: #6d28d9;
@@ -453,7 +459,7 @@
 }
 
 .synaipse-root .activity-btn.has-unread .activity-btn-icon {
-    color: var(--gold);
+    color: var(--gold-text);
     animation: pulse-soft 1.6s ease-in-out infinite;
 }
 
@@ -491,7 +497,7 @@
 }
 
 .synaipse-root .tab.has-unread {
-    color: var(--gold);
+    color: var(--gold-text);
 }
 
 /* === CONSENT INBOX === */
@@ -990,7 +996,6 @@ body.synaipse-sidebar-resizing {
     white-space: nowrap;
     text-overflow: ellipsis;
     display: block;
-    opacity: 0.75;
     letter-spacing: 0.02em;
 }
 
@@ -1013,6 +1018,10 @@ body.synaipse-sidebar-resizing {
 
 .synaipse-root .note-list li.active .note-list-tag {
     background: rgba(0, 0, 0, 0.18);
+}
+
+.synaipse-root[data-theme='light'] .note-list li.active .note-list-tag {
+    background: rgba(255, 255, 255, 0.55);
 }
 
 .synaipse-root .note-list-tag-more {
@@ -4452,7 +4461,7 @@ body.synaipse-sidebar-resizing {
 }
 
 .synaipse-root .md-preview .wikilink {
-    color: var(--gold);
+    color: var(--gold-text);
     background: var(--gold-soft);
     padding: 1px 6px;
     border-radius: var(--r-1);
@@ -4463,7 +4472,7 @@ body.synaipse-sidebar-resizing {
     background: var(--gold-soft);
     border: 1px solid transparent;
     font: inherit;
-    color: var(--gold);
+    color: var(--gold-text);
     cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast);
 }
@@ -8022,4 +8031,66 @@ body.synaipse-sidebar-resizing {
     font-family: var(--font-mono);
     font-size: 11px;
     text-align: center;
+}
+
+/* --- Readable colours (WCAG AA, checked by the axe step of npm run e2e) --- */
+
+/* Tag-coloured text: Colors.applyTagText sets both variants, the theme picks. */
+.synaipse-root .tag-text.tag-text {
+    color: var(--tag-fg-dark);
+}
+
+.synaipse-root[data-theme='light'] .tag-text.tag-text {
+    color: var(--tag-fg-light);
+}
+
+/* Selected tag chips (Colors.applyTagFill): readable variant as fill. */
+.synaipse-root .tag-fill.tag-fill {
+    background: var(--tag-fg-dark);
+    border-color: var(--tag-fg-dark);
+    color: #0f1115;
+}
+
+.synaipse-root[data-theme='light'] .tag-fill.tag-fill {
+    background: var(--tag-fg-light);
+    border-color: var(--tag-fg-light);
+    color: #ffffff;
+}
+
+.synaipse-root .tag-fill .chip-count {
+    opacity: 1;
+}
+
+/* highlight.js github themes: the colours below 4.5:1 on our code background.
+   One class more than Theme.ts' injected (later) theme rules, so these win. */
+.synaipse-root[data-theme='light'] .hljs .hljs-doctag,
+.synaipse-root[data-theme='light'] .hljs .hljs-keyword,
+.synaipse-root[data-theme='light'] .hljs .hljs-meta .hljs-keyword,
+.synaipse-root[data-theme='light'] .hljs .hljs-template-tag,
+.synaipse-root[data-theme='light'] .hljs .hljs-template-variable,
+.synaipse-root[data-theme='light'] .hljs .hljs-type,
+.synaipse-root[data-theme='light'] .hljs .hljs-variable.language_ {
+    color: #b9283a;
+}
+
+.synaipse-root[data-theme='light'] .hljs .hljs-name,
+.synaipse-root[data-theme='light'] .hljs .hljs-quote,
+.synaipse-root[data-theme='light'] .hljs .hljs-selector-tag,
+.synaipse-root[data-theme='light'] .hljs .hljs-selector-pseudo {
+    color: #116329;
+}
+
+.synaipse-root[data-theme='light'] .hljs .hljs-comment,
+.synaipse-root[data-theme='light'] .hljs .hljs-code,
+.synaipse-root[data-theme='light'] .hljs .hljs-formula {
+    color: #57606a;
+}
+
+.synaipse-root[data-theme='light'] .hljs .hljs-built_in,
+.synaipse-root[data-theme='light'] .hljs .hljs-symbol {
+    color: #953800;
+}
+
+.synaipse-root:not([data-theme='light']) .hljs .hljs-section {
+    color: #58a6ff;
 }

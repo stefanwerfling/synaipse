@@ -539,7 +539,7 @@ Die alten Namen bleiben eine Version lang als Aliase mit Deprecation-Hinweis bes
 - Sichtbarer `:focus-visible`-Ring überall. Heute gibt es nur 2 Regeln.
 - Icon-Buttons mit `aria-label`. Glyphen (☾ ☀ ●) durch ein kleines SVG-Icon-Set ersetzen.
 - `prefers-reduced-motion` global respektieren (Pulse, Trails, Bloom, Kamerafahrten).
-- Automatisierte Prüfung mit axe-core im Playwright-Smoke (siehe G3). Läuft seit 2026-11-20 (WCAG 2 A/AA, beide Themes); offen ist nur der Farbkontrast (≈ 20 Elemente je Theme unter 4,5:1, v. a. Pfade, Zähler, Tag-Chips), dafür ist die Regel im Smoke abgeschaltet.
+- Automatisierte Prüfung mit axe-core im Playwright-Smoke (siehe G3). Läuft seit 2026-11-20 (WCAG 2 A/AA, beide Themes, 11 Ansichten, Farbkontrast eingeschlossen, dazu gewählte Tag-Chips im Graph-Filter). Farbkontrast behoben 2026-11-20: `--text-3` dunkel `#8b92a0`, hell `#5a6170` (≥ 4,6:1 auch auf der ausgewählten Zeile), helles `--accent` `#2b57bd`, neues `--gold-text` (Host-Token `--sh-warn-text`) für Gold als Schrift, Pfade ohne `opacity`; Tag-Schrift pro Farbton und Theme so hell bzw. dunkel gerechnet, dass 4,6:1 erreicht werden (`Colors.tagTextColor`, Unit-Test über 400 Farbtöne), gewählte Chips mit dieser Farbe gefüllt; die github-hljs-Farben unter 4,5:1 überschrieben. Dabei mitgefunden: sieben `select` ohne Namen (Projekt-Picker, Audit-, Metrik-, Dimensions- und Status-Auswahl).
 
 ### C5. Kern-Workflows schärfen
 - **Editor:** Split-View Edit/Preview, Wikilink-Autocomplete auch für Überschriften (`[[Note#…]]`), Backlinks-Panel unter der Note, Konfliktanzeige bei externer Änderung (Hash-Mismatch) statt stillem Überschreiben.

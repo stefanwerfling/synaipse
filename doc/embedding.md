@@ -92,10 +92,11 @@ theme, otherwise a light Synaipse would get dark borders.
 | `--sh-border-soft`, `--sh-border`, `--sh-border-strong` | `--border-soft`, `--border`, `--border-strong` | lines |
 | `--sh-text-strong` | `--text-0` | headings |
 | `--sh-text` | `--text-1` | body text |
-| `--sh-muted`, `--sh-faint` | `--text-2`, `--text-3` | secondary text |
+| `--sh-muted`, `--sh-faint` | `--text-2`, `--text-3` | secondary text; `--text-3` also on the selected row, so keep it at 4.5:1 there (defaults `#8b92a0` dark, `#5a6170` light) |
 | `--sh-accent`, `--sh-accent-hover`, `--sh-accent-press` | `--accent`, `--accent-hover`, `--accent-press` | links, primary buttons |
 | `--sh-accent-soft` | `--accent-soft` | selection, soft highlight (default: accent at 14 % / 10 %) |
 | `--sh-ok`, `--sh-warn`, `--sh-down` | `--green`, `--gold`, `--red` | states |
+| `--sh-warn-text` | `--gold-text` | gold as text (wikilinks, unread markers); default `--gold` in dark, `#7d5a06` in light |
 | `--sh-r-sm`, `--sh-r` | `--r-2`, `--r-3` | radii |
 | `--sh-font-sans`, `--sh-font-mono` | `--font-sans`, `--font-mono` | type |
 

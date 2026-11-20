@@ -385,6 +385,8 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         unresolvedLink: 'nicht aufgelöster Wikilink'
     },
     roadmapPanel: {
+        a11yProject: 'Projekt',
+        a11yStatus: 'Status von {title}',
         statusBacklog: 'Backlog',
         statusPlanned: 'Geplant',
         statusInProgress: 'In Arbeit',
@@ -554,6 +556,9 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         fieldRequired: '{label} ist erforderlich.'
     },
     benchmarksPanel: {
+        a11yProject: 'Projekt',
+        a11yMetric: 'Nach Metrik filtern',
+        a11yDimension: 'Nach {key} filtern',
         newProjectTitle: 'Benchmark-Set für ein neues Projekt anlegen',
         newProject: '＋ Projekt',
         subtitle: 'Speed-/Qualitäts-Vergleiche pro Projekt — Maschine, Backend, Technik: frei definierbare Dimensionen, kein festes Schema.',
@@ -722,6 +727,8 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         linkTitle: 'Link'
     },
     inboxPanel: {
+        a11yProject: 'Projekt',
+        a11yTarget: 'Zielnotiz',
         title: 'Inbox',
         subtitle: 'Was Agenten per remember nebenbei notiert haben. Übernehmen hängt den Text an eine Notiz an oder legt eine neue an, Verwerfen entfernt den Eintrag. Beides steht in der Versionsgeschichte.',
         project: 'Projekt',
@@ -775,6 +782,8 @@ export const DE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
         loadOlder: 'Ältere laden'
     },
     auditPanel: {
+        a11yProvider: 'Nach Anbieter filtern',
+        a11yKind: 'Nach Art filtern',
         kindChat: 'Chat',
         kindSummarize: 'Zusammenfassen',
         kindCompile: 'Kompilieren',

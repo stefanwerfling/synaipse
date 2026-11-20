@@ -8,6 +8,8 @@ import type {RoadmapGraph} from './RoadmapGraph.js';
 import {toast} from './Toast.js';
 
 const t = defineMessages('roadmapPanel', {
+    a11yProject: 'Project',
+    a11yStatus: 'Status of {title}',
     statusBacklog: 'Backlog',
     statusPlanned: 'Planned',
     statusInProgress: 'In progress',
@@ -277,7 +279,7 @@ export class RoadmapPanel {
     public constructor(opts: RoadmapPanelOptions = {}) {
         this.opts = opts;
 
-        this.picker = el('select', {class: 'rm-picker-select', on: {change: () => void this.onPickProject()}}) as HTMLSelectElement;
+        this.picker = el('select', {class: 'rm-picker-select', attrs: {'aria-label': t('a11yProject')}, on: {change: () => void this.onPickProject()}}) as HTMLSelectElement;
 
         const newBtn = el('button', {
             class: 'rm-btn ghost',
@@ -736,6 +738,7 @@ export class RoadmapPanel {
 
         const statusSel = el('select', {
             class: `rm-status-select ${STATUS_CLASS[step.status]}`,
+            attrs: {'aria-label': t('a11yStatus', {title: step.title})},
             on: {change: (e) => void this.changeStatus(step.id, (e.target as HTMLSelectElement).value as RoadmapStatus)}
         }) as HTMLSelectElement;
         for (const st of STATUS_ORDER) {
