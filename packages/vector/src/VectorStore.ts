@@ -35,6 +35,7 @@ export interface VectorStore {
      * Optional (plan P4 / A3): nearest chunks of OTHER notes for each
      * stored chunk, using its stored vector, so no embedding call is
      * needed. Chunk ids that are not stored are absent from the result.
+     * With a scope, only hits inside it count toward `limit`.
      */
-    similarToChunks?(chunkIds: readonly string[], limit: number): Promise<Map<string, SearchHit[]>>;
+    similarToChunks?(chunkIds: readonly string[], limit: number, scope?: SearchScope): Promise<Map<string, SearchHit[]>>;
 }

@@ -540,7 +540,7 @@ export class QdrantStore implements VectorStore {
         return out;
     }
 
-    public async similarToChunks(chunkIds: readonly string[], limit: number): Promise<Map<string, SearchHit[]>> {
+    public async similarToChunks(chunkIds: readonly string[], limit: number, scope?: SearchScope): Promise<Map<string, SearchHit[]>> {
         const out = new Map<string, SearchHit[]>();
 
         if (chunkIds.length === 0) {
@@ -548,6 +548,14 @@ export class QdrantStore implements VectorStore {
         }
 
         await this.ensureCollection();
+
+        // Same scope handling as search(): folders in Qdrant once every
+        // point carries `dirs`, the rest (and everything before) client-side.
+        const scoped = !isUnscoped(scope);
+        const pushed = scoped ? scopeToFilter(scope) : {filter: null, exact: true};
+        const useFilter = pushed.filter !== null && await this.dirsReady();
+        const exact = !scoped || (useFilter && pushed.exact);
+        const fetchFactor = exact ? 3 : (useFilter ? 6 : 12);
 
         // A query by a missing point id fails the whole batch, so look up
         // which chunks exist first (ids only, no payload or vectors).
@@ -564,11 +572,14 @@ export class QdrantStore implements VectorStore {
             const searches = group.map((pointId) => {
                 const chunkId = byPoint.get(pointId)!;
                 const noteId = chunkId.slice(0, chunkId.lastIndexOf('::'));
+                const notSelf = {key: 'noteId', match: {value: noteId}};
                 return {
                     query: pointId,
-                    filter: {must_not: [{key: 'noteId', match: {value: noteId}}]},
+                    filter: useFilter
+                        ? {...pushed.filter, must_not: [...(pushed.filter?.must_not ?? []), notSelf]}
+                        : {must_not: [notSelf]},
                     // several chunks per note may come back; de-duplicated below
-                    limit: limit * 3,
+                    limit: limit * fetchFactor,
                     with_payload: SEARCH_PAYLOAD
                 };
             });
@@ -577,6 +588,7 @@ export class QdrantStore implements VectorStore {
             results.forEach((result, idx) => {
                 const seen = new Set<string>();
                 const hits = this.toHits(result.points).filter((hit) => {
+                    if (!exact && !inScope(hit.noteId, scope)) return false;
                     if (seen.has(hit.noteId)) return false;
                     seen.add(hit.noteId);
                     return true;

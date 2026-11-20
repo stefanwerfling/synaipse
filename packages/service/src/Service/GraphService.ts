@@ -1,4 +1,4 @@
-import type {Note, NoteId, SearchHit} from '@synaipse/core';
+import type {Note, NoteId, SearchHit, SearchScope} from '@synaipse/core';
 import {createLogger, extractTypedLinks} from '@synaipse/core';
 import {extractEntitySpans} from '../EntityLinker.js';
 import {type GraphLayout} from '../Layout.js';
@@ -389,12 +389,16 @@ export class GraphService {
             const embedStart = Date.now();
             let embedCalls = 0;
             const withContent = scoped.filter((n) => n.content.length > 0);
+            // With a prefix the partner must be inside it too: ask the store
+            // for in-scope neighbours instead of the global top 20, which in
+            // a big vault are mostly elsewhere (plan P4 / A4).
+            const hitScope: SearchScope | undefined = prefix.length > 0 ? {include: [prefix]} : undefined;
 
             // Stored first-chunk vectors answer most notes without any
             // embedding call (one batched Qdrant request per 64 notes).
             let stored = new Map<NoteId, SearchHit[]>();
             try {
-                stored = await this.index.similarToNotes(withContent.map((n) => n.id), 20);
+                stored = await this.index.similarToNotes(withContent.map((n) => n.id), 20, hitScope);
             } catch (error) {
                 log.warn('stored-vector similarity failed, embedding samples instead', {error});
             }
@@ -405,7 +409,7 @@ export class GraphService {
 
                 if (hits === undefined) {
                     // Not embedded yet (or no store support): embed a sample.
-                    hits = await this.index.semanticSearch(note.content.slice(0, SEMANTIC_SAMPLE_CHARS), 20);
+                    hits = await this.index.semanticSearch(note.content.slice(0, SEMANTIC_SAMPLE_CHARS), 20, hitScope);
                     embedCalls += 1;
                     embedSourceNotes.push(note.id);
                 }

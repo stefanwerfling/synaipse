@@ -37,6 +37,15 @@ const storeWith = (missingDirs: number) => {
         count: async () => ({count: missingDirs}),
         scroll: async () => ({points: []}),
         setPayload: async () => ({}),
+        retrieve: async (_c: string, args: {ids: string[]}) => args.ids.map((id) => ({id})),
+        queryBatch: async (_c: string, args: {searches: Array<Record<string, unknown>>}) => {
+            calls.push({method: 'queryBatch', args});
+            return args.searches.map((search) => {
+                const filter = search.filter as {must?: unknown[]} | undefined;
+                const hits = filter?.must === undefined ? all : all.filter((p) => p.payload.noteId.startsWith('Memory/a/'));
+                return {points: hits.slice(0, search.limit as number)};
+            });
+        },
         queryGroups: async (_c: string, args: Record<string, unknown>) => {
             calls.push({method: 'queryGroups', args});
             const hits = args.filter === undefined ? all : all.filter((p) => p.payload.noteId.startsWith('Memory/a/'));
@@ -63,5 +72,35 @@ describe('QdrantStore.search with a scope', () => {
         expect(hits.map((h) => h.noteId)).toEqual(['Memory/a/1.md', 'Memory/a/3.md']);
         expect(calls[0]?.args.filter).toBeUndefined();
         expect(calls[0]?.args.limit).toBe(12);
+    });
+});
+
+describe('QdrantStore.similarToChunks with a scope (P4 A4)', () => {
+    it('keeps excluding the note itself and adds the folder filter', async () => {
+        const {store, calls} = storeWith(0);
+        const out = await store.similarToChunks(['Memory/a/9.md::0'], 2, {include: ['Memory/a/']});
+        const search = (calls[0]?.args.searches as Array<Record<string, unknown>>)[0];
+        expect(search?.filter).toEqual({
+            must: [{key: 'dirs', match: {any: ['Memory/a/']}}],
+            must_not: [{key: 'noteId', match: {value: 'Memory/a/9.md'}}]
+        });
+        expect(out.get('Memory/a/9.md::0')?.map((h) => h.noteId)).toEqual(['Memory/a/1.md', 'Memory/a/3.md']);
+    });
+
+    it('filters client-side while old points lack dirs', async () => {
+        const {store, calls} = storeWith(5);
+        const out = await store.similarToChunks(['Memory/a/9.md::0'], 2, {include: ['Memory/a/']});
+        const search = (calls[0]?.args.searches as Array<Record<string, unknown>>)[0];
+        expect(search?.filter).toEqual({must_not: [{key: 'noteId', match: {value: 'Memory/a/9.md'}}]});
+        expect(search?.limit).toBe(24);
+        expect(out.get('Memory/a/9.md::0')?.map((h) => h.noteId)).toEqual(['Memory/a/1.md', 'Memory/a/3.md']);
+    });
+
+    it('unscoped stays as before', async () => {
+        const {store, calls} = storeWith(0);
+        await store.similarToChunks(['Memory/a/9.md::0'], 2);
+        const search = (calls[0]?.args.searches as Array<Record<string, unknown>>)[0];
+        expect(search?.filter).toEqual({must_not: [{key: 'noteId', match: {value: 'Memory/a/9.md'}}]});
+        expect(search?.limit).toBe(6);
     });
 });

@@ -2,7 +2,7 @@ import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {Chunk, NoteId, SearchHit} from '@synaipse/core';
+import type {Chunk, NoteId, SearchHit, SearchScope} from '@synaipse/core';
 import type {Embedder, VectorStore} from '@synaipse/vector';
 import {SynaipseService} from '../src/Service.js';
 
@@ -49,6 +49,7 @@ const isX = (id: string): boolean => path.basename(id).startsWith('x-');
 class SimilarStore implements VectorStore {
     public readonly points = new Map<string, Chunk>();
     public similarCalls = 0;
+    public lastScope: SearchScope | undefined;
 
     public async ensureCollection(): Promise<void> {}
 
@@ -70,8 +71,9 @@ class SimilarStore implements VectorStore {
         return [];
     }
 
-    public async similarToChunks(chunkIds: readonly string[], limit: number): Promise<Map<string, SearchHit[]>> {
+    public async similarToChunks(chunkIds: readonly string[], limit: number, scope?: SearchScope): Promise<Map<string, SearchHit[]>> {
         this.similarCalls++;
+        this.lastScope = scope;
         const out = new Map<string, SearchHit[]>();
         for (const chunkId of chunkIds) {
             const own = this.points.get(chunkId);
@@ -142,5 +144,19 @@ describe('suggestLinks performance path', () => {
         const fresh = await svc.suggestLinks();
         expect(store.similarCalls).toBe(2);
         expect(pairs(fresh)).not.toContain('x-a.md|x-b.md');
+    });
+
+    it('asks the store for neighbours inside pathPrefix (P4 A4)', async () => {
+        const store = new SimilarStore();
+        const svc = await boot(new FakeEmbedder(), store);
+        for (const n of ['x-a', 'x-b']) await svc.writeNote({path: `in/${n}.md`, content: `note ${n}`});
+        await svc.writeNote({path: 'out/x-c.md', content: 'note x-c'});
+
+        const result = await svc.suggestLinks({pathPrefix: 'Memory/p/in/'});
+        expect(store.lastScope).toEqual({include: ['Memory/p/in/']});
+        expect(pairs(result.filter((s) => s.reasons.includes('semantic')))).toEqual(['x-a.md|x-b.md']);
+
+        await svc.suggestLinks({pathPrefix: ''});
+        expect(store.lastScope).toBeUndefined();
     });
 });
