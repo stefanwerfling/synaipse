@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "bench": "vitest run --config vitest.bench.config.ts",
     "bench:gate": "node scripts/bench-gate.mjs",
+    "e2e": "playwright test",
     "eval": "vitest run --config vitest.eval.config.ts",
     "bundle:check": "npm --workspace @synaipse/web-client run build && node scripts/check-bundle-budget.mjs",
     "mcp": "npm --workspace @synaipse/mcp-server run start",
@@ -40,7 +41,9 @@
     "docker:down": "docker-compose --profile voyage --profile ollama --profile server down"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
     "typescript": "^5.7.2",

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Embed host</title>
+<link rel="stylesheet" href="/lib/synaipse.css">
+<style>
+    body { margin: 0; font: 14px system-ui, sans-serif; }
+    header { height: 40px; display: flex; gap: 8px; align-items: center; padding: 0 12px; background: #222; color: #eee; }
+    #host { height: calc(100vh - 40px); }
+</style>
+</head>
+<body>
+<header><span>Host app</span><button id="mount">mount</button><button id="unmount">unmount</button></header>
+<main id="host"></main>
+<script type="module">
+    import {mount} from '/lib/mount.js';
+    const host = document.getElementById('host');
+    let handle = null;
+    window.__routes = [];
+    window.__mount = async () => {
+        handle = await mount(host, {apiBase: '', theme: 'light', brand: false, onRouteChange: (r) => window.__routes.push(r)});
+        return true;
+    };
+    window.__unmount = async () => {
+        await handle?.unmount();
+        handle = null;
+        return true;
+    };
+    window.__navigate = (route) => handle.navigate(route);
+    document.getElementById('mount').onclick = () => window.__mount();
+    document.getElementById('unmount').onclick = () => window.__unmount();
+    window.__hostReady = true;
+</script>
+</body>
+</html>

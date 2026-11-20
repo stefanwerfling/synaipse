@@ -114,7 +114,7 @@ Suite 1127 grün (25 übersprungen), Lint ohne Fehler.
 
 | Punkt | Stand |
 |---|---|
-| G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bundle-Budget seit D4 drin; Bench-Gate seit A7 als eigener Job `bench`; Playwright kommt mit P4 |
+| G3 CI-Gerüst | erledigt: `.github/workflows/ci.yml` mit Build, Lint und Test auf Node 22.13 und 24, dazu ein MariaDB-Job mit eigenem Service-Container. Bundle-Budget seit D4 drin; Bench-Gate seit A7 als eigener Job `bench`; Playwright-Smoke seit P4 als Job `e2e` |
 | G5 Pinning | erledigt: `ngit`, `vts` und `mdfloor` auf die Commit-SHAs aus dem Lockfile gepinnt; `engines.node >=22.13`, `.nvmrc`. **Offen:** vitest-Major-Update und Ersatz von `gray-matter` (braucht Round-Trip-Tests, eigener Slice) |
 | A1 `LinkIndex` und Bulk-Write | erledigt: Backlinks werden inkrementell gepflegt, Tag-Index ebenso. `service.batch()` macht einen ngit-Commit, embeddet in Gruppen und flusht einmal. Crawler-CLI und Jobs (gitea, devto, github-stars, code) nutzen es |
 | A1 persistente Titel/Alias-Indizes | offen. Die O(N)-Rescans in `related`, `prime`, `todos` usw. bleiben vorerst; sie sind erst ab ca. 50k Notes spürbar → mit A7-Bench messen, dann entscheiden |
@@ -146,7 +146,7 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 
 ---
 
-### Status P4 (2026-11-18): begonnen
+### Status P4 (2026-11-18, abgeschlossen 2026-11-20): erledigt
 
 | Punkt | Stand |
 |---|---|
@@ -169,6 +169,19 @@ Suite 1146 grün (25 übersprungen). Der Vertrag ist in [embedding.md](embedding
 | D5 Chat-Streaming | erledigt: Tokens patchen nur noch den Text der laufenden Antwortblase, höchstens einmal pro Frame mit adaptiver Drossel (`FrameThrottle`, Render ≤ 1/3 der Zeit), ohne antv-/Floorplan-Hydration bis zum Ende. Senden hängt neue Nachrichten an statt den Verlauf neu zu bauen; Auto-Scroll nur, wenn man unten ist; Footer (aufgeklappte Quellen) bleibt stehen. Browser mit Fake-LLM (18 000 Zeichen, 2 900 Tokens, 40 Codeblöcke): vorher Tab > 45 s blockiert, jetzt so schnell wie der Stream (≈ 6 s), 10–12 Renders statt 2 900 |
 | D4 Bundle-Budget | erledigt: Entry-Chunk 506 → 244 KB (gzip 155 → 70 KB), Ziel < 250 KB erreicht. highlight.js als Hydration-Pass (`CodeHighlight.ts`, lädt beim ersten Codeblock; PDF-Export wartet darauf), marked-highlight entfernt; jszip erst beim ChatGPT-Import. `scripts/check-bundle-budget.mjs` (`npm run bundle:check`, in CI): Initial-JS ≤ 260 KB / 80 KB gzip, jeder Lazy-Chunk ≤ 1,6 MB. Browser: Notizvorschau und Chat-Stream (40 Blöcke) gefärbt, beim Start weder hljs noch jszip geladen. cytoscape (455 KB) seit P6 S2 durch jsNGraph (≈ 112 KB) ersetzt. **Offen:** @antv (808 KB, lazy) |
 | D5 Listen-Virtualisierung | bewusst nicht gebaut: Jobs halten höchstens 30 Einträge, Activity (50) und Audit (200) laden seitenweise per Klick, echte Vault hat 5 Audit-Einträge und 2 Chats. Browser-Messung mit 2 000 synthetischen Audit-Einträgen: Scrollen im Median 60 fps, Nachladen ≈ 100 ms pro Seite. Stattdessen Audit-Details erst beim Aufklappen gebaut: 56 500 → 24 000 DOM-Knoten. Neu bewerten, wenn eine Liste ohne Pagination wächst (Server-Mode) |
+
+Nachzügler 2026-11-20 (P4 abgeschlossen):
+
+| Punkt | Stand |
+|---|---|
+| A5 Schema-Validierung | erledigt (`022cdef`), siehe Router-Zeile oben |
+| A4 Scope in `similarToChunks`/`suggestLinks` | erledigt (`d84b08b`), siehe Scope-Zeile oben |
+| A4 Lazy-Bodies | nach Messung verworfen; stattdessen gepackte Layout-Eingabe (`b1e5160`), siehe Speicher-Zeile oben |
+| G3/C4 Playwright-Smoke | erledigt (Commit „test(e2e): Playwright browser smoke …“, Fixes `afbba07`): siehe unten |
+| A3 mehrere HF-Worker | bewusst nicht gebaut: ein Worker hält jedes Modell einmal (≈ 100–400 MB pro Modell); mehrere hieße das Modell mehrfach im Speicher. Ohne gemessenen Durchsatzengpass kein Gewinn. Neu bewerten, wenn Re-Indexing großer Vaults mit HF-Embedder zu langsam wird |
+| A5 3D-Ansicht bei Graph-Deltas | bleibt: `buildNodeRecords` übernimmt die Positionen vorhandener Knoten, die 3D-Ansicht springt also nicht; nur die Simulation wärmt neu an |
+
+Playwright-Smoke (`npm run e2e`, CI-Job `e2e`, lokal mit installiertem Chrome: `E2E_CHANNEL=chrome npm run e2e`): `e2e/serve.mjs` startet den gebauten Server isoliert gegen eine Kopie von `e2e/fixture-vault` (5 Notizen) und liefert Standalone-UI, `lib/mount.js` und eine Host-Seite (`e2e/embed-host.html`) aus. 9 Tests: Laden, Notiz öffnen + Wikilink + Backlinks, Deep-Link, Volltextsuche, alle Tabs ohne Fehler, Theme-Wechsel, axe in beiden Themes, und `mount()`/`unmount()` im Host: Ein Init-Skript zählt Listener an `window`/`document`, Intervalle und offene EventSources; nach dem ersten Zyklus (Lazy-Chunks legen ihren Modulzustand einmal an) muss jeder weitere Zyklus exakt auf demselben Stand enden, die URL des Hosts bleibt unberührt. Jeder Test schlägt bei Seiten- oder Konsolenfehlern fehl. Gefunden und behoben (`afbba07`): zwei `storage`-Listener pro Mount (`NotesSidebar` gab `groupMode`/`collapsedGroups` nicht frei; Gegenprobe: ohne Fix schlägt der Test an), Ordner-Kopfzeilen als `li[role=button]` mit Button darin (Liste ohne Listeneinträge, verschachtelte Bedienelemente, Enter ohne Wirkung), Suchmodus-Auswahl ohne Namen.
 
 ### Status P5 (2026-11-18): umgesetzt (jsNGraph 0.2.0 + S1 lokaler Graph)
 
@@ -526,7 +539,7 @@ Die alten Namen bleiben eine Version lang als Aliase mit Deprecation-Hinweis bes
 - Sichtbarer `:focus-visible`-Ring überall. Heute gibt es nur 2 Regeln.
 - Icon-Buttons mit `aria-label`. Glyphen (☾ ☀ ●) durch ein kleines SVG-Icon-Set ersetzen.
 - `prefers-reduced-motion` global respektieren (Pulse, Trails, Bloom, Kamerafahrten).
-- Automatisierte Prüfung mit axe-core im Playwright-Smoke (siehe G3).
+- Automatisierte Prüfung mit axe-core im Playwright-Smoke (siehe G3). Läuft seit 2026-11-20 (WCAG 2 A/AA, beide Themes); offen ist nur der Farbkontrast (≈ 20 Elemente je Theme unter 4,5:1, v. a. Pfade, Zähler, Tag-Chips), dafür ist die Regel im Smoke abgeschaltet.
 
 ### C5. Kern-Workflows schärfen
 - **Editor:** Split-View Edit/Preview, Wikilink-Autocomplete auch für Überschriften (`[[Note#…]]`), Backlinks-Panel unter der Note, Konfliktanzeige bei externer Änderung (Hash-Mismatch) statt stillem Überschreiben.
@@ -708,7 +721,7 @@ Jede Phase besteht aus einzeln committbaren Slices und endet grün (Tests, Lint,
 | **P1 Fundament** | G3 CI-Grundgerüst, G2 Logging, G5 Pinning, A2 SQLite-State, A1 `LinkIndex` und Bulk-Write | P0 | 1 Woche |
 | **P2 LLM-Protokoll** | B1 (SDK, instructions, annotations, structured output), B3 Token-Ökonomie, B2 Konsolidierung mit Aliasen, B6 Hook über `additionalContext` | P0 | 1 Woche |
 | **P3 Embed-Vertrag** | D1 View/Disposables/Tab-Registry, E1 `mount → MountHandle` plus `apiUrl`, D3 CSS-Scoping, E2 `close`/`ready`/explizite Config | P1 | 1–1,5 Wochen |
-| **P4 Performance** | A3 Worker (Layout, suggestLinks, HF), A4 Qdrant-`query`-API und Diff-Embedding, A5 Router/ETag/Pagination/Graph-Deltas, D4 Lazy-Panels, D5 Chat-Streaming | P1 | 1,5 Wochen |
+| **P4 Performance** | A3 Worker (Layout, suggestLinks, HF), A4 Qdrant-`query`-API und Diff-Embedding, A5 Router/ETag/Pagination/Graph-Deltas, D4 Lazy-Panels, D5 Chat-Streaming | P1 | erledigt |
 | **P5 jsNGraph I** | J1, J2, J3, J7, J9, J10, J13 → S1 Lokaler Graph | parallel zu P3/P4 | 1 Woche |
 | **P6 jsNGraph II** | J4, J5, J6, J8 → S2 cytoscape raus, S3 Atlas auf jsNGraph | P5 | 1,5–2 Wochen |
 | **P7 UX** | C1 Routing und Palette, C2 Toast/Confirm/States, C3 i18n, C4 a11y, D2 God-Files zerlegen | P3 | 1,5 Wochen |
@@ -735,7 +748,7 @@ Begründung: P0 behebt Datenverlust- und Sicherheitsfehler. P2 bringt den größ
 | Graph-Engines in `web` | 3 (+ Canvas-Kamera) | 2 (jsNGraph, three) |
 | Interaktiver 2D-Graph | Warnung ab 5k, aus ab 20k | flüssig (≥ 30 FPS) bis 50k mit LOD |
 | Native `alert`/`confirm`/`prompt` | ca. 44 | 0 |
-| Listener-Leaks nach `unmount()` | kein Unmount | 0 (Playwright-Test zählt Listener und Timer) |
+| Listener-Leaks nach `unmount()` | kein Unmount | 0 (Playwright-Test zählt Listener und Timer) — erreicht 2026-11-20, `e2e/embed.spec.ts` |
 | Host-CSS-Workarounds in PKG Studio | ca. 110 Zeilen | 0 |
 | Doku-Drift MCP-Tools | 23/36 dokumentiert | generiert, CI-geprüft |
 

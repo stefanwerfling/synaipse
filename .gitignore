@@ -35,3 +35,5 @@ packages/*/benchmark/results/*.json
 *.iml
 bench-result.json
 bench-baseline.json
+test-results/
+playwright-report/
