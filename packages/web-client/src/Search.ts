@@ -221,7 +221,8 @@ export class Search {
             {name: 'fulltext', key: 'fulltext'},
             {name: 'title', key: 'title'},
             {name: 'semantic', key: 'semantic'},
-            {name: 'graph', key: 'graph'}
+            {name: 'graph', key: 'graph'},
+            {name: 'context', key: 'context'}
         ];
 
         for (const {name, key} of signals) {

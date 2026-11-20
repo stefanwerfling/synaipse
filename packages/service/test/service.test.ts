@@ -2,7 +2,6 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import {mkdtemp, rm, writeFile, mkdir, readFile, utimes} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import type {SearchHit} from '@synaipse/core';
 import {SynaipseService} from '../src/Service.js';
 import {auditContextStorage} from '../src/AuditContext.js';
 import type {ChatEvent} from '../src/Chat.js';
@@ -1781,37 +1780,74 @@ describe('SynaipseService graph signal in hybrid search', () => {
         }
     });
 
-    it('treats recently-accessed notes as seeds too', async () => {
-        // Hub is unpinned but gets touched via readNote, which writes
-        // lastAccessed into the cache. That alone should be enough to make
-        // Hub act as a graph seed and promote its neighbour Near.
-        await writeNote(
-            vaultDir,
-            'Hub.md',
-            '---\ntitle: Hub\n---\nrefers to [[Near]]'
-        );
-        await writeNote(
-            vaultDir,
-            'Near.md',
-            '---\ntitle: Near\n---\nshared keyword alpha sits here'
-        );
-        await writeNote(
-            vaultDir,
-            'Far.md',
-            '---\ntitle: Far\n---\nshared keyword alpha sits here'
-        );
-
+    // Session context (eval session/follow-up variants, 2026-11-20): read
+    // notes are not graph seeds any more; they feed the low-weight
+    // `context` signal, and only when they match the query themselves.
+    const contextVault = async (hubBody: string): Promise<void> => {
+        await writeNote(vaultDir, 'Hub.md', `---\ntitle: Hub\n---\n${hubBody}`);
+        await writeNote(vaultDir, 'Near.md', '---\ntitle: Near\n---\nshared keyword alpha sits here');
+        await writeNote(vaultDir, 'Far.md', '---\ntitle: Far\n---\nshared keyword alpha sits here');
         service = new SynaipseService(buildConfig(vaultDir, cacheFile));
         await service.start();
+    };
 
+    it('lets a read note on the topic tip a near-tie towards its neighbour', async () => {
+        await contextVault('notes on alpha, see [[Near]]');
+        service.readNote('Hub.md');
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        const ids = hits.map((h) => h.noteId);
+        expect(ids.indexOf('Near.md')).toBeLessThan(ids.indexOf('Far.md'));
+        expect(hits.find((h) => h.noteId === 'Near.md')?.components?.context).toBeDefined();
+        expect(hits.find((h) => h.noteId === 'Far.md')?.components?.context).toBeUndefined();
+        // No bonus for the read note itself, and read notes are no `graph` seeds.
+        expect(hits.find((h) => h.noteId === 'Hub.md')?.components?.context).toBeUndefined();
+        for (const hit of hits) expect(hit.components?.graph).toBeUndefined();
+    });
+
+    it('ignores a read note that does not match the query', async () => {
+        await contextVault('something else entirely, see [[Near]]');
+        service.readNote('Hub.md');
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        for (const hit of hits) expect(hit.components?.context).toBeUndefined();
+    });
+
+    it('lifts a neighbour by a few ranks at most, not from far behind to the top', async () => {
+        // Near is linked from the read note but ranks last in fulltext. At
+        // full weight the context entry alone would carry it to the top.
+        await writeNote(vaultDir, 'Hub.md', `---\ntitle: Hub\n---\nalpha, see [[Near]]. ${'filler text. '.repeat(30)}`);
+        await writeNote(vaultDir, 'Near.md', `---\ntitle: Near\n---\nalpha ${'filler text. '.repeat(60)}`);
+        await writeNote(vaultDir, 'Best.md', '---\ntitle: Best\n---\nalpha alpha alpha alpha');
+        for (let i = 0; i < 4; i++) {
+            await writeNote(vaultDir, `Mid${i}.md`, `---\ntitle: Mid ${i}\n---\nalpha alpha ${'filler. '.repeat(i * 3)}`);
+        }
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
         service.readNote('Hub.md');
 
         const hits = await service.search('alpha', 'hybrid', 10);
         const near = hits.find((h) => h.noteId === 'Near.md');
-        const far = hits.find((h) => h.noteId === 'Far.md');
-        expect(near?.components?.graph).toBeDefined();
-        expect(far?.components?.graph).toBeUndefined();
-        expect(hits.indexOf(near as SearchHit)).toBeLessThan(hits.indexOf(far as SearchHit));
+        expect(near?.components?.context).toBeDefined();
+        expect(near?.components?.fulltext?.rank).toBeGreaterThan(5);
+        expect(hits[0]?.noteId).toBe('Best.md');
+    });
+
+    it('only counts the last three reads', async () => {
+        await contextVault('notes on alpha, see [[Near]]');
+        for (let i = 0; i < 3; i++) await writeNote(vaultDir, `Other${i}.md`, `---\ntitle: Other ${i}\n---\nalpha ${i}`);
+        await service.stop();
+        service = new SynaipseService(buildConfig(vaultDir, cacheFile));
+        await service.start();
+
+        service.readNote('Hub.md');
+        for (let i = 0; i < 3; i++) {
+            await new Promise((r) => setTimeout(r, 5));
+            service.readNote(`Other${i}.md`);
+        }
+
+        const hits = await service.search('alpha', 'hybrid', 10);
+        expect(hits.find((h) => h.noteId === 'Near.md')?.components?.context).toBeUndefined();
     });
 });
 

@@ -41,8 +41,8 @@ Web browser  ──http──▶   @synaipse/web-api  ──▶  @synaipse/servi
 2. `service.search`:
     - `fulltext`: scans the in-memory index (title, headings, body, tags).
     - `semantic`: embeds the query, queries Qdrant, returns top-k chunks.
-    - `hybrid`: both, merged with rank-based fusion.
-3. If `EMBEDDINGS_PROVIDER=none`, the semantic path is short-circuited and `hybrid` collapses to `fulltext`.
+    - `hybrid`: title, fulltext and semantic hits merged with rank-based fusion (RRF), plus two graph signals over those candidates: `graph` (proximity to `pinned`/`prime` notes) and `context` (proximity to the last three notes read, only when one of them matches the query itself; weight 0.05, so it settles near-ties and never outweighs the text). `explain` shows each signal's rank.
+3. If `EMBEDDINGS_PROVIDER=none`, the semantic path is short-circuited and `hybrid` keeps title, fulltext and the graph signals.
 
 ## External edits
 

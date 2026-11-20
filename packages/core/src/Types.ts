@@ -98,7 +98,7 @@ export interface SearchQuery {
     paths?: string[];
 }
 
-export type SearchSignalName = 'fulltext' | 'title' | 'semantic' | 'graph' | 'rerank';
+export type SearchSignalName = 'fulltext' | 'title' | 'semantic' | 'graph' | 'context' | 'rerank';
 
 export interface SearchSignalComponent {
     /**
@@ -115,11 +115,18 @@ export interface SearchHitComponents {
     title?: SearchSignalComponent;
     semantic?: SearchSignalComponent;
     /**
-     * Graph proximity to pinned + recently-touched seed notes. Hits that are
-     * direct neighbours of seeds or share common neighbours (Adamic-Adar) rank
-     * higher. Only present in hybrid mode when at least one seed exists.
+     * Graph proximity to pinned notes (`pinned` / `prime`). Hits that are
+     * pinned, direct neighbours of one or share common neighbours
+     * (Adamic-Adar) rank higher. Only in hybrid mode with a pinned note.
      */
     graph?: SearchSignalComponent;
+    /**
+     * Graph proximity to the notes read last, when one of them also
+     * matches this query: decides near-ties in favour of what the session
+     * is about, never outweighs the text (low fusion weight, no bonus for
+     * the read note itself). Hybrid mode only.
+     */
+    context?: SearchSignalComponent;
     /**
      * Cross-encoder rerank score, when a Reranker is configured. This
      * component OVERRIDES the ordering — the final `score` is the

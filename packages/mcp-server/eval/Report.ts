@@ -40,6 +40,14 @@ export interface EvalReport {
     /** Duplicate check on writes (P8 S3); missing in baselines from before. */
     dedupe?: DedupeSummary;
     overall: Summary;
+    /**
+     * All questions in one session, forward and then reversed in a second
+     * one: reads accumulate and become graph seeds, as in real use.
+     * Missing in baselines from before.
+     */
+    session?: Summary;
+    /** Follow-up questions after reading context notes (EVAL_FOLLOWUPS). */
+    followup?: Summary;
     byCategory: Record<string, Summary>;
     questions: QuestionResult[];
 }
@@ -62,6 +70,17 @@ export const regressions = (base: EvalReport, now: EvalReport): string[] => {
     higher('toolListTokens', base.context.toolListTokens, now.context.toolListTokens, 0.05);
     higher('instructionsTokens', base.context.instructionsTokens, now.context.instructionsTokens, 0.05);
     higher('primeTokens', base.context.primeTokens, now.context.primeTokens, 0.05);
+    if (base.session !== undefined && now.session !== undefined) {
+        lower('session hit@1', base.session.hitAt1, now.session.hitAt1);
+        lower('session recall@5', base.session.recallAt5, now.session.recallAt5);
+        lower('session mrr', base.session.mrr, now.session.mrr);
+        higher('session outdatedAbove', base.session.outdatedAbove, now.session.outdatedAbove, 0);
+    }
+    if (base.followup !== undefined && now.followup !== undefined) {
+        lower('followup hit@1', base.followup.hitAt1, now.followup.hitAt1);
+        lower('followup mrr', base.followup.mrr, now.followup.mrr);
+        higher('followup outdatedAbove', base.followup.outdatedAbove, now.followup.outdatedAbove, 0);
+    }
     if (base.dedupe !== undefined && now.dedupe !== undefined) {
         lower('dedupe recall', base.dedupe.recall, now.dedupe.recall);
         higher('dedupe falseAlarms', base.dedupe.falseAlarms, now.dedupe.falseAlarms, 0);

@@ -9,7 +9,7 @@ import {SynaipseService} from '@synaipse/service';
 import {buildTools} from '../src/Tools.js';
 import {buildMcpServer} from '../src/Server.js';
 import {EventPublisher} from '../src/EventPublisher.js';
-import {EVAL_DRAFTS, EVAL_NOTES, EVAL_QUESTIONS, type EvalDraft, type EvalNote, type EvalQuestion} from './fixture.js';
+import {EVAL_DRAFTS, EVAL_FOLLOWUPS, EVAL_NOTES, EVAL_QUESTIONS, type EvalDraft, type EvalNote, type EvalQuestion} from './fixture.js';
 import {regressions, type DedupeSummary, type EvalReport, type QuestionResult, type Summary} from './Report.js';
 
 /**
@@ -149,6 +149,8 @@ const table = (report: EvalReport, base: EvalReport | null): string => {
         '| category   |   N | hit@1 | R@5 | MRR | outdated above | tokens/question |',
         '|------------|----:|-------|-----|-----|----------------|-----------------|',
         row('overall', report.overall, base?.overall),
+        ...(report.session !== undefined ? [row('session', report.session, base?.session)] : []),
+        ...(report.followup !== undefined ? [row('followup', report.followup, base?.followup)] : []),
         ...Object.entries(report.byCategory).map(([c, s]) => row(c, s, base?.byCategory[c]))
     ].join('\n');
 };
@@ -187,6 +189,20 @@ describe('LLM usability eval', () => {
         try {
             const results: QuestionResult[] = [];
             for (const q of EVAL_QUESTIONS) results.push(await session((client) => answer(client, q)));
+            // The same questions as one working session (twice, in both orders).
+            const inSession: QuestionResult[] = [];
+            for (const order of [EVAL_QUESTIONS, [...EVAL_QUESTIONS].reverse()]) {
+                await session(async (client) => {
+                    for (const q of order) inSession.push(await answer(client, q));
+                });
+            }
+            const followups: QuestionResult[] = [];
+            for (const q of EVAL_FOLLOWUPS) {
+                followups.push(await session(async (client) => {
+                    for (const id of q.context) await client.callTool({name: 'synaipse_read_note', arguments: {id}});
+                    return answer(client, q);
+                }));
+            }
             const flagged: Record<string, string[]> = {};
             for (const draft of EVAL_DRAFTS) flagged[draft.id] = await session((client) => attemptWrite(client, draft));
             const context = await session(async (client) => ({
@@ -203,12 +219,16 @@ describe('LLM usability eval', () => {
                 context,
                 dedupe: summarizeDedupe(flagged),
                 overall: summarize(results, EVAL_QUESTIONS),
+                session: summarize(inSession, EVAL_QUESTIONS),
+                followup: summarize(followups, EVAL_FOLLOWUPS),
                 byCategory: Object.fromEntries(categories.map((c) => [c, summarize(results.filter((r) => r.category === c), EVAL_QUESTIONS)])),
                 questions: results
             };
 
             const base = await readFile(BASELINE, 'utf8').then((raw) => JSON.parse(raw) as EvalReport, () => null);
-            const misses = results.filter((r) => r.rank !== 1).map((r) => `${r.id}${r.rank === 0 ? '✗' : `@${r.rank}`}${r.outdatedAbove ? '!' : ''}`);
+            const missList = (list: readonly QuestionResult[]): string =>
+                list.filter((r) => r.rank !== 1).map((r) => `${r.id}${r.rank === 0 ? '✗' : `@${r.rank}`}${r.outdatedAbove ? '!' : ''}`).join(' ') || 'none';
+            const misses = missList(results);
 
             process.stdout.write([
                 '',
@@ -218,7 +238,9 @@ describe('LLM usability eval', () => {
                 '',
                 `context tokens: tool list ${report.context.toolListTokens}, instructions ${report.context.instructionsTokens}, prime ${report.context.primeTokens}`,
                 `duplicate check: recall ${report.dedupe!.recall}${base?.dedupe ? ` (${base.dedupe.recall})` : ''}, false alarms ${report.dedupe!.falseAlarms}${base?.dedupe ? ` (${base.dedupe.falseAlarms})` : ''}; flagged ${Object.entries(flagged).map(([id, ids]) => `${id}:${ids.length > 0 ? ids.map((x) => x.split('/').pop()).join('+') : '-'}`).join(' ')}`,
-                `not first (rank, ✗ = missing, ! = outdated above): ${misses.join(' ') || 'none'}`,
+                `not first (rank, ✗ = missing, ! = outdated above): ${misses}`,
+                `not first after context: ${missList(followups)}`,
+                `not first in session (forward | reversed): ${missList(inSession.slice(0, EVAL_QUESTIONS.length))} | ${missList(inSession.slice(EVAL_QUESTIONS.length))}`,
                 ''
             ].join('\n') + '\n');
 

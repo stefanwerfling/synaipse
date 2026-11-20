@@ -44,6 +44,22 @@
     "outdatedAbove": 0,
     "tokensPerQuestion": 501
   },
+  "session": {
+    "questions": 70,
+    "hitAt1": 0.814,
+    "recallAt5": 0.979,
+    "mrr": 0.886,
+    "outdatedAbove": 0,
+    "tokensPerQuestion": 501
+  },
+  "followup": {
+    "questions": 4,
+    "hitAt1": 0.75,
+    "recallAt5": 1,
+    "mrr": 0.875,
+    "outdatedAbove": 0,
+    "tokensPerQuestion": 538
+  },
   "byCategory": {
     "lookup": {
       "questions": 17,

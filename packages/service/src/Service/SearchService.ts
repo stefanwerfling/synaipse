@@ -14,8 +14,24 @@ import {MS_PER_DAY} from './Util.js';
 
 const log = createLogger('service');
 
-const GRAPH_SEED_RECENT_WINDOW_MS = 7 * MS_PER_DAY;
-const GRAPH_SEED_RECENT_CAP = 10;
+/**
+ * Session context (the `context` signal): the notes read last, if one
+ * matches the query, nudge their graph neighbours. Measured with the
+ * session and follow-up variants of the eval (P8 / B7, 2026-11-20): with
+ * the old setup (last 10 reads as full-weight graph seeds, read notes
+ * boosted themselves) a session of unrelated questions dropped hit@1 from
+ * 0.83 to 0.59 and put outdated notes above the answer.
+ */
+const CONTEXT_WINDOW_MS = 7 * MS_PER_DAY;
+/** Only the last few reads stand for what the session is about now. */
+const CONTEXT_READS = 3;
+/**
+ * RRF weight of the context signal. One rank step in a text signal is
+ * worth ~1/(61·62) ≈ 0.0003, a full-weight signal entry ~0.016: at weight
+ * 1 any neighbour of a read note jumped over better text matches. 0.05
+ * keeps it to near-ties.
+ */
+const CONTEXT_WEIGHT = 0.05;
 
 /** Extra search candidates fetched so demoted (outdated) hits can make room. */
 const KNOWLEDGE_HEADROOM = 5;
@@ -173,8 +189,7 @@ export class SearchService {
         ];
         if (sem.length > 0) signals.push({name: 'semantic', hits: sem});
 
-        const graph = this.buildGraphSignal([titles, sem, ft], limit);
-        if (graph !== null) signals.push(graph);
+        signals.push(...this.buildGraphSignals([titles, sem, ft], limit));
 
         // Fusion runs at a widened budget when reranking so the cross-
         // encoder gets more candidates to reorder — otherwise it can
@@ -259,18 +274,17 @@ export class SearchService {
     }
 
     /**
-     * Construct a graph-proximity signal for the candidate union of the other
-     * search signals. Returns null when there are no seed notes (pinned +
-     * recently-touched) or no candidate has a positive proximity score — the
-     * signal then contributes nothing and isn't added to the fusion.
+     * Graph signals over the candidate union of the other signals:
+     * `graph` ranks by proximity to pinned notes (as before), `context` by
+     * proximity to the notes read last that are candidates themselves, i.e.
+     * on this query's topic. A read note gets no bonus for itself (the
+     * agent already has it); only its neighbours do. Signals without a
+     * seed or a scored candidate are left out.
      */
-    private buildGraphSignal(
+    private buildGraphSignals(
         candidateLists: readonly (readonly SearchHit[])[],
         limit: number
-    ): RankedSignal | null {
-        const seeds = this.collectGraphSeeds();
-        if (seeds.length === 0) return null;
-
+    ): RankedSignal[] {
         const seen = new Set<NoteId>();
         const candidates: SearchHit[] = [];
         for (const list of candidateLists) {
@@ -281,44 +295,47 @@ export class SearchService {
             }
         }
 
-        if (candidates.length === 0) return null;
+        if (candidates.length === 0) return [];
 
-        const hits = rankByGraphProximity(candidates, seeds, this.core.adjacency()).slice(0, limit);
-        if (hits.length === 0) return null;
+        const adj = this.core.adjacency();
+        const signals: RankedSignal[] = [];
 
-        return {name: 'graph', hits};
-    }
-
-    /**
-     * Seed set for graph-signal ranking: pinned notes (frontmatter `pinned`
-     * or `prime` truthy) plus notes touched recently via the access cache.
-     * Capped so the per-candidate AA sum stays bounded.
-     */
-    private collectGraphSeeds(): NoteId[] {
-        const seeds = new Set<NoteId>();
-
-        for (const note of this.notes.list()) {
-            const fm = note.frontmatter;
-            if (fm['pinned'] === true || fm['prime'] === true) {
-                seeds.add(note.id);
-            }
+        const pinned = this.pinnedSeeds();
+        if (pinned.length > 0) {
+            const hits = rankByGraphProximity(candidates, pinned, adj).slice(0, limit);
+            if (hits.length > 0) signals.push({name: 'graph', hits});
         }
 
+        const read = this.recentReads().filter((id) => seen.has(id) && !pinned.includes(id));
+        if (read.length > 0) {
+            const hits = rankByGraphProximity(candidates, read, adj, {seedSelfBonus: 0}).slice(0, limit);
+            if (hits.length > 0) signals.push({name: 'context', hits, weight: CONTEXT_WEIGHT});
+        }
+
+        return signals;
+    }
+
+    /** Notes marked `pinned` or `prime` in their frontmatter. */
+    private pinnedSeeds(): NoteId[] {
+        return this.notes.list()
+            .filter((n) => n.frontmatter['pinned'] === true || n.frontmatter['prime'] === true)
+            .map((n) => n.id);
+    }
+
+    /** The notes read last (access cache, within {@link CONTEXT_WINDOW_MS}), newest first. */
+    private recentReads(): NoteId[] {
         const recent: {id: NoteId; lastAccessed: number}[] = [];
-        const cutoff = Date.now() - GRAPH_SEED_RECENT_WINDOW_MS;
+        const cutoff = Date.now() - CONTEXT_WINDOW_MS;
         for (const id of this.notes.entryIds()) {
-            const entry = this.notes.getEntry(id);
-            const lastAccessed = entry?.lastAccessed;
+            const lastAccessed = this.notes.getEntry(id)?.lastAccessed;
             if (lastAccessed === undefined || lastAccessed < cutoff) continue;
             if (this.notes.tryGet(id) === undefined) continue;
             recent.push({id, lastAccessed});
         }
 
-        recent.sort((a, b) => b.lastAccessed - a.lastAccessed);
-        for (const {id} of recent.slice(0, GRAPH_SEED_RECENT_CAP)) {
-            seeds.add(id);
-        }
-
-        return [...seeds];
+        return recent
+            .sort((a, b) => b.lastAccessed - a.lastAccessed)
+            .slice(0, CONTEXT_READS)
+            .map((r) => r.id);
     }
 }

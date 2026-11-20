@@ -16,7 +16,7 @@ export interface EvalNote {
     fm?: Readonly<Record<string, unknown>>;
 }
 
-export type EvalCategory = 'lookup' | 'paraphrase' | 'current' | 'scoped' | 'trust';
+export type EvalCategory = 'lookup' | 'paraphrase' | 'current' | 'scoped' | 'trust' | 'followup';
 
 export interface EvalQuestion {
     id: string;
@@ -388,6 +388,25 @@ export const EVAL_QUESTIONS: readonly EvalQuestion[] = [
     // ---- remembered facts that only live in the inbox ------------------------
     {id: 'L13', category: 'lookup', question: 'How long are old invoice file versions kept?', query: 'invoice bucket versioning lifecycle', relevant: [`${K}/inbox/2025-11-10.md`]},
     {id: 'L14', category: 'lookup', question: 'When are dunning emails sent?', query: 'dunning emails', relevant: [`${K}/inbox/2025-11-12.md`]}
+];
+
+/** A question asked after the agent already read `context` in the same session. */
+export interface EvalFollowup extends EvalQuestion {
+    context: readonly string[];
+}
+
+/**
+ * Follow-up questions: what was read before is a graph seed of the next
+ * search. It should settle a question the text alone leaves open (F1,
+ * F2: the answer is linked from what was read) without pulling the read
+ * note itself above a better answer (F3: an old decision read first, F4:
+ * the other project's note).
+ */
+export const EVAL_FOLLOWUPS: readonly EvalFollowup[] = [
+    {id: 'F1', category: 'followup', question: 'And how do they release?', context: [`${H}/architecture/overview.md`], query: 'how do releases work', relevant: [`${H}/howto/release.md`], outdated: [`${K}/howto/release.md`]},
+    {id: 'F2', category: 'followup', question: 'How do I switch that on for a table?', context: [`${K}/architecture/multi-tenancy.md`], query: 'enable row level security policy', relevant: ['Knowledge/postgres/row-level-security.md']},
+    {id: 'F3', category: 'followup', question: 'Is that still how Kestrel stores sessions?', context: [`${K}/decisions/session-store-redis.md`], query: 'Kestrel session store', relevant: [`${K}/decisions/session-store-postgres.md`], outdated: [`${K}/decisions/session-store-redis.md`]},
+    {id: 'F4', category: 'followup', question: 'And how does Harbor release?', context: [`${K}/howto/release.md`], query: 'Harbor release process', relevant: [`${H}/howto/release.md`], outdated: [`${K}/howto/release.md`]}
 ];
 
 /**

@@ -12,6 +12,8 @@ export interface FusionOptions {
 export interface RankedSignal {
     name: SearchSignalName;
     hits: readonly SearchHit[];
+    /** Multiplies this signal's RRF contribution (default 1). */
+    weight?: number;
 }
 
 interface Accumulator {
@@ -43,7 +45,7 @@ export const reciprocalRankFusion = (
     for (const signal of signals) {
         signal.hits.forEach((hit, idx) => {
             const rank = idx + 1;
-            const contribution = 1 / (k + rank);
+            const contribution = (signal.weight ?? 1) / (k + rank);
             const existing = map.get(hit.noteId);
             const component = {score: hit.score, rank};
 
