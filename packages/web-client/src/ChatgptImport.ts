@@ -1,6 +1,12 @@
 // Type only: the 95 KB library itself is loaded when an export is parsed (plan P4 / D4).
 import type JSZip from 'jszip';
 import type {ChatgptImportAttachment, ChatgptImportConversation, ChatgptImportMessage} from './Api.js';
+import {defineMessages} from './I18n.js';
+
+// Errors only; the shown dialog is ImportDialog. Note content stays as is.
+const t = defineMessages('chatgptImport', {
+    noConversations: 'No conversations.json or conversations-NNN.json found in ZIP'
+});
 
 interface RawNode {
     id: string;
@@ -323,7 +329,7 @@ export const parseChatgptExport = async (file: File): Promise<ParsedExport> => {
     const convFiles = collectConversationFiles(zip);
 
     if (convFiles.length === 0) {
-        throw new Error('No conversations.json or conversations-NNN.json found in ZIP');
+        throw new Error(t('noConversations'));
     }
 
     const conversations: NormalizedConversation[] = [];

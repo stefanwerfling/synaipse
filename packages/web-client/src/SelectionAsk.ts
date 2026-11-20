@@ -1,4 +1,9 @@
 import {el, portalHost} from './Dom.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('selectionAsk', {
+    ask: '↳ Ask about this'
+});
 
 export interface SelectionAskOptions {
     /** The element a selection must lie in (the note preview); null while none is shown. */
@@ -76,7 +81,7 @@ export class SelectionAsk {
             this.button = el('button', {
                 class: 'selection-action',
                 attrs: {type: 'button'},
-                text: '↳ Ask about this',
+                text: t('ask'),
                 on: {mousedown: (e) => e.preventDefault()}
             }) as HTMLButtonElement;
             portalHost().appendChild(this.button);

@@ -9,6 +9,48 @@ import {
 import {confirmDialog} from './Dialogs.js';
 import {toastError} from './Toast.js';
 import {openModal} from './Modal.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('tokensPanel', {
+    statusRevoked: 'revoked',
+    statusExpired: 'expired',
+    statusActive: 'active',
+    intro: 'Personal MCP bearer tokens. Each grants read and/or write access to the vault on behalf of your account.',
+    myTokens: 'My tokens',
+    labelPlaceholder: 'Label (e.g. laptop-mcp)',
+    expiresPlaceholder: 'expires (days, optional)',
+    createToken: 'Create token',
+    label: 'Label',
+    scopes: 'Scopes',
+    read: 'Read',
+    write: 'Write',
+    expires: 'Expires',
+    labelRequired: 'Label is required',
+    scopeRequired: 'Pick at least one scope (read or write)',
+    expiresInvalid: 'Expires (days) must be a positive integer',
+    creating: 'Creating…',
+    loadingTokens: 'Loading tokens…',
+    empty: 'No tokens yet. Create one above to authenticate the MCP server.',
+    rotate: 'Rotate',
+    revoke: 'Revoke',
+    created: 'created {date}',
+    lastUsed: 'last used {date}',
+    expiresAt: 'expires {date}',
+    revokeTitle: 'Revoke token?',
+    revokeMessage: 'Any client using "{label}" loses access immediately. This cannot be undone.',
+    revoking: 'Revoking…',
+    rotateTitle: 'Rotate token?',
+    rotateMessage: 'The old bearer of "{label}" stops working immediately. You get a new one, shown only once.',
+    rotating: 'Rotating…',
+    copiedClose: 'I have copied it — close',
+    copy: 'Copy',
+    copiedCheck: 'Copied ✓',
+    newToken: 'New token',
+    tokenCreated: 'Token created: {label}',
+    tokenRotated: 'Token rotated: {label}',
+    copyNow: 'Copy this token now.',
+    hashOnly: 'Synaipse stores only a hash — once this dialog closes the plain bearer is gone forever.'
+});
 
 const formatDate = (ms: number | null): string => {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) return '—';
@@ -26,9 +68,9 @@ const isExpired = (token: TokenDto, now: number): boolean =>
     token.expiresAt !== null && token.expiresAt <= now;
 
 const status = (token: TokenDto, now: number): {label: string; cls: string} => {
-    if (token.revokedAt !== null) return {label: 'revoked', cls: 'tokens-status revoked'};
-    if (isExpired(token, now)) return {label: 'expired', cls: 'tokens-status revoked'};
-    return {label: 'active', cls: 'tokens-status active'};
+    if (token.revokedAt !== null) return {label: t('statusRevoked'), cls: 'tokens-status revoked'};
+    if (isExpired(token, now)) return {label: t('statusExpired'), cls: 'tokens-status revoked'};
+    return {label: t('statusActive'), cls: 'tokens-status active'};
 };
 
 export class TokensPanel {
@@ -44,10 +86,10 @@ export class TokensPanel {
 
         this.element.appendChild(el('p', {
             class: 'tokens-intro',
-            text: 'Personal MCP bearer tokens. Each grants read and/or write access to the vault on behalf of your account.'
+            text: t('intro')
         }));
         this.element.appendChild(this.formHost);
-        this.element.appendChild(el('h3', {class: 'tokens-section-title', text: 'My tokens'}));
+        this.element.appendChild(el('h3', {class: 'tokens-section-title', text: t('myTokens')}));
         this.element.appendChild(this.listHost);
 
         this.renderForm();
@@ -63,7 +105,7 @@ export class TokensPanel {
 
         const labelInput = el('input', {
             class: 'tokens-input',
-            attrs: {type: 'text', placeholder: 'Label (e.g. laptop-mcp)', maxlength: '64'}
+            attrs: {type: 'text', placeholder: t('labelPlaceholder'), maxlength: '64'}
         }) as HTMLInputElement;
 
         const readCheck = el('input', {
@@ -76,30 +118,30 @@ export class TokensPanel {
 
         const expiresInput = el('input', {
             class: 'tokens-input tokens-input-small',
-            attrs: {type: 'number', placeholder: 'expires (days, optional)', min: '1', max: '1825'}
+            attrs: {type: 'number', placeholder: t('expiresPlaceholder'), min: '1', max: '1825'}
         }) as HTMLInputElement;
 
         const error = el('div', {class: 'tokens-form-error', attrs: {'aria-live': 'polite'}});
         const submitBtn = el('button', {
             class: 'btn btn-primary',
             attrs: {type: 'submit'},
-            text: 'Create token'
+            text: t('createToken')
         }) as HTMLButtonElement;
 
         const form = el('form', {class: 'tokens-form'},
             el('div', {class: 'tokens-form-row'},
-                el('label', {class: 'tokens-label-text', text: 'Label'}),
+                el('label', {class: 'tokens-label-text', text: t('label')}),
                 labelInput
             ),
             el('div', {class: 'tokens-form-row'},
-                el('label', {class: 'tokens-label-text', text: 'Scopes'}),
+                el('label', {class: 'tokens-label-text', text: t('scopes')}),
                 el('div', {class: 'tokens-checks'},
-                    el('label', {class: 'tokens-check'}, readCheck, el('span', {text: 'Read'})),
-                    el('label', {class: 'tokens-check'}, writeCheck, el('span', {text: 'Write'}))
+                    el('label', {class: 'tokens-check'}, readCheck, el('span', {text: t('read')})),
+                    el('label', {class: 'tokens-check'}, writeCheck, el('span', {text: t('write')}))
                 )
             ),
             el('div', {class: 'tokens-form-row'},
-                el('label', {class: 'tokens-label-text', text: 'Expires'}),
+                el('label', {class: 'tokens-label-text', text: t('expires')}),
                 expiresInput
             ),
             error,
@@ -112,14 +154,14 @@ export class TokensPanel {
 
             const label = labelInput.value.trim();
             if (label.length === 0) {
-                error.textContent = 'Label is required';
+                error.textContent = t('labelRequired');
                 return;
             }
 
             const read = readCheck.checked;
             const write = writeCheck.checked;
             if (!read && !write) {
-                error.textContent = 'Pick at least one scope (read or write)';
+                error.textContent = t('scopeRequired');
                 return;
             }
 
@@ -128,7 +170,7 @@ export class TokensPanel {
             if (raw.length > 0) {
                 const n = Number.parseInt(raw, 10);
                 if (!Number.isFinite(n) || n <= 0) {
-                    error.textContent = 'Expires (days) must be a positive integer';
+                    error.textContent = t('expiresInvalid');
                     return;
                 }
                 expiresInDays = n;
@@ -137,7 +179,7 @@ export class TokensPanel {
             error.textContent = '';
             this.busy = true;
             submitBtn.disabled = true;
-            submitBtn.textContent = 'Creating…';
+            submitBtn.textContent = t('creating');
 
             void (async () => {
                 try {
@@ -153,7 +195,7 @@ export class TokensPanel {
                 } finally {
                     this.busy = false;
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'Create token';
+                    submitBtn.textContent = t('createToken');
                 }
             })();
         });
@@ -163,7 +205,7 @@ export class TokensPanel {
 
     private renderListLoading(): void {
         clear(this.listHost);
-        this.listHost.appendChild(el('div', {class: 'tokens-empty', text: 'Loading tokens…'}));
+        this.listHost.appendChild(el('div', {class: 'tokens-empty', text: t('loadingTokens')}));
     }
 
     private async refresh(): Promise<void> {
@@ -185,7 +227,7 @@ export class TokensPanel {
         if (tokens.length === 0) {
             this.listHost.appendChild(el('div', {
                 class: 'tokens-empty',
-                text: 'No tokens yet. Create one above to authenticate the MCP server.'
+                text: t('empty')
             }));
             return;
         }
@@ -211,14 +253,14 @@ export class TokensPanel {
         const rotateBtn = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Rotate'
+            text: t('rotate')
         }) as HTMLButtonElement;
         rotateBtn.addEventListener('click', () => this.handleRotate(token, rotateBtn));
 
         const revokeBtn = el('button', {
             class: 'btn btn-danger',
             attrs: {type: 'button'},
-            text: 'Revoke'
+            text: t('revoke')
         }) as HTMLButtonElement;
         revokeBtn.addEventListener('click', () => this.handleRevoke(token, revokeBtn));
 
@@ -236,9 +278,9 @@ export class TokensPanel {
                 ),
                 el('div', {class: 'tokens-row-meta'},
                     el('span', {class: 'tokens-row-hint', text: `…${token.tokenHint}`}),
-                    el('span', {text: `created ${formatDate(token.createdAt)}`}),
-                    el('span', {text: `last used ${formatDate(token.lastUsedAt)}`}),
-                    el('span', {text: `expires ${formatDate(token.expiresAt)}`})
+                    el('span', {text: t('created', {date: formatDate(token.createdAt)})}),
+                    el('span', {text: t('lastUsed', {date: formatDate(token.lastUsedAt)})}),
+                    el('span', {text: t('expiresAt', {date: formatDate(token.expiresAt)})})
                 )
             ),
             el('div', {class: 'tokens-row-actions'}, rotateBtn, revokeBtn)
@@ -248,16 +290,16 @@ export class TokensPanel {
     private async handleRevoke(token: TokenDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
         const ok = await confirmDialog({
-            title: 'Revoke token?',
-            message: `Any client using "${token.label}" loses access immediately. This cannot be undone.`,
-            confirmLabel: 'Revoke',
+            title: t('revokeTitle'),
+            message: t('revokeMessage', {label: token.label}),
+            confirmLabel: t('revoke'),
             danger: true
         });
         if (!ok) return;
 
         this.busy = true;
         btn.disabled = true;
-        btn.textContent = 'Revoking…';
+        btn.textContent = t('revoking');
 
         try {
             await revokeToken(token.id);
@@ -265,7 +307,7 @@ export class TokensPanel {
         } catch (cause) {
             toastError('', cause);
             btn.disabled = false;
-            btn.textContent = 'Revoke';
+            btn.textContent = t('revoke');
         } finally {
             this.busy = false;
         }
@@ -274,16 +316,16 @@ export class TokensPanel {
     private async handleRotate(token: TokenDto, btn: HTMLButtonElement): Promise<void> {
         if (this.busy) return;
         const ok = await confirmDialog({
-            title: 'Rotate token?',
-            message: `The old bearer of "${token.label}" stops working immediately. You get a new one, shown only once.`,
-            confirmLabel: 'Rotate',
+            title: t('rotateTitle'),
+            message: t('rotateMessage', {label: token.label}),
+            confirmLabel: t('rotate'),
             danger: true
         });
         if (!ok) return;
 
         this.busy = true;
         btn.disabled = true;
-        btn.textContent = 'Rotating…';
+        btn.textContent = t('rotating');
 
         try {
             const result = await rotateToken(token.id);
@@ -292,7 +334,7 @@ export class TokensPanel {
         } catch (cause) {
             toastError('', cause);
             btn.disabled = false;
-            btn.textContent = 'Rotate';
+            btn.textContent = t('rotate');
         } finally {
             this.busy = false;
         }
@@ -303,23 +345,23 @@ const showPlainTokenModal = (plain: string, label: string, action: 'created' | '
     const closeBtn = el('button', {
         class: 'btn btn-primary',
         attrs: {type: 'button'},
-        text: 'I have copied it — close'
+        text: t('copiedClose')
     });
 
     const copyBtn = el('button', {
         class: 'btn',
         attrs: {type: 'button'},
-        text: 'Copy'
+        text: t('copy')
     }) as HTMLButtonElement;
 
-    const tokenBox = el('code', {class: 'tokens-modal-code', attrs: {'aria-label': 'New token'}, text: plain});
+    const tokenBox = el('code', {class: 'tokens-modal-code', attrs: {'aria-label': t('newToken')}, text: plain});
 
     copyBtn.addEventListener('click', () => {
         void (async () => {
             try {
                 await navigator.clipboard.writeText(plain);
-                copyBtn.textContent = 'Copied ✓';
-                window.setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+                copyBtn.textContent = t('copiedCheck');
+                window.setTimeout(() => { copyBtn.textContent = t('copy'); }, 1500);
             } catch {
                 // Clipboard API can fail on non-https contexts; fall back to manual select.
                 const range = document.createRange();
@@ -334,13 +376,14 @@ const showPlainTokenModal = (plain: string, label: string, action: 'created' | '
     });
 
     const modal = openModal({
-        title: `Token ${action}: ${label}`,
+        title: action === 'created' ? t('tokenCreated', {label}) : t('tokenRotated', {label}),
         size: 'md',
         className: 'tokens-modal',
         body: [
             el('p', {class: 'tokens-modal-warning'},
-                el('strong', {text: 'Copy this token now.'}),
-                ' Synaipse stores only a hash — once this dialog closes the plain bearer is gone forever.'
+                el('strong', {text: t('copyNow')}),
+                ' ',
+                t('hashOnly')
             ),
             el('div', {class: 'tokens-modal-codewrap'}, tokenBox, copyBtn)
         ],

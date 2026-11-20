@@ -72,7 +72,10 @@ const MIGRATED = [
     'NotesSidebar', 'NotesTree', 'PreviewDialog', 'SummarizeDialog', 'Toc',
     // S4c panels
     'ActivityPanel', 'AuditPanel', 'BenchmarksPanel', 'CanvasBottomBar', 'CanvasCards', 'CanvasPanel', 'CanvasRenderer',
-    'CardEditor', 'ChatPanel', 'ChatSidebar', 'InboxPanel', 'JobsPanel', 'RoadmapPanel'
+    'CardEditor', 'ChatPanel', 'ChatSidebar', 'InboxPanel', 'JobsPanel', 'RoadmapPanel',
+    // S4d account and dialogs
+    'AdminPanel', 'Auth', 'ChatgptImport', 'DsgvoDialog', 'FloorplanDialog', 'ImportDialog', 'LocalGraphPanel', 'SelectionAsk',
+    'TokensPanel'
 ];
 
 const placeholders = (message: string): string[] => [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort();

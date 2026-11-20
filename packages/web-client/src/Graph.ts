@@ -442,8 +442,8 @@ export class GraphView implements GraphRenderer {
         const built = buildServerGraph(layout, this.state.data, this.state.showCommunities);
         this.notes = new Map(this.state.data.nodes.map((n) => [n.id, n]));
         this.clusterTitles = new Map(built.clusters.map((c) => {
-            const name = c.label ?? `community ${c.id}`;
-            return [c.id, `${name} · ${c.size ?? 0} notes · click to zoom in`];
+            const name = c.label ?? tg('community', {id: c.id});
+            return [c.id, tg('clusterTitle', {name, count: c.size ?? 0})];
         }));
 
         graph.setData(built.nodes, built.edges);

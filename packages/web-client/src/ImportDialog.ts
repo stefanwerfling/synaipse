@@ -7,7 +7,42 @@ import {
     type ParsedExport
 } from './ChatgptImport.js';
 import {clear, el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
 import {openModal, type ModalHandle} from './Modal.js';
+
+const t = defineMessages('importDialog', {
+    title: 'Import ChatGPT export',
+    titleCount: 'Import ChatGPT export · {count} conversation|Import ChatGPT export · {count} conversations',
+    chooseZip: 'Choose a ChatGPT export ZIP',
+    dropHere: 'Drop your ChatGPT export ZIP here',
+    orClick: 'Or click to pick a file',
+    parsing: 'Parsing {name}…',
+    failed: 'Import failed',
+    pickAnother: 'Pick another file',
+    filterPlaceholder: 'Filter by title…',
+    filterLabel: 'Filter by title',
+    selectAll: 'Select all',
+    clear: 'Clear',
+    import: 'Import',
+    noMatch: 'No conversations match the filter.',
+    importOne: 'Import “{title}”',
+    messages: '{count} msg',
+    badgeUpdate: 'Update',
+    badgeNew: 'New',
+    pickPreview: 'Pick a conversation to preview.',
+    created: 'Created',
+    updated: 'Updated',
+    model: 'Model',
+    messagesLabel: 'Messages',
+    chatgptId: 'ChatGPT ID',
+    existingNote: 'Existing note',
+    firstMessage: 'First user message',
+    selectOne: 'Select at least one conversation',
+    payloadNull: '{id}: payload build returned null',
+    imported: '✓ Imported {count}',
+    importedSome: 'Imported {done} · {failed} failed',
+    importedSomeError: 'Imported {done} · {failed} failed — first error: {error}'
+});
 
 export interface ImportDialogCallbacks {
     onNotesChanged: () => void;
@@ -48,8 +83,8 @@ export class ImportDialog {
         }
 
         this.modal = openModal({
-            title: 'Import ChatGPT export',
-            closeLabel: 'Close',
+            title: t('title'),
+            closeLabel: tc('close'),
             size: 'xl',
             layout: 'sections',
             className: 'import-dialog',
@@ -80,7 +115,7 @@ export class ImportDialog {
     private renderDropzone(): void {
         clear(this.body);
 
-        this.modal?.setTitle('Import ChatGPT export');
+        this.modal?.setTitle(t('title'));
         this.modal?.setFooter([]);
 
         const fileInput = el('input', {
@@ -92,10 +127,10 @@ export class ImportDialog {
             }}
         }) as HTMLInputElement;
 
-        const dz = el('div', {class: 'import-dropzone', attrs: {role: 'button', tabindex: '0', 'aria-label': 'Choose a ChatGPT export ZIP'}},
+        const dz = el('div', {class: 'import-dropzone', attrs: {role: 'button', tabindex: '0', 'aria-label': t('chooseZip')}},
             el('div', {class: 'import-dropzone-icon', attrs: {'aria-hidden': 'true'}, text: '⬇'}),
-            el('p', {class: 'import-dropzone-text', text: 'Drop your ChatGPT export ZIP here'}),
-            el('p', {class: 'import-dropzone-hint', text: 'Or click to pick a file'}),
+            el('p', {class: 'import-dropzone-text', text: t('dropHere')}),
+            el('p', {class: 'import-dropzone-hint', text: t('orClick')}),
             fileInput
         );
 
@@ -122,7 +157,7 @@ export class ImportDialog {
     }
 
     private async loadFile(file: File): Promise<void> {
-        this.renderLoading(`Parsing ${file.name}…`);
+        this.renderLoading(t('parsing', {name: file.name}));
 
         try {
             this.parsed = await parseChatgptExport(file);
@@ -146,12 +181,12 @@ export class ImportDialog {
         clear(this.body);
 
         this.body.appendChild(el('div', {class: 'import-error', attrs: {role: 'alert'}},
-            el('h3', {text: 'Import failed'}),
+            el('h3', {text: t('failed')}),
             el('p', {text: message}),
             el('button', {
                 class: 'btn',
                 attrs: {type: 'button'},
-                text: 'Pick another file',
+                text: t('pickAnother'),
                 on: {click: () => this.renderDropzone()}
             })
         ));
@@ -160,11 +195,11 @@ export class ImportDialog {
     private renderList(): void {
         clear(this.body);
 
-        this.modal?.setTitle(`Import ChatGPT export · ${this.previews.length} conversations`);
+        this.modal?.setTitle(t('titleCount', {count: this.previews.length}));
 
         const filterInput = el('input', {
             class: 'import-filter',
-            attrs: {type: 'text', placeholder: 'Filter by title…', 'aria-label': 'Filter by title'},
+            attrs: {type: 'text', placeholder: t('filterPlaceholder'), 'aria-label': t('filterLabel')},
             on: {input: (e) => {
                 this.filter = (e.target as HTMLInputElement).value;
                 this.renderListBody(listHost, previewHost);
@@ -174,7 +209,7 @@ export class ImportDialog {
         const selectAll = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Select all',
+            text: t('selectAll'),
             on: {click: () => {
                 this.selected = new Set(this.filteredPreviews().map((p) => p.id));
                 this.renderListBody(listHost, previewHost);
@@ -184,7 +219,7 @@ export class ImportDialog {
         const selectNone = el('button', {
             class: 'btn',
             attrs: {type: 'button'},
-            text: 'Clear',
+            text: t('clear'),
             on: {click: () => {
                 this.selected.clear();
                 this.renderListBody(listHost, previewHost);
@@ -201,7 +236,7 @@ export class ImportDialog {
         const importBtn = el('button', {
             class: 'btn btn-primary',
             attrs: {type: 'button'},
-            text: 'Import',
+            text: t('import'),
             on: {click: () => void this.runImport(importBtn as HTMLButtonElement, statusLine)}
         }) as HTMLButtonElement;
 
@@ -212,7 +247,7 @@ export class ImportDialog {
             el('button', {
                 class: 'btn',
                 attrs: {type: 'button'},
-                text: 'Cancel',
+                text: tc('cancel'),
                 on: {click: () => this.close()}
             }),
             importBtn
@@ -242,7 +277,7 @@ export class ImportDialog {
         const items = this.filteredPreviews();
 
         if (items.length === 0) {
-            listHost.appendChild(el('div', {class: 'import-empty', text: 'No conversations match the filter.'}));
+            listHost.appendChild(el('div', {class: 'import-empty', text: t('noMatch')}));
         }
 
         for (const p of items) {
@@ -256,7 +291,7 @@ export class ImportDialog {
             },
                 el('input', {
                     class: 'import-row-check',
-                    attrs: {type: 'checkbox', 'aria-label': `Import “${p.title}”`, ...(isSelected ? {checked: 'checked'} : {})},
+                    attrs: {type: 'checkbox', 'aria-label': t('importOne', {title: p.title}), ...(isSelected ? {checked: 'checked'} : {})},
                     on: {change: (e) => {
                         const checked = (e.target as HTMLInputElement).checked;
                         if (checked) this.selected.add(p.id);
@@ -268,13 +303,13 @@ export class ImportDialog {
                     el('div', {class: 'import-row-title', text: p.title}),
                     el('div', {class: 'import-row-meta'},
                         el('span', {text: formatDate(p.updateTime)}),
-                        el('span', {text: `${p.messageCount} msg`}),
+                        el('span', {text: t('messages', {count: p.messageCount})}),
                         ...(p.model !== null ? [el('span', {class: 'import-row-model', text: p.model})] : [])
                     )
                 ),
                 el('span', {
                     class: isExisting ? 'import-row-badge update' : 'import-row-badge new',
-                    text: isExisting ? 'Update' : 'New'
+                    text: isExisting ? t('badgeUpdate') : t('badgeNew')
                 })
             );
 
@@ -303,7 +338,7 @@ export class ImportDialog {
         clear(host);
 
         if (this.activePreview === null) {
-            host.appendChild(el('div', {class: 'import-empty', text: 'Pick a conversation to preview.'}));
+            host.appendChild(el('div', {class: 'import-empty', text: t('pickPreview')}));
             return;
         }
 
@@ -315,18 +350,18 @@ export class ImportDialog {
         host.appendChild(el('h3', {class: 'import-preview-title', text: preview.title}));
 
         host.appendChild(el('dl', {class: 'import-preview-meta'},
-            el('dt', {text: 'Created'}), el('dd', {text: formatDate(preview.createTime)}),
-            el('dt', {text: 'Updated'}), el('dd', {text: formatDate(preview.updateTime)}),
-            el('dt', {text: 'Model'}), el('dd', {text: preview.model ?? '—'}),
-            el('dt', {text: 'Messages'}), el('dd', {text: String(preview.messageCount)}),
-            el('dt', {text: 'ChatGPT ID'}), el('dd', {text: preview.id}),
+            el('dt', {text: t('created')}), el('dd', {text: formatDate(preview.createTime)}),
+            el('dt', {text: t('updated')}), el('dd', {text: formatDate(preview.updateTime)}),
+            el('dt', {text: t('model')}), el('dd', {text: preview.model ?? '—'}),
+            el('dt', {text: t('messagesLabel')}), el('dd', {text: String(preview.messageCount)}),
+            el('dt', {text: t('chatgptId')}), el('dd', {text: preview.id}),
             ...(existingNote !== undefined
-                ? [el('dt', {text: 'Existing note'}), el('dd', {text: existingNote})]
+                ? [el('dt', {text: t('existingNote')}), el('dd', {text: existingNote})]
                 : [])
         ));
 
         if (preview.excerpt.length > 0) {
-            host.appendChild(el('div', {class: 'import-preview-excerpt-label', text: 'First user message'}));
+            host.appendChild(el('div', {class: 'import-preview-excerpt-label', text: t('firstMessage')}));
             host.appendChild(el('div', {class: 'import-preview-excerpt', text: preview.excerpt}));
         }
     }
@@ -334,7 +369,7 @@ export class ImportDialog {
     private async runImport(button: HTMLButtonElement, status: HTMLElement): Promise<void> {
         if (this.parsed === null) return;
         if (this.selected.size === 0) {
-            status.textContent = 'Select at least one conversation';
+            status.textContent = t('selectOne');
             return;
         }
 
@@ -354,7 +389,7 @@ export class ImportDialog {
                 const payload = await buildImportPayload(this.parsed, id);
                 if (payload === null) {
                     failed += 1;
-                    if (firstError === null) firstError = `${id}: payload build returned null`;
+                    if (firstError === null) firstError = t('payloadNull', {id});
                     continue;
                 }
                 await importApi.importConversation(payload);
@@ -366,12 +401,12 @@ export class ImportDialog {
         }
 
         if (failed === 0) {
-            status.textContent = `✓ Imported ${ids.length}`;
+            status.textContent = t('imported', {count: ids.length});
         } else {
-            const summary = `Imported ${ids.length - failed} · ${failed} failed`;
+            const counts = {done: ids.length - failed, failed};
             status.textContent = firstError === null
-                ? summary
-                : `${summary} — first error: ${firstError}`;
+                ? t('importedSome', counts)
+                : t('importedSomeError', {...counts, error: firstError});
         }
 
         this.cb.onNotesChanged();

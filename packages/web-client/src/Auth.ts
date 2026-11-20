@@ -5,6 +5,12 @@
  */
 
 import {apiUrl} from './ApiBase.js';
+import {defineMessages} from './I18n.js';
+
+const t = defineMessages('auth', {
+    loginFailed: 'Login failed ({status})'
+});
+
 export interface AccountDto {
     id: number;
     email: string;
@@ -52,7 +58,7 @@ export const login = async (email: string, password: string): Promise<LoginResul
 
     if (!res.ok) {
         const text = await res.text().catch(() => '');
-        let message = `Login failed (${res.status})`;
+        let message = t('loginFailed', {status: res.status});
         try {
             const parsed = JSON.parse(text) as {error?: string};
             if (typeof parsed.error === 'string') message = parsed.error;

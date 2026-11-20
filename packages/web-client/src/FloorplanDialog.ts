@@ -1,5 +1,15 @@
 import {el} from './Dom.js';
+import {defineMessages, tc} from './I18n.js';
 import {openModal} from './Modal.js';
+
+const t = defineMessages('floorplanDialog', {
+    loading: 'Loading mdfloor…',
+    loadFailed: 'Could not load mdfloor: {message}',
+    apply: 'Apply',
+    applyHint: 'Apply (Ctrl+Enter)',
+    editTitle: 'Edit floor plan',
+    insertTitle: 'Insert floor plan'
+});
 
 /**
  * Modal wrapper around mdfloor's `mountEditor` for inserting or editing
@@ -20,20 +30,19 @@ export interface FloorplanDialogOptions {
     onCancel?: () => void;
 }
 
-const DEFAULT_TEMPLATE = [
-    '@title Neuer Grundriss',
-    '@scale 55',
-    '@grid 0.5',
-    '',
-    'room Raum 0,0 4x3',
-    '  door N 1 1'
-].join('\n');
+// Note content inserted into the document (data, not UI text).
+const DEFAULT_TEMPLATE = `@title Neuer Grundriss
+@scale 55
+@grid 0.5
+
+room Raum 0,0 4x3
+  door N 1 1`;
 
 export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     const {initial, onConfirm} = opts;
 
     const stage = el('div', {class: 'floorplan-modal-stage'},
-        el('div', {class: 'floorplan-modal-loading', attrs: {role: 'status'}, text: 'mdfloor lädt …'})
+        el('div', {class: 'floorplan-modal-loading', attrs: {role: 'status'}, text: t('loading')})
     );
 
     // The confirm handler is captured under a mutable ref so the OK button
@@ -51,7 +60,7 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     const cancelBtn = el('button', {
         class: 'btn',
         attrs: {type: 'button'},
-        text: 'Abbrechen',
+        text: tc('cancel'),
         on: {click: () => {
             modal.close();
             opts.onCancel?.();
@@ -59,16 +68,16 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
     });
     const okBtn = el('button', {
         class: 'btn btn-primary',
-        attrs: {type: 'button', title: 'Übernehmen (Ctrl+Enter)', 'aria-keyshortcuts': 'Control+Enter'},
-        text: 'Übernehmen',
+        attrs: {type: 'button', title: t('applyHint'), 'aria-keyshortcuts': 'Control+Enter'},
+        text: t('apply'),
         on: {click: confirm}
     }) as HTMLButtonElement;
     okBtn.disabled = true;
 
     const modal = openModal({
-        title: initial.length > 0 ? 'Grundriss bearbeiten' : 'Grundriss einfügen',
+        title: initial.length > 0 ? t('editTitle') : t('insertTitle'),
         icon: '🏠',
-        closeLabel: 'Schließen',
+        closeLabel: tc('close'),
         size: 'full',
         className: 'floorplan-modal',
         body: stage,
@@ -86,7 +95,7 @@ export const openFloorplanDialog = (opts: FloorplanDialogOptions): void => {
             stage.replaceChildren(el('div', {
                 class: 'floorplan-modal-error',
                 attrs: {role: 'alert'},
-                text: `mdfloor konnte nicht geladen werden: ${e instanceof Error ? e.message : String(e)}`
+                text: t('loadFailed', {message: e instanceof Error ? e.message : String(e)})
             }));
             return;
         }

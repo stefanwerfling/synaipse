@@ -14,5 +14,7 @@ export const tg = defineMessages('graph', {
     zoomClick: 'zoom {zoom}× (click a community)',
     zoom: 'zoom {zoom}×',
     layoutMs: 'layout {ms}ms',
-    updating: 'updating…'
+    updating: 'updating…',
+    community: 'community {id}',
+    clusterTitle: '{name} · {count} note · click to zoom in|{name} · {count} notes · click to zoom in'
 });

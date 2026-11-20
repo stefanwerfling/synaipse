@@ -4,6 +4,22 @@ import {el} from './Dom.js';
 import {edgeKinds, loadJsNGraph, readGraphTheme, TYPED_LABEL, type JsNGraph} from './GraphStyle.js';
 import {PersistentValue} from './Persistence.js';
 import {onThemeChange} from './Theme.js';
+import {defineMessages, tc} from './I18n.js';
+
+const t = defineMessages('localGraphPanel', {
+    title: 'Local graph',
+    depth: 'Link depth',
+    direct: 'Direct links',
+    indirect: 'Links of links',
+    hop1: '1 hop',
+    hop2: '2 hops',
+    fitTitle: 'Fit to view',
+    fit: 'Fit',
+    unavailable: 'unavailable',
+    noLinks: 'no linked notes',
+    count: '{count} note|{count} notes',
+    countTop: '{count} notes (top {limit})'
+});
 
 interface LocalGraphPrefs {
     open: boolean;
@@ -49,16 +65,16 @@ export class LocalGraphPanel {
             on: {click: () => this.setOpen(!this.prefs.get().open)}
         },
             el('span', {class: 'local-graph-chevron', attrs: {'aria-hidden': 'true'}, text: '▾'}),
-            el('span', {text: 'Local graph'})
+            el('span', {text: t('title')})
         ) as HTMLButtonElement;
 
-        const depthGroup = el('div', {class: 'local-graph-depth', attrs: {role: 'group', 'aria-label': 'Link depth'}});
+        const depthGroup = el('div', {class: 'local-graph-depth', attrs: {role: 'group', 'aria-label': t('depth')}});
 
         for (const depth of [1, 2] as const) {
             const btn = el('button', {
                 class: 'local-graph-depth-btn',
-                attrs: {type: 'button', title: depth === 1 ? 'Direct links' : 'Links of links'},
-                text: depth === 1 ? '1 hop' : '2 hops',
+                attrs: {type: 'button', title: depth === 1 ? t('direct') : t('indirect')},
+                text: depth === 1 ? t('hop1') : t('hop2'),
                 on: {click: () => this.setDepth(depth)}
             }) as HTMLButtonElement;
             this.depthBtns.set(depth, btn);
@@ -67,8 +83,8 @@ export class LocalGraphPanel {
 
         const fitBtn = el('button', {
             class: 'local-graph-fit',
-            attrs: {type: 'button', title: 'Fit to view'},
-            text: 'Fit',
+            attrs: {type: 'button', title: t('fitTitle')},
+            text: t('fit'),
             on: {click: () => this.graph?.fit({animate: true, maxScale: 1.2})}
         });
 
@@ -156,14 +172,14 @@ export class LocalGraphPanel {
         if (key === this.loadedKey) return;
 
         const seq = ++this.loadSeq;
-        this.status.textContent = 'loading…';
+        this.status.textContent = tc('loading');
 
         let data: LocalGraphData;
         try {
             [data, this.lib] = await Promise.all([api.getLocalGraph(id, depth, NODE_LIMIT), loadJsNGraph()]);
         } catch (error) {
             if (seq !== this.loadSeq) return;
-            this.status.textContent = 'unavailable';
+            this.status.textContent = t('unavailable');
             this.status.title = error instanceof Error ? error.message : String(error);
             return;
         }
@@ -213,8 +229,8 @@ export class LocalGraphPanel {
         const others = data.nodes.length - 1;
 
         this.status.textContent = others === 0
-            ? 'no linked notes'
-            : `${others} note${others === 1 ? '' : 's'}${data.truncated ? ' (top ' + NODE_LIMIT + ')' : ''}`;
+            ? t('noLinks')
+            : data.truncated ? t('countTop', {count: others, limit: NODE_LIMIT}) : t('count', {count: others});
         this.status.title = '';
 
         const maxDegree = Math.max(1, ...data.nodes.map((n) => n.degree));
