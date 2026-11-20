@@ -1,6 +1,6 @@
-import type {CanvasDocument, CanvasNode} from '@synaipse/core';
+import type {CanvasNode} from '@synaipse/core';
 import {api} from './Api.js';
-import {clear, el} from './Dom.js';
+import {el} from './Dom.js';
 import {renderMarkdownInto} from './MarkdownPreview.js';
 import {resolveColor, SIDES} from './CanvasGeometry.js';
 import {defineMessages, tc} from './I18n.js';
@@ -17,16 +17,11 @@ const t = defineMessages('canvasCards', {
 
 /**
  * DOM for canvas cards and group frames (plan P7 / D2). Every element
- * carries `data-node-id`; the renderer's pointer handlers route on that
- * plus `data-role` (`text-body`, `resize`, `anchor`).
+ * carries `data-node-id`; the renderer places them on the jsNGraph
+ * RectBoard (plan P10 / S6), which recognises the resize grip and the side
+ * anchors by `data-rb` (`resize`, `anchor`). `data-role="text-body"` marks
+ * where the text editor mounts.
  */
-
-const placeBox = (node: CanvasNode): Record<string, string> => ({
-    left: `${node.x}px`,
-    top: `${node.y}px`,
-    width: `${node.width}px`,
-    height: `${node.height}px`
-});
 
 /**
  * OneNote-style tint: the element's background shifts toward the picked
@@ -40,33 +35,18 @@ const tint = (target: HTMLElement, color: string | undefined): void => {
     target.dataset.color = '1';
 };
 
-/** Rebuild all group frames into `host`; returns the id → element map. */
-export const renderGroups = (host: HTMLElement, doc: CanvasDocument, selected: ReadonlySet<string>): Map<string, HTMLElement> => {
-    clear(host);
-    const els = new Map<string, HTMLElement>();
-
-    for (const node of doc.nodes) {
-        if (node.type !== 'group') continue;
-
-        const rect = el('div', {
-            class: selected.has(node.id) ? 'canvas-group selected' : 'canvas-group',
-            style: placeBox(node)
-        });
-        rect.dataset.nodeId = node.id;
-        tint(rect, node.color);
-
-        if (node.label !== undefined && node.label.length > 0) {
-            rect.appendChild(el('div', {class: 'canvas-group-label', text: node.label}));
-        }
-
-        host.appendChild(rect);
-        els.set(node.id, rect);
+/** A group frame; its geometry is set by the board. */
+export const buildGroup = (node: CanvasNode): HTMLElement => {
+    const frame = el('div', {class: 'canvas-group'});
+    frame.dataset.nodeId = node.id;
+    tint(frame, node.color);
+    if (node.type === 'group' && node.label !== undefined && node.label.length > 0) {
+        frame.appendChild(el('div', {class: 'canvas-group-label', text: node.label}));
     }
-    return els;
+    return frame;
 };
 
 export interface CardOptions {
-    selected: ReadonlySet<string>;
     editable: boolean;
     onOpenLink: (url: string) => void;
 }
@@ -90,11 +70,11 @@ const populateFileCard = (card: HTMLElement, fileId: string): void => {
     });
 };
 
-const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
-    const card = el('div', {class: `canvas-card canvas-card-${node.type}`, style: placeBox(node)});
+/** A card (text, file or link); its geometry is set by the board. */
+export const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
+    const card = el('div', {class: `canvas-card canvas-card-${node.type}`});
     card.dataset.nodeId = node.id;
     tint(card, node.color);
-    if (opts.selected.has(node.id)) card.classList.add('selected');
 
     if (node.type === 'text') {
         const body = el('div', {class: 'canvas-card-body md-preview'});
@@ -118,7 +98,7 @@ const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
 
     if (opts.editable) {
         const handle = el('div', {class: 'canvas-card-resize', attrs: {title: t('resize')}});
-        handle.dataset.role = 'resize';
+        handle.dataset.rb = 'resize';
         card.appendChild(handle);
 
         // One anchor dot per card side, positioned via CSS. Group nodes
@@ -129,26 +109,13 @@ const buildCard = (node: CanvasNode, opts: CardOptions): HTMLElement => {
                 class: `canvas-card-anchor canvas-card-anchor-${side}`,
                 attrs: {title: t('dragEdge', {side: t(side)})}
             });
-            anchor.dataset.role = 'anchor';
+            anchor.dataset.rb = 'anchor';
             anchor.dataset.side = side;
             card.appendChild(anchor);
         }
     }
 
     return card;
-};
-
-/** Rebuild all non-group cards into `host`; returns the id → element map. */
-export const renderCards = (host: HTMLElement, doc: CanvasDocument, opts: CardOptions): Map<string, HTMLElement> => {
-    clear(host);
-    const els = new Map<string, HTMLElement>();
-    for (const node of doc.nodes) {
-        if (node.type === 'group') continue;
-        const card = buildCard(node, opts);
-        host.appendChild(card);
-        els.set(node.id, card);
-    }
-    return els;
 };
 
 /** The markdown body of a text card element, where the editor mounts. */

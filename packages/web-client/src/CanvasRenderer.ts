@@ -1,19 +1,18 @@
 import type {CanvasDocument, CanvasEdge, CanvasNode, CanvasSide, CanvasTextNode} from '@synaipse/core';
+import {RectBoard, RectHistory, type RectBoardChange, type RectEdgeSpec} from 'jsngraph';
 import {el} from './Dom.js';
 import {renderBottomBar} from './CanvasBottomBar.js';
-import {CanvasCamera} from './CanvasCamera.js';
-import {renderCards, renderGroups, textBodyOf} from './CanvasCards.js';
-import {edgeMidpoint, renderEdges} from './CanvasEdges.js';
+import {buildCard, buildGroup, textBodyOf} from './CanvasCards.js';
 import {openLabelEdit, openTextCardEditor} from './CanvasEditors.js';
 import {
-    computeBounds,
     DEFAULT_TEXT_CARD_H,
     DEFAULT_TEXT_CARD_W,
     genId,
+    GRID_STEP,
     MIN_CARD_H,
     MIN_CARD_W,
     nodesInsideGroup,
-    nodesOverlapping,
+    resolveColor,
     snap,
     withCardText,
     withEdgeArrow,
@@ -26,7 +25,6 @@ import {
     withRerouted,
     type ArrowStyle
 } from './CanvasGeometry.js';
-import {CanvasHistory} from './CanvasHistory.js';
 import {defineMessages} from './I18n.js';
 
 const t = defineMessages('canvasRenderer', {
@@ -48,82 +46,25 @@ export interface CanvasRendererOptions {
     editable?: boolean;
 }
 
-interface DragState {
-    id: string;
-    mode: 'move' | 'resize';
-    origX: number;
-    origY: number;
-    origW: number;
-    origH: number;
-    startClientX: number;
-    startClientY: number;
-    moved: boolean;
-    /**
-     * Other nodes moving in lockstep — the rest of a multi-selection and,
-     * for a group, everything inside it. Empty for single-drag and for
-     * resize (multi-resize is out of scope).
-     */
-    partners: Array<{id: string; origX: number; origY: number}>;
-}
-
-/**
- * "User is drawing a new edge from a source anchor." Nothing reaches the
- * doc until the pointer is released over another card.
- */
-interface EdgeDraftState {
-    fromNode: string;
-    fromSide: CanvasSide;
-    x: number;
-    y: number;
-}
-
-/** "User is dragging one endpoint of the selected edge" — same release semantics, but rewrites the endpoint. */
-interface EdgeHandleDragState {
-    edgeId: string;
-    endpoint: 'from' | 'to';
-    x: number;
-    y: number;
-}
-
-/**
- * Rubber band on empty stage. `group` (Shift) creates a group node from
- * the rect, `multi-select` (Ctrl/Cmd) selects every node it touches —
- * added to the selection with Ctrl/Cmd+Shift. The rect element lives in
- * the stage so it inherits pan/zoom.
- */
-interface BandSelectState {
-    mode: 'group' | 'multi-select';
-    startX: number;
-    startY: number;
-    x: number;
-    y: number;
-    additive: boolean;
-}
-
-/** Bands smaller than these are accidental clicks, not selections or groups. */
-const MIN_MULTI_BAND = 4;
+/** A Shift band smaller than this is an accidental click, not a group. */
 const MIN_GROUP_SIZE = 40;
 
 /**
- * Interactive canvas view (plan P7 / D2 split): owns the document, the
- * selection and the pointer/keyboard interaction. Rendering lives in
- * CanvasCards / CanvasEdges / CanvasBottomBar, pan/zoom in CanvasCamera,
- * undo/redo in CanvasHistory, pure geometry and document operations in
- * CanvasGeometry.
+ * Interactive canvas view (plan P7 / D2, P10 / S6). Camera, card drag and
+ * resize, side anchors, connector routing and drawing, reroute, rubber
+ * bands and hit-testing come from the jsNGraph RectBoard; this class owns
+ * the JSON Canvas document, turns the board's `commit` events into
+ * document changes, keeps the undo history and runs the editors and the
+ * bottom bar. Group frames carry their contents through `dragPartners`.
  */
 export class CanvasRenderer {
     public readonly element: HTMLElement;
-    private stage!: HTMLElement;
-    private edgesSvg!: SVGSVGElement;
-    private cardsHost!: HTMLElement;
-    private groupsHost!: HTMLElement;
-    private bottomBar!: HTMLElement;
-    private readonly camera = new CanvasCamera();
-    private readonly history: CanvasHistory;
+    private readonly board: RectBoard;
+    private readonly bottomBar: HTMLElement;
+    private readonly history: RectHistory<CanvasDocument>;
 
     private doc: CanvasDocument;
     private cardEls = new Map<string, HTMLElement>();
-    private groupEls = new Map<string, HTMLElement>();
     /**
      * Multi-node selection; single-select is size===1. Edges and nodes are
      * mutually exclusive selection targets (one delete focus, and the
@@ -134,17 +75,56 @@ export class CanvasRenderer {
     private editingId: string | null = null;
     /** Force-commits the open modal editor; destroy() uses it so a tab switch never leaves the portalled modal behind. */
     private editingTeardown: (() => void) | null = null;
-    private dragState: DragState | null = null;
-    private edgeDraft: EdgeDraftState | null = null;
-    private edgeHandleDrag: EdgeHandleDragState | null = null;
-    private bandSelect: BandSelectState | null = null;
-    private bandRectEl: HTMLElement | null = null;
 
     public constructor(doc: CanvasDocument, private readonly opts: CanvasRendererOptions) {
         this.doc = doc;
-        this.history = new CanvasHistory(doc);
+        this.history = new RectHistory(doc);
         this.element = el('div', {class: 'canvas-viewport', attrs: {tabindex: '0'}});
-        this.build();
+        this.board = new RectBoard(this.element, {
+            editable: this.editable,
+            grid: GRID_STEP,
+            minItemSize: {w: MIN_CARD_W, h: MIN_CARD_H},
+            minScale: 0.15,
+            maxScale: 4,
+            zoomStep: 1.15,
+            padding: 40,
+            curve: {factor: 0.4, min: 32, max: 160},
+            selectedClass: 'selected',
+            edgeLabels: 'pill',
+            dragPartners: (id) => this.groupContents(id)
+        });
+        this.board.stage.classList.add('canvas-stage');
+        this.bottomBar = el('div', {class: 'canvas-bottom-bar', attrs: {hidden: 'hidden'}});
+        this.element.appendChild(this.bottomBar);
+
+        this.board
+            .on('commit', (change) => this.onBoardCommit(change))
+            .on('select', (ids) => {
+                this.selectedIds = new Set(ids);
+                if (ids.length > 0) this.selectedEdgeId = null;
+                this.refreshBottomBar();
+            })
+            .on('edgeSelect', (id) => {
+                this.selectedEdgeId = id;
+                if (id !== null) this.selectedIds.clear();
+                this.refreshBottomBar();
+            })
+            .on('band', (rect, mods) => {
+                // Ctrl/Cmd bands select (the board does that); a Shift band draws a group.
+                if (mods.shift && !mods.ctrl && rect.w >= MIN_GROUP_SIZE && rect.h >= MIN_GROUP_SIZE) {
+                    this.addGroup(snap(rect.x), snap(rect.y), snap(rect.w), snap(rect.h));
+                }
+            })
+            .on('itemDblClick', (id) => this.onNodeDoubleClick(id))
+            .on('edgeDblClick', (id) => this.startEdgeLabelEdit(id))
+            .on('backgroundDblClick', (point) => {
+                const newId = this.addTextCard(point.x, point.y);
+                const body = textBodyOf(this.cardEls.get(newId));
+                if (body !== null) this.startTextEdit(newId, body);
+            });
+
+        document.addEventListener('keydown', this.onKeyDown);
+        this.renderAll();
     }
 
     private get editable(): boolean {
@@ -152,7 +132,7 @@ export class CanvasRenderer {
     }
 
     public mount(): void {
-        this.fitView();
+        this.board.fitAll(false);
     }
 
     public destroy(): void {
@@ -160,6 +140,7 @@ export class CanvasRenderer {
         // backdrop (under document.body) don't outlive the panel.
         this.stopEditing();
         document.removeEventListener('keydown', this.onKeyDown);
+        this.board.destroy();
     }
 
     /** Force-close the modal editor, committing pending text. Called by the panel on tab switch. */
@@ -172,57 +153,47 @@ export class CanvasRenderer {
         return this.doc;
     }
 
-    private build(): void {
-        this.groupsHost = el('div', {class: 'canvas-groups'});
-        this.cardsHost = el('div', {class: 'canvas-cards'});
-        this.edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        this.edgesSvg.classList.add('canvas-edges');
-        this.edgesSvg.setAttribute('overflow', 'visible');
-
-        this.stage = el('div', {class: 'canvas-stage'});
-        this.stage.appendChild(this.groupsHost);
-        this.stage.appendChild(this.edgesSvg);
-        this.stage.appendChild(this.cardsHost);
-
-        this.bottomBar = el('div', {class: 'canvas-bottom-bar', attrs: {hidden: 'hidden'}});
-
-        this.element.appendChild(this.stage);
-        this.element.appendChild(this.bottomBar);
-
-        this.element.addEventListener('wheel', this.onWheel, {passive: false});
-        this.element.addEventListener('pointerdown', this.onPointerDown);
-        this.element.addEventListener('pointermove', this.onPointerMove);
-        this.element.addEventListener('pointerup', this.onPointerUp);
-        this.element.addEventListener('pointercancel', this.onPointerUp);
-        this.element.addEventListener('dblclick', this.onDoubleClick);
-        document.addEventListener('keydown', this.onKeyDown);
-
-        this.renderAll();
-    }
-
     // ─── Rendering ───
 
+    /** Rebuild every frame, card and connector from the document; the board keeps the selection by id. */
     private renderAll(): void {
-        this.renderGroups();
-        this.cardEls = renderCards(this.cardsHost, this.doc, {
-            selected: this.selectedIds,
-            editable: this.editable,
-            onOpenLink: this.opts.onOpenLink
-        });
+        this.board.clear();
+        this.cardEls = new Map();
+        for (const node of this.doc.nodes) {
+            const geometry = {w: node.width, h: node.height};
+            if (node.type === 'group') {
+                this.board.add(buildGroup(node), node.x, node.y, node.id, {...geometry, layer: 'back', resizable: false, connectable: false});
+                continue;
+            }
+            const card = buildCard(node, {editable: this.editable, onOpenLink: this.opts.onOpenLink});
+            this.board.add(card, node.x, node.y, node.id, geometry);
+            this.cardEls.set(node.id, card);
+        }
         this.renderEdges();
+        this.board.select(this.selectedIds);
+        if (this.selectedEdgeId !== null) this.board.selectEdge(this.selectedEdgeId);
     }
 
-    private renderGroups(): void {
-        this.groupEls = renderGroups(this.groupsHost, this.doc, this.selectedIds);
-    }
-
+    /** Connectors from the document; edges touching a group are not drawn (Obsidian's rule). */
     private renderEdges(): void {
-        renderEdges(this.edgesSvg, this.doc, {
-            selectedEdgeId: this.selectedEdgeId,
-            editable: this.editable,
-            handleDrag: this.edgeHandleDrag,
-            draft: this.edgeDraft
-        });
+        const groups = new Set(this.doc.nodes.filter((n) => n.type === 'group').map((n) => n.id));
+        const specs: RectEdgeSpec[] = [];
+        for (const edge of this.doc.edges) {
+            if (groups.has(edge.fromNode) || groups.has(edge.toNode)) continue;
+            specs.push({
+                id: edge.id,
+                from: edge.fromNode,
+                to: edge.toNode,
+                ...(edge.fromSide !== undefined ? {fromSide: edge.fromSide} : {}),
+                ...(edge.toSide !== undefined ? {toSide: edge.toSide} : {}),
+                color: resolveColor(edge.color, 'var(--accent)'),
+                arrow: edge.toEnd !== 'none',
+                fromArrow: edge.fromEnd === 'arrow',
+                className: 'canvas-edge-group',
+                ...(edge.label !== undefined && edge.label.length > 0 ? {label: edge.label} : {})
+            });
+        }
+        this.board.setEdges(specs);
     }
 
     private refreshBottomBar(): void {
@@ -240,84 +211,59 @@ export class CanvasRenderer {
         });
     }
 
-    private fitView(): void {
-        this.camera.fit(computeBounds(this.doc.nodes), this.element.clientWidth || 1200, this.element.clientHeight || 800);
-        this.applyTransform();
+    // ─── Board → document ───
+
+    /** Everything geometrically inside a group moves with it (children and nested groups). */
+    private groupContents(id: string): string[] {
+        const node = this.nodeById(id);
+        return node?.type === 'group' ? nodesInsideGroup(node, this.doc.nodes).map((n) => n.id) : [];
     }
 
-    private applyTransform(): void {
-        this.stage.style.transform = this.camera.transform();
-    }
-
-    // ─── Selection ───
-
-    /** Single-node selection (or none for null), replacing any prior multi-selection. */
-    private selectNode(id: string | null): void {
-        this.clearEdgeSelectionOnly();
-        for (const prev of this.selectedIds) {
-            if (prev === id) continue;
-            this.nodeElement(prev)?.classList.remove('selected');
-        }
-        this.selectedIds.clear();
-        if (id !== null) {
-            this.selectedIds.add(id);
-            this.nodeElement(id)?.classList.add('selected');
-        }
-        this.refreshBottomBar();
-    }
-
-    /** Shift-click: add or remove one node. */
-    private toggleNodeSelection(id: string): void {
-        this.clearEdgeSelectionOnly();
-        if (this.selectedIds.has(id)) {
-            this.selectedIds.delete(id);
-            this.nodeElement(id)?.classList.remove('selected');
-        } else {
-            this.selectedIds.add(id);
-            this.nodeElement(id)?.classList.add('selected');
-        }
-        this.refreshBottomBar();
-    }
-
-    /** Rubber-band result: replace the selection, or add to it. */
-    private setMultiSelection(ids: string[], additive: boolean): void {
-        this.clearEdgeSelectionOnly();
-        if (!additive) {
-            for (const prev of this.selectedIds) {
-                this.nodeElement(prev)?.classList.remove('selected');
+    private onBoardCommit(change: RectBoardChange): void {
+        switch (change.type) {
+            case 'move':
+                for (const moved of change.items) {
+                    const node = this.nodeById(moved.id);
+                    if (node === undefined) continue;
+                    node.x = moved.to.x;
+                    node.y = moved.to.y;
+                }
+                this.commit();
+                return;
+            case 'resize': {
+                const node = this.nodeById(change.id);
+                if (node === undefined) return;
+                node.width = change.to.w;
+                node.height = change.to.h;
+                this.commit();
+                return;
             }
-            this.selectedIds.clear();
-        }
-        for (const id of ids) {
-            if (this.selectedIds.has(id)) continue;
-            this.selectedIds.add(id);
-            this.nodeElement(id)?.classList.add('selected');
-        }
-        this.refreshBottomBar();
-    }
-
-    private clearEdgeSelectionOnly(): void {
-        if (this.selectedEdgeId === null) return;
-        this.selectedEdgeId = null;
-        this.renderEdges();
-    }
-
-    private selectEdge(id: string | null): void {
-        if (this.selectedIds.size > 0) {
-            for (const prev of this.selectedIds) {
-                this.nodeElement(prev)?.classList.remove('selected');
+            case 'connect': {
+                const edge = this.addEdge(change.from, change.fromSide, change.to);
+                this.renderEdges();
+                this.board.selectEdge(edge.id, true);
+                this.commit();
+                return;
             }
-            this.selectedIds.clear();
+            case 'reroute':
+                this.doc = withRerouted(this.doc, change.edgeId, change.endpoint, change.to);
+                this.renderEdges();
+                this.commit();
+                return;
         }
-        if (this.selectedEdgeId === id) return;
-        this.selectedEdgeId = id;
-        this.renderEdges();
-        this.refreshBottomBar();
     }
 
-    /** DOM lookup covering both cards and groups. */
-    private nodeElement(id: string): HTMLElement | undefined {
-        return this.cardEls.get(id) ?? this.groupEls.get(id);
+    private onNodeDoubleClick(id: string): void {
+        const node = this.nodeById(id);
+        if (node === undefined) return;
+        if (node.type === 'file') {
+            this.opts.onOpenNote(node.file);
+        } else if (node.type === 'text') {
+            const body = textBodyOf(this.cardEls.get(id));
+            if (body !== null) this.startTextEdit(id, body);
+        } else if (node.type === 'group') {
+            this.startGroupLabelEdit(id);
+        }
     }
 
     private nodeById(id: string): CanvasNode | undefined {
@@ -357,9 +303,10 @@ export class CanvasRenderer {
      * that no longer exists in the restored doc.
      */
     private restore(doc: CanvasDocument): void {
-        this.doc = doc;
+        this.doc = structuredClone(doc);
         this.selectedIds.clear();
         this.selectedEdgeId = null;
+        this.board.selectEdge(null);
         this.renderAll();
         this.refreshBottomBar();
         this.opts.onChange?.(this.doc);
@@ -375,6 +322,7 @@ export class CanvasRenderer {
         this.doc = withoutEdge(this.doc, id);
         if (this.selectedEdgeId === id) this.selectedEdgeId = null;
         this.renderEdges();
+        this.refreshBottomBar();
         this.commit();
     }
 
@@ -403,60 +351,22 @@ export class CanvasRenderer {
             text
         };
         this.doc = {nodes: [...this.doc.nodes, node], edges: this.doc.edges};
+        this.selectedIds = new Set([id]);
+        this.selectedEdgeId = null;
         this.renderAll();
-        this.selectNode(id);
+        this.refreshBottomBar();
         this.commit();
         return id;
-    }
-
-    // ─── Geometry helpers bound to the viewport ───
-
-    /** Page coordinates → stage/world coordinates. */
-    private toWorld(clientX: number, clientY: number): {x: number; y: number} {
-        const rect = this.element.getBoundingClientRect();
-        return this.camera.toWorld(clientX - rect.left, clientY - rect.top);
-    }
-
-    /**
-     * The card under the pointer, unless it is `skipNodeId` (rejects
-     * self-loops for edge create and reroute). Groups never count —
-     * edges only connect real cards.
-     */
-    private resolveTargetNodeId(clientX: number, clientY: number, skipNodeId: string): string | null {
-        const hit = document.elementFromPoint(clientX, clientY);
-        if (hit === null) return null;
-        const cardEl = (hit as HTMLElement).closest('.canvas-card') as HTMLElement | null;
-        if (cardEl === null) return null;
-        const id = cardEl.dataset.nodeId;
-        if (id === undefined || id === skipNodeId) return null;
-        const node = this.nodeById(id);
-        if (node === undefined || node.type === 'group') return null;
-        return id;
-    }
-
-    private updateBandRect(): void {
-        if (this.bandSelect === null || this.bandRectEl === null) return;
-        const {startX, startY, x, y} = this.bandSelect;
-        this.bandRectEl.style.left = `${Math.min(startX, x)}px`;
-        this.bandRectEl.style.top = `${Math.min(startY, y)}px`;
-        this.bandRectEl.style.width = `${Math.abs(x - startX)}px`;
-        this.bandRectEl.style.height = `${Math.abs(y - startY)}px`;
-    }
-
-    private releasePointer(event: PointerEvent): void {
-        if (this.element.hasPointerCapture(event.pointerId)) {
-            this.element.releasePointerCapture(event.pointerId);
-        }
     }
 
     // ─── Editing ───
 
     private startTextEdit(id: string, body: HTMLElement): void {
         if (this.editingId === id) return;
-        this.editingId = id;
 
         const node = this.nodeById(id);
         if (node === undefined || node.type !== 'text') return;
+        this.editingId = id;
 
         this.editingTeardown = openTextCardEditor(this.cardEls.get(id), body, node.text, (nextText) => {
             this.editingId = null;
@@ -473,7 +383,7 @@ export class CanvasRenderer {
         const group = this.nodeById(groupId);
         if (group === undefined || group.type !== 'group') return;
 
-        openLabelEdit(this.stage, {
+        openLabelEdit(this.board.stage, {
             className: 'canvas-group-label-edit',
             value: group.label ?? '',
             placeholder: t('groupLabel'),
@@ -483,7 +393,7 @@ export class CanvasRenderer {
                 const now = this.nodeById(groupId);
                 if (now === undefined || now.type !== 'group' || (now.label ?? '') === next) return;
                 this.doc = withGroupLabel(this.doc, groupId, next);
-                this.renderGroups();
+                this.renderAll();
                 this.commit();
             }
         });
@@ -492,10 +402,10 @@ export class CanvasRenderer {
     /** Label input at the edge's midpoint. */
     private startEdgeLabelEdit(edgeId: string): void {
         const edge = this.doc.edges.find((e) => e.id === edgeId);
-        const mid = edgeMidpoint(this.doc, edgeId);
+        const mid = this.board.edgeMidpoint(edgeId);
         if (edge === undefined || mid === null) return;
 
-        openLabelEdit(this.stage, {
+        openLabelEdit(this.board.stage, {
             className: 'canvas-edge-label-edit',
             value: edge.label ?? '',
             placeholder: t('edgeLabel'),
@@ -550,388 +460,5 @@ export class CanvasRenderer {
             event.preventDefault();
             this.removeNodes([...this.selectedIds]);
         }
-    };
-
-    // ─── Pointer ───
-
-    private onWheel = (event: WheelEvent): void => {
-        event.preventDefault();
-        const rect = this.element.getBoundingClientRect();
-        this.camera.zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY < 0);
-        this.applyTransform();
-    };
-
-    /** Start a move/resize drag on `node` with the given partners. */
-    private beginDrag(event: PointerEvent, node: CanvasNode, mode: DragState['mode'], partners: DragState['partners']): void {
-        this.dragState = {
-            id: node.id,
-            mode,
-            origX: node.x,
-            origY: node.y,
-            origW: node.width,
-            origH: node.height,
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            moved: false,
-            partners
-        };
-        // Alongside `user-select: none` on the card: suppress the native
-        // text selection that would otherwise start under the pointer and
-        // eventually cancel the drag.
-        event.preventDefault();
-        this.element.setPointerCapture(event.pointerId);
-    }
-
-    /** Current positions of the other selected nodes, for a lockstep move. */
-    private selectionPartners(exceptId: string): DragState['partners'] {
-        const partners: DragState['partners'] = [];
-        if (this.selectedIds.size <= 1) return partners;
-        for (const otherId of this.selectedIds) {
-            if (otherId === exceptId) continue;
-            const other = this.nodeById(otherId);
-            if (other !== undefined) partners.push({id: otherId, origX: other.x, origY: other.y});
-        }
-        return partners;
-    }
-
-    /**
-     * Shift toggles the node in the selection (no drag, returns false);
-     * otherwise a click on an unselected node selects only it, and a
-     * click on a selected node keeps the selection so the drag moves all.
-     */
-    private pickForDrag(event: PointerEvent, id: string): boolean {
-        if (event.shiftKey) {
-            this.toggleNodeSelection(id);
-            event.preventDefault();
-            return false;
-        }
-        if (!this.selectedIds.has(id)) this.selectNode(id);
-        return true;
-    }
-
-    private onPointerDown = (event: PointerEvent): void => {
-        if (event.button !== 0) return;
-
-        const target = event.target as HTMLElement | SVGElement;
-
-        // Inputs and links inside cards handle their own clicks.
-        if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.tagName === 'A') return;
-
-        // Bottom-bar clicks belong to its actions — the empty-background
-        // branch below would otherwise clear the selection and detach the
-        // button before its click handler runs.
-        if (target instanceof HTMLElement && target.closest('.canvas-bottom-bar') !== null) return;
-
-        // Edge-first: an anchor dot beats the card behind it, an edge
-        // handle beats the edge behind it, an edge beats empty background.
-        if (this.editable && target instanceof HTMLElement && target.dataset.role === 'anchor') {
-            const fromNode = (target.closest('.canvas-card') as HTMLElement | null)?.dataset.nodeId;
-            const side = target.dataset.side as CanvasSide | undefined;
-            if (fromNode !== undefined && side !== undefined) {
-                this.edgeDraft = {fromNode, fromSide: side, ...this.toWorld(event.clientX, event.clientY)};
-                this.element.classList.add('edge-drafting');
-                this.element.setPointerCapture(event.pointerId);
-                this.renderEdges();
-                return;
-            }
-        }
-
-        if (this.editable && target instanceof SVGElement && target.classList.contains('canvas-edge-handle')) {
-            const edgeId = target.dataset.edgeId;
-            const endpoint = target.dataset.endpoint;
-            if (edgeId !== undefined && (endpoint === 'from' || endpoint === 'to')) {
-                this.edgeHandleDrag = {edgeId, endpoint, ...this.toWorld(event.clientX, event.clientY)};
-                this.element.classList.add('edge-drafting');
-                this.element.setPointerCapture(event.pointerId);
-                this.renderEdges();
-                return;
-            }
-        }
-
-        if (target instanceof SVGElement) {
-            const edgeId = (target.closest('.canvas-edge-group') as SVGGElement | null)?.dataset.edgeId;
-            if (edgeId !== undefined) {
-                this.selectEdge(edgeId);
-                return;
-            }
-        }
-
-        const targetEl = target instanceof HTMLElement ? target : null;
-
-        const cardEl = targetEl?.closest('.canvas-card') as HTMLElement | null ?? null;
-        if (cardEl !== null && this.editable) {
-            const id = cardEl.dataset.nodeId;
-            const node = id === undefined ? undefined : this.nodeById(id);
-            if (id === undefined || node === undefined) return;
-            if (!this.pickForDrag(event, id)) return;
-
-            // Never drag while the text editor is open on this card.
-            if (this.editingId === id) return;
-
-            // Resize is single-card only.
-            const isResize = targetEl?.dataset.role === 'resize';
-            this.beginDrag(event, node, isResize ? 'resize' : 'move', isResize ? [] : this.selectionPartners(id));
-            return;
-        }
-
-        // Group frame: a container move that carries every node
-        // geometrically inside it (children + nested groups), merged with
-        // the rest of a multi-selection.
-        const groupEl = targetEl?.closest('.canvas-group') as HTMLElement | null ?? null;
-        if (groupEl !== null && this.editable) {
-            const id = groupEl.dataset.nodeId;
-            const node = id === undefined ? undefined : this.nodeById(id);
-            if (id === undefined || node === undefined || node.type !== 'group') return;
-            if (!this.pickForDrag(event, id)) return;
-
-            const partners = new Map(this.selectionPartners(id).map((p) => [p.id, p]));
-            for (const contained of nodesInsideGroup(node, this.doc.nodes)) {
-                if (!partners.has(contained.id)) {
-                    partners.set(contained.id, {id: contained.id, origX: contained.x, origY: contained.y});
-                }
-            }
-            this.beginDrag(event, node, 'move', [...partners.values()]);
-            return;
-        }
-
-        // Empty background: Shift-drag → group band, Ctrl/Cmd-drag →
-        // multi-select band, no modifier → pan. A plain click clears the
-        // selection first.
-        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
-            this.selectNode(null);
-            this.selectEdge(null);
-        }
-
-        if (this.editable && (event.shiftKey || event.ctrlKey || event.metaKey)) {
-            const isMulti = event.ctrlKey || event.metaKey;
-            const {x, y} = this.toWorld(event.clientX, event.clientY);
-            this.bandSelect = {
-                mode: isMulti ? 'multi-select' : 'group',
-                startX: x,
-                startY: y,
-                x,
-                y,
-                additive: isMulti && event.shiftKey
-            };
-            this.bandRectEl = el('div', {class: isMulti ? 'canvas-band-rect canvas-band-rect-multi' : 'canvas-band-rect'});
-            this.stage.appendChild(this.bandRectEl);
-            this.updateBandRect();
-            this.element.setPointerCapture(event.pointerId);
-            return;
-        }
-
-        this.camera.startPan(event.clientX, event.clientY);
-        this.element.classList.add('panning');
-        this.element.setPointerCapture(event.pointerId);
-    };
-
-    private onPointerMove = (event: PointerEvent): void => {
-        const live = this.bandSelect ?? this.edgeDraft ?? this.edgeHandleDrag;
-        if (live !== null) {
-            const {x, y} = this.toWorld(event.clientX, event.clientY);
-            live.x = x;
-            live.y = y;
-            if (live === this.bandSelect) this.updateBandRect();
-            else this.renderEdges();
-            return;
-        }
-
-        if (this.dragState !== null) {
-            this.dragTo(this.dragState, event);
-            return;
-        }
-
-        if (this.camera.panning) {
-            this.camera.panTo(event.clientX, event.clientY);
-            this.applyTransform();
-        }
-    };
-
-    /**
-     * Live move/resize. Nodes are mutated in place (committed on pointer
-     * up); Alt held → pixel-precise, otherwise snapped to the grid — read
-     * on every move so it can be toggled mid-drag.
-     */
-    private dragTo(drag: DragState, event: PointerEvent): void {
-        const dx = (event.clientX - drag.startClientX) / this.camera.scale;
-        const dy = (event.clientY - drag.startClientY) / this.camera.scale;
-        if (!drag.moved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) drag.moved = true;
-
-        const node = this.nodeById(drag.id);
-        // Cards and group frames live in different maps — nodeElement covers both.
-        const primaryEl = this.nodeElement(drag.id);
-        if (node === undefined || primaryEl === undefined) return;
-
-        const align = (v: number): number => event.altKey ? Math.round(v) : snap(v);
-
-        if (drag.mode === 'move') {
-            node.x = align(drag.origX + dx);
-            node.y = align(drag.origY + dy);
-            primaryEl.style.left = `${node.x}px`;
-            primaryEl.style.top = `${node.y}px`;
-
-            // Same delta for every partner; each snaps on its own grid slot
-            // so an already-aligned group stays aligned.
-            for (const partner of drag.partners) {
-                const other = this.nodeById(partner.id);
-                if (other === undefined) continue;
-                other.x = align(partner.origX + dx);
-                other.y = align(partner.origY + dy);
-                const partnerEl = this.nodeElement(partner.id);
-                if (partnerEl !== undefined) {
-                    partnerEl.style.left = `${other.x}px`;
-                    partnerEl.style.top = `${other.y}px`;
-                }
-            }
-        } else {
-            node.width = Math.max(MIN_CARD_W, align(drag.origW + dx));
-            node.height = Math.max(MIN_CARD_H, align(drag.origH + dy));
-            primaryEl.style.width = `${node.width}px`;
-            primaryEl.style.height = `${node.height}px`;
-        }
-
-        this.renderEdges();
-    }
-
-    private onPointerUp = (event: PointerEvent): void => {
-        if (this.bandSelect !== null) {
-            const band = this.bandSelect;
-            this.bandSelect = null;
-            this.bandRectEl?.remove();
-            this.bandRectEl = null;
-            this.releasePointer(event);
-            this.finishBand(band);
-            return;
-        }
-
-        if (this.edgeDraft !== null) {
-            const draft = this.edgeDraft;
-            this.edgeDraft = null;
-            this.element.classList.remove('edge-drafting');
-            this.releasePointer(event);
-
-            const targetNodeId = this.resolveTargetNodeId(event.clientX, event.clientY, draft.fromNode);
-            if (targetNodeId === null) {
-                this.renderEdges();
-                return;
-            }
-            const edge = this.addEdge(draft.fromNode, draft.fromSide, targetNodeId);
-            this.renderEdges();
-            this.selectEdge(edge.id);
-            this.commit();
-            return;
-        }
-
-        if (this.edgeHandleDrag !== null) {
-            const drag = this.edgeHandleDrag;
-            this.edgeHandleDrag = null;
-            this.element.classList.remove('edge-drafting');
-            this.releasePointer(event);
-
-            const edge = this.doc.edges.find((e) => e.id === drag.edgeId);
-            if (edge !== undefined) {
-                const opposite = drag.endpoint === 'from' ? edge.toNode : edge.fromNode;
-                const targetNodeId = this.resolveTargetNodeId(event.clientX, event.clientY, opposite);
-                if (targetNodeId !== null) {
-                    this.doc = withRerouted(this.doc, drag.edgeId, drag.endpoint, targetNodeId);
-                    this.commit();
-                }
-            }
-            this.renderEdges();
-            return;
-        }
-
-        if (this.dragState !== null) {
-            const wasMoved = this.dragState.moved;
-            this.dragState = null;
-            this.releasePointer(event);
-            if (wasMoved) this.commit();
-            return;
-        }
-
-        if (this.camera.panning) {
-            this.camera.endPan();
-            this.element.classList.remove('panning');
-            this.releasePointer(event);
-        }
-    };
-
-    private finishBand(band: BandSelectState): void {
-        const minX = Math.min(band.startX, band.x);
-        const minY = Math.min(band.startY, band.y);
-        const maxX = Math.max(band.startX, band.x);
-        const maxY = Math.max(band.startY, band.y);
-        const width = maxX - minX;
-        const height = maxY - minY;
-
-        if (band.mode === 'multi-select') {
-            // Overlap, not full containment: a partial sweep captures the
-            // nodes the user visibly touched.
-            if (width >= MIN_MULTI_BAND || height >= MIN_MULTI_BAND) {
-                this.setMultiSelection(nodesOverlapping(this.doc.nodes, minX, minY, maxX, maxY), band.additive);
-            }
-            return;
-        }
-
-        // Group bounds snap to the grid so a group of snapped cards has
-        // coherent geometry (no Alt bypass — bands are low-precision anyway).
-        if (width >= MIN_GROUP_SIZE && height >= MIN_GROUP_SIZE) {
-            this.addGroup(snap(minX), snap(minY), snap(width), snap(height));
-        }
-    }
-
-    private onDoubleClick = (event: MouseEvent): void => {
-        if (!this.editable) return;
-
-        // pointerdown on a card or group captures the pointer on the
-        // viewport, so the browser retargets the following dblclick to the
-        // viewport itself. Hit-test the position instead of trusting
-        // event.target, or every card/group double-click would land on
-        // "empty stage" and spawn a new card.
-        const hit = document.elementFromPoint(event.clientX, event.clientY);
-        const target = (hit !== null && this.element.contains(hit) ? hit : event.target) as HTMLElement | SVGElement;
-
-        // Edge → inline label editor at the midpoint.
-        if (target instanceof SVGElement) {
-            const edgeId = (target.closest('.canvas-edge-group') as SVGGElement | null)?.dataset.edgeId;
-            if (edgeId !== undefined) {
-                this.startEdgeLabelEdit(edgeId);
-                return;
-            }
-        }
-
-        const targetEl = target instanceof HTMLElement ? target : null;
-
-        // File card → open the note.
-        const fileCard = targetEl?.closest('.canvas-card-file') as HTMLElement | null ?? null;
-        if (fileCard !== null) {
-            const id = fileCard.dataset.nodeId;
-            const node = id === undefined ? undefined : this.nodeById(id);
-            if (node !== undefined && node.type === 'file') this.opts.onOpenNote(node.file);
-            return;
-        }
-
-        // Text card → edit.
-        const textCard = targetEl?.closest('.canvas-card-text') as HTMLElement | null ?? null;
-        if (textCard !== null) {
-            const id = textCard.dataset.nodeId;
-            const body = textBodyOf(textCard);
-            if (id !== undefined && body !== null) this.startTextEdit(id, body);
-            return;
-        }
-
-        // Group → edit its label.
-        const groupEl = targetEl?.closest('.canvas-group') as HTMLElement | null ?? null;
-        if (groupEl !== null) {
-            const id = groupEl.dataset.nodeId;
-            if (id !== undefined) this.startGroupLabelEdit(id);
-            return;
-        }
-
-        // Empty stage → new text card at the cursor, straight into the editor.
-        const {x, y} = this.toWorld(event.clientX, event.clientY);
-        const newId = this.addTextCard(x, y);
-        const body = textBodyOf(this.cardEls.get(newId));
-        if (body !== null) this.startTextEdit(newId, body);
     };
 }

@@ -6532,7 +6532,7 @@ body.synaipse-sidebar-resizing {
     touch-action: none;
 }
 
-.synaipse-root .canvas-viewport.panning {
+.synaipse-root .canvas-viewport.rb-panning {
     cursor: grabbing;
 }
 
@@ -6546,38 +6546,18 @@ body.synaipse-sidebar-resizing {
     will-change: transform;
 }
 
-.synaipse-root .canvas-groups,
-.synaipse-root .canvas-cards,
-.synaipse-root .canvas-edges {
-    position: absolute;
-    top: 0;
-    left: 0;
-    pointer-events: none;
-}
-
-.synaipse-root .canvas-groups > *,
-.synaipse-root .canvas-cards > * {
-    pointer-events: auto;
-}
-
-.synaipse-root .canvas-groups {
+/* Board layers (jsNGraph RectBoard, P10 S6): group frames in the back
+   layer, the connector SVG above them, cards in the front layer. The SVG
+   root stays pointer-events:none (set by the board) so empty group
+   interiors stay grabbable; hit strokes and end handles opt back in. */
+.synaipse-root .canvas-stage .rb-layer-back {
     /* Own stacking context: a selected group's z-index lifts it above
-       sibling groups only, never above the edge and card layers painted
-       after it — otherwise its child cards became unclickable. */
+       sibling groups only, never above the connectors and cards. */
     isolation: isolate;
 }
 
-.synaipse-root .canvas-edges {
-    /* SVG ROOT MUST STAY pointer-events:none. It is sized to cover the
-       whole diagram and painted on top of the group layer, so if the root
-       were `auto` its bounding box would swallow every pointerdown over
-       empty space — including empty group interiors — before it could
-       reach the group frame beneath (that exact bug turned group-drag
-       into a canvas-pan). Interactive children opt back in individually:
-       edge hitboxes via pointer-events="stroke", endpoint handles via
-       `.canvas-edge-handle { pointer-events: all }`. Visible line / arrow
-       / label / draft line stay none so they don't hijack the hitbox. */
-    overflow: visible;
+.synaipse-root .rb-edge-label {
+    font-family: inherit;
 }
 
 .synaipse-root .canvas-group {
@@ -6879,7 +6859,7 @@ body.synaipse-sidebar-resizing {
 }
 
 .synaipse-root .canvas-card:hover .canvas-card-anchor,
-.synaipse-root .canvas-viewport.edge-drafting .canvas-card-anchor {
+.synaipse-root .canvas-viewport.rb-drafting .canvas-card-anchor {
     opacity: 1;
 }
 
@@ -6906,28 +6886,28 @@ body.synaipse-sidebar-resizing {
 
 /* SVG edge visuals */
 
-.synaipse-root .canvas-edge-group .canvas-edge-hitbox {
+.synaipse-root .rb-edge-hit {
     cursor: pointer;
 }
 
-.synaipse-root .canvas-edge-group.selected .canvas-edge {
+.synaipse-root .rb-edge-selected .rb-edge-line {
     filter: drop-shadow(0 0 4px var(--accent));
 }
 
 /* Rounded chip behind an edge label so the text stays legible where it
    crosses the routed line, instead of raw glyphs floating on the stroke. */
-.synaipse-root .canvas-edge-label-bg {
+.synaipse-root .rb-edge-label-bg {
     fill: var(--bg-elev);
     stroke: var(--border-soft);
     stroke-width: 1;
 }
 
-.synaipse-root .canvas-edge-label {
+.synaipse-root .rb-edge-label {
     letter-spacing: 0.01em;
     paint-order: stroke;
 }
 
-.synaipse-root .canvas-edge-handle {
+.synaipse-root .rb-edge-handle {
     fill: var(--accent);
     stroke: var(--bg-0);
     stroke-width: 2;
@@ -6937,11 +6917,11 @@ body.synaipse-sidebar-resizing {
     pointer-events: all;
 }
 
-.synaipse-root .canvas-edge-handle:active {
+.synaipse-root .rb-edge-handle:active {
     cursor: grabbing;
 }
 
-.synaipse-root .canvas-edge-draft {
+.synaipse-root .rb-edge-draft {
     stroke: var(--accent);
     stroke-width: 2;
     stroke-dasharray: 6 4;
@@ -6982,7 +6962,7 @@ body.synaipse-sidebar-resizing {
 
 /* Rubber-band rect for Shift+drag group creation. Lives inside the stage
    so pan/zoom apply automatically. */
-.synaipse-root .canvas-band-rect {
+.synaipse-root .rb-band {
     position: absolute;
     border: 1.5px dashed var(--accent);
     background: rgba(90, 169, 212, 0.08);
@@ -6993,7 +6973,7 @@ body.synaipse-sidebar-resizing {
 /* Ctrl/Cmd-drag rubber-band for multi-select — visually distinct from the
    group-create band above (solid + warmer hue) so the user can tell the
    two rubber-band modes apart at a glance. */
-.synaipse-root .canvas-band-rect-multi {
+.synaipse-root .rb-band-select {
     border-style: solid;
     border-color: #e0a458;
     background: rgba(224, 164, 88, 0.10);
@@ -7108,14 +7088,14 @@ body.synaipse-sidebar-resizing {
 }
 
 /* Group selected outline — mirrors .canvas-card.selected. The z-index
-   only orders it among groups (.canvas-groups isolates). */
+   only orders it among groups (.rb-layer-back isolates). */
 .synaipse-root .canvas-group.selected {
     border-style: solid;
     box-shadow: 0 0 0 2px var(--accent);
     z-index: 5;
 }
 
-.synaipse-root .canvas-viewport.edge-drafting {
+.synaipse-root .canvas-viewport.rb-drafting {
     cursor: crosshair;
 }
 
