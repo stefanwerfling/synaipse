@@ -130,6 +130,35 @@ describe('startSynaipseEmbed', () => {
         expect((await fetch(`${base}/api/notes`)).status).toBe(500);
     });
 
+    it('consent requests ride on the event stream, open ones replayed on connect', async () => {
+        handle = startSynaipseEmbed({env: explicitEnv()});
+        const base = await listen(handle);
+        const {service} = await handle.ready;
+        const consent = service.getConsentStore();
+        void consent.request('Before.md', 'tok-a', 5000);
+
+        let body = '';
+        const stream = request(`${base}/api/events/stream`, (res) => res.on('data', (c: Buffer) => { body += c.toString(); }));
+        stream.on('error', () => undefined);
+        stream.end();
+        const waitFor = async (needle: string): Promise<void> => {
+            for (let i = 0; i < 100 && !body.includes(needle); i++) await new Promise((r) => setTimeout(r, 20));
+            expect(body).toContain(needle);
+        };
+
+        await waitFor('"noteId":"Before.md"');
+        expect(body).toMatch(/event: consent-new\ndata: \{[^\n]*"noteId":"Before\.md"/);
+
+        void consent.request('Live.md', 'tok-b', 5000);
+        await waitFor('"noteId":"Live.md"');
+        const live = consent.pending().find((r) => r.noteId === 'Live.md');
+        const res = await fetch(`${base}/api/consent/${encodeURIComponent(live!.id)}/approve`, {method: 'POST'});
+        expect(res.status).toBe(200);
+        await waitFor('event: consent-resolved');
+        expect(body).toMatch(/event: consent-resolved\ndata: \{[^\n]*"noteId":"Live\.md"[^\n]*"decision":"granted"/);
+        stream.destroy();
+    });
+
     for (const [verb, decision] of [['approve', 'granted'], ['deny', 'denied']] as const) {
         it(`POST /api/consent/:id/${verb} stores "${decision}" (frontmatter and the waiting MCP read)`, async () => {
             await writeFile(path.join(dir, 'Secret.md'), '---\ntitle: Secret\nmcp_consent: pending\n---\nprivate\n', 'utf8');

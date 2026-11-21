@@ -83,7 +83,8 @@ const cycle = async (page: Page): Promise<void> => {
     await page.evaluate(() => (window as unknown as Host).__mount());
     await expect(host.locator('.note-list-item')).toHaveCount(5);
     await expect(host).toHaveAttribute('data-theme', 'light');
-    expect((await leaks(page)).openSources).toBeGreaterThan(0);
+    // One stream per tab: activity, graph deltas and consent share it.
+    expect((await leaks(page)).openSources).toBe(1);
 
     await page.evaluate(() => (window as unknown as Host).__navigate('#/notes/Memory/demo/Architecture.md'));
     await expect(host.getByRole('heading', {name: /Linked from/})).toBeVisible();

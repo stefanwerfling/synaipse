@@ -12,12 +12,19 @@ export interface SynaipseEvent {
 
 const KEEPALIVE_MS = 25_000;
 
+/** One connected stream, for events only it should get (a replay on connect). */
+export interface EventClient {
+    sendNamed(name: string, data: unknown): void;
+}
+
+const named = (name: string, data: unknown): string => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
 export class EventBroadcaster {
     private readonly clients = new Set<ServerResponse>();
-    private readonly connectListeners = new Set<() => void>();
+    private readonly connectListeners = new Set<(client: EventClient) => void>();
 
-    /** Runs after a client joined (e.g. to take a delta baseline). */
-    public onConnect(listener: () => void): () => void {
+    /** Runs after a client joined (e.g. to take a delta baseline, or replay state to it). */
+    public onConnect(listener: (client: EventClient) => void): () => void {
         this.connectListeners.add(listener);
         return () => {
             this.connectListeners.delete(listener);
@@ -51,8 +58,17 @@ export class EventBroadcaster {
         res.on('close', cleanup);
         res.on('error', cleanup);
 
+        const client: EventClient = {
+            sendNamed: (name, data) => {
+                try {
+                    res.write(named(name, data));
+                } catch {
+                    // connection died; cleanup runs in 'close' handler
+                }
+            }
+        };
         for (const listener of this.connectListeners) {
-            listener();
+            listener(client);
         }
     }
 
@@ -66,7 +82,7 @@ export class EventBroadcaster {
      * feed never see it.
      */
     public publishNamed(name: string, data: unknown): void {
-        this.send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+        this.send(named(name, data));
     }
 
     private send(payload: string): void {

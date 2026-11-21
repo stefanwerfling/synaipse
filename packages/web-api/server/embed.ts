@@ -214,6 +214,15 @@ export const createSynaipseEmbed = async (
     const broadcaster = new EventBroadcaster();
     const graphDeltas = new GraphDeltaPublisher(service, broadcaster);
     broadcaster.onConnect(() => graphDeltas.prime());
+    // Consent requests ride on the one event stream per browser tab (an
+    // own stream per tab hit the 6-connection limit of HTTP/1.1 with three
+    // tabs). A new stream first gets the open requests.
+    const consent = service.getConsentStore();
+    const offConsentNew = consent.onNew((r) => broadcaster.publishNamed('consent-new', r));
+    const offConsentResolved = consent.onResolved((r) => broadcaster.publishNamed('consent-resolved', r));
+    broadcaster.onConnect((client) => {
+        for (const r of consent.pending()) client.sendNamed('consent-new', r);
+    });
     // Job history in the vault's state.db (local mode); server mode keeps
     // it in memory until jobs move to MariaDB.
     const jobStore = config.mode === 'server'
@@ -266,6 +275,8 @@ export const createSynaipseEmbed = async (
         closed ??= (async () => {
             scheduler.stop();
             graphDeltas.close();
+            offConsentNew();
+            offConsentResolved();
             jobs.stopAll();
             broadcaster.close();
             await mcpHandler.closeAll();

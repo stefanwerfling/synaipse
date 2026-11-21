@@ -39,14 +39,14 @@ The Node API behind the UI is also useful for scripts:
 | GET    | `/api/graph`               | Graph nodes + edges                  |
 | GET    | `/api/tags`                | Tag counts                           |
 | POST   | `/api/sessions/log`        | Append to session log                |
-| GET    | `/api/events/stream`       | SSE stream of vault events           |
+| GET    | `/api/events/stream`       | SSE stream of vault events, graph deltas and consent requests |
 | POST   | `/api/events`              | Publish an event (used by MCP)       |
 
 The id in `/api/notes/<id>` is the vault-relative path, URL-encoded.
 
 ## Live updates from the MCP server
 
-When the MCP server writes a note it publishes an event to `/api/events` (see [`packages/mcp-server/src/EventPublisher.ts`](../packages/mcp-server/src/EventPublisher.ts)). The UI listens via `/api/events/stream` (SSE) and refreshes affected views without a reload.
+When the MCP server writes a note it publishes an event to `/api/events` (see [`packages/mcp-server/src/EventPublisher.ts`](../packages/mcp-server/src/EventPublisher.ts)). The UI listens via `/api/events/stream` (SSE) and refreshes affected views without a reload. The same stream carries named events: `graph-delta` / `graph-reset` for the graph and `consent-new` / `consent-resolved` for the Consent Inbox (a new stream first gets every open request as `consent-new`). So each browser tab holds one long-lived connection; with several tabs over HTTP/1.1 that matters, because the browser allows six per host. `/api/consent/stream` still exists for other clients.
 
 ## Production build
 

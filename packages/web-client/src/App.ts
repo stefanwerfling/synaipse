@@ -155,7 +155,7 @@ export class App {
         host.appendChild(this.element);
         host.appendChild(this.palette.element);
         this.events.start();
-        this.consentPanel.start();
+        this.consentPanel.start(this.events);
         this.graphTab.start();
         this.life.listen(document, 'keydown', (event) => this.onShortcutKey(event));
         if (this.appOpts.routing === 'hash') {

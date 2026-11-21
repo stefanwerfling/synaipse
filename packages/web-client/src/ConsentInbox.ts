@@ -1,5 +1,6 @@
 import {consentApi, type ConsentRequestSummary} from './Api.js';
 import {clear, el} from './Dom.js';
+import type {EventStream} from './Events.js';
 import {defineMessages, formatDateTime} from './I18n.js';
 
 const t = defineMessages('consentInbox', {
@@ -23,8 +24,10 @@ export interface ConsentInboxOptions {
 /**
  * Consent Inbox: shows every open just-in-time consent request from the
  * MCP tool gate, one per row, with Approve / Deny buttons. Live-updates
- * via `/api/consent/stream` (SSE) so the list stays in sync even when
- * multiple tabs are open.
+ * via the app's event stream (`consent-new` / `consent-resolved` on
+ * `/api/events/stream`; a fresh stream first replays the open requests),
+ * so the list stays in sync even when multiple tabs are open, without a
+ * second stream per tab.
  *
  * The badge count on the topbar tab is derived from the same stream —
  * we keep the local `requests` map as the single source of truth and
@@ -34,7 +37,7 @@ export class ConsentInbox {
     public readonly element: HTMLElement;
     private readonly listHost: HTMLElement;
     private readonly requests = new Map<string, ConsentRequestSummary>();
-    private closeStream: (() => void) | null = null;
+    private readonly unsubscribe: Array<() => void> = [];
     private started = false;
 
     public constructor(private readonly opts: ConsentInboxOptions = {}) {
@@ -57,7 +60,7 @@ export class ConsentInbox {
      * Start the live subscription — call once from App.mount() so the
      * badge count is accurate before the user ever opens the tab.
      */
-    public start(): void {
+    public start(events: EventStream): void {
         if (this.started) return;
         this.started = true;
 
@@ -74,25 +77,26 @@ export class ConsentInbox {
                 console.warn('[consent] initial fetch failed', err);
             });
 
-        this.closeStream = consentApi.stream(
-            (req) => {
+        this.unsubscribe.push(
+            events.subscribeNamed('consent-new', (data) => {
+                const req = data as ConsentRequestSummary;
                 this.requests.set(req.id, req);
                 this.render();
                 this.emitCount();
-            },
-            (req) => {
-                this.requests.delete(req.id);
+            }),
+            events.subscribeNamed('consent-resolved', (data) => {
+                this.requests.delete((data as ConsentRequestSummary).id);
                 this.render();
                 this.emitCount();
-            }
+            }),
+            // The replay after a drop only adds; requests resolved meanwhile
+            // would linger without a full refresh.
+            events.onReconnect(() => void this.onShow())
         );
     }
 
     public stop(): void {
-        if (this.closeStream !== null) {
-            this.closeStream();
-            this.closeStream = null;
-        }
+        for (const off of this.unsubscribe.splice(0)) off();
         this.started = false;
     }
 

@@ -807,36 +807,5 @@ export const consentApi = {
         const response = await fetch(apiUrl(`/api/consent/${encodeURIComponent(id)}/deny`), {method: 'POST'});
         const {request} = await json<{request: ConsentRequestSummary}>(response);
         return request;
-    },
-    // SSE stream with named events ("new" + "resolved") — replays the
-    // current pending set on connect so a fresh subscriber doesn't need
-    // a separate GET /pending round-trip.
-    stream: (
-        onNew: (req: ConsentRequestSummary) => void,
-        onResolved: (req: ConsentRequestSummary) => void
-    ): () => void => {
-        const es = new EventSource(apiUrl('/api/consent/stream'));
-        const parse = (evt: MessageEvent): ConsentRequestSummary | null => {
-            try {
-                return JSON.parse(evt.data as string) as ConsentRequestSummary;
-            } catch {
-                return null;
-            }
-        };
-        const handleNew = (evt: MessageEvent): void => {
-            const r = parse(evt);
-            if (r !== null) onNew(r);
-        };
-        const handleResolved = (evt: MessageEvent): void => {
-            const r = parse(evt);
-            if (r !== null) onResolved(r);
-        };
-        es.addEventListener('new', handleNew as EventListener);
-        es.addEventListener('resolved', handleResolved as EventListener);
-        return () => {
-            es.removeEventListener('new', handleNew as EventListener);
-            es.removeEventListener('resolved', handleResolved as EventListener);
-            es.close();
-        };
     }
 };
