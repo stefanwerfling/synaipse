@@ -19,3 +19,20 @@ describe('gray-matter cache', () => {
         expect(parsed.content).toBe('# Body\n');
     });
 });
+
+describe('gray-matter JavaScript front matter', () => {
+    const probe = '__synaipseMatterProbe';
+    const evil = (lang: string): string =>
+        `---${lang}\n{title: (() => { globalThis.${probe} = '${lang}'; return 'x'; })()}\n---\nbody\n`;
+
+    it('is never evaluated, neither when parsing nor when stringifying', () => {
+        for (const lang of ['js', 'javascript', ' js']) {
+            delete (globalThis as Record<string, unknown>)[probe];
+            const note = parseNote({vaultRoot: '/v', absolutePath: '/v/x.md', raw: evil(lang), mtime: 0});
+            expect(note.frontmatter).toEqual({});
+            // Writing such content is refused (until gray-matter is replaced).
+            expect(() => matter.stringify(evil(lang), {title: 'T'}, NO_CACHE)).toThrow(/not supported/);
+            expect((globalThis as Record<string, unknown>)[probe]).toBeUndefined();
+        }
+    });
+});
