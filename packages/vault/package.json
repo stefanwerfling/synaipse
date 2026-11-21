@@ -18,7 +18,10 @@
   },
   "dependencies": {
     "@synaipse/core": "*",
-    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.3.2",
     "ngit": "github:stefanwerfling/ngit#02744ba1caeb0b264bef0ebf46563ff3161505e5"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9"
   }
 }

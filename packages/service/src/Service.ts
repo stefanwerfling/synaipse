@@ -1,8 +1,7 @@
 import path from 'node:path';
 import type {BenchmarkSet, BenchmarkSummary, CanvasDocument, ChatAdapter, Config, ExternalNoteChange, Frontmatter, Graph, Note, NoteAdapter, NoteId, NoteWriteInput, Roadmap, RoadmapSummary, SearchHit, SearchMode, SearchScope, VaultEvent} from '@synaipse/core';
 import {createLogger, parseRoadmap, ProjectScopeError} from '@synaipse/core';
-import matter from 'gray-matter';
-import {EntryStore, FilesystemNoteAdapter, MATTER_NO_CACHE, QueryVectorCache, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
+import {EntryStore, FilesystemNoteAdapter, parseFrontMatter, QueryVectorCache, Vault, VaultHistory, VaultWatcher, type History} from '@synaipse/vault';
 import {createEmbedder, createReranker, embedderFingerprint, QdrantStore, VectorIndex, type Embedder, type Reranker, type VectorStore} from '@synaipse/vector';
 import type {VerifyReport} from 'ngit';
 import type {ActivityCommit, ActivityReport} from './Activity.js';
@@ -790,8 +789,7 @@ export class SynaipseService {
     public async rollbackRoadmap(project: string, commitSha: string): Promise<Roadmap> {
         const id = roadmapPathFor(project);
         const raw = await this.historyService.noteVersion(id, commitSha);
-        const parsed = matter(raw, MATTER_NO_CACHE);
-        const roadmap = parseRoadmap(project, parsed.data as Record<string, unknown>);
+        const roadmap = parseRoadmap(project, parseFrontMatter(raw).data);
         if (roadmap === null) {
             throw new Error(`commit ${commitSha.slice(0, 8)} has no valid roadmap for project "${project}"`);
         }

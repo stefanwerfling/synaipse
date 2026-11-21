@@ -1,9 +1,8 @@
 import {existsSync} from 'node:fs';
 import {mkdir, readdir, readFile, stat, unlink, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import matter from 'gray-matter';
-import {MATTER_NO_CACHE} from '@synaipse/vault';
-import type {Frontmatter, Note} from '@synaipse/core';
+import {parseFrontMatter, stringifyFrontMatter} from '@synaipse/vault';
+import type {Note} from '@synaipse/core';
 import {
     parseChatSession,
     serializeChatSession,
@@ -19,7 +18,7 @@ import {
  * search index. Promoting a chat into a vault note is an explicit user
  * action handled elsewhere — this module only owns the chat layer.
  *
- * File format mirrors what's used elsewhere (gray-matter frontmatter +
+ * File format mirrors what's used elsewhere (YAML frontmatter +
  * markdown body with HTML-comment turn markers), so a chat file is still
  * human-readable if opened in any editor — the difference is purely
  * about where it lives and who scans it.
@@ -78,7 +77,7 @@ export class ChatRepo {
     public async write(session: ChatSession): Promise<void> {
         await this.ensureDir();
         const {content, frontmatter} = serializeChatSession(session);
-        const raw = matter.stringify(content, frontmatter as Record<string, unknown>, MATTER_NO_CACHE);
+        const raw = stringifyFrontMatter(content, frontmatter as Record<string, unknown>);
         const file = this.filePath(session.id);
         const dir = path.dirname(file);
         if (!existsSync(dir)) await mkdir(dir, {recursive: true});
@@ -119,8 +118,8 @@ export class ChatRepo {
     private async readAsNote(id: string, file: string): Promise<Note | null> {
         try {
             const raw = await readFile(file, 'utf8');
-            const parsed = matter(raw, MATTER_NO_CACHE);
-            const frontmatter = parsed.data as Frontmatter;
+            const parsed = parseFrontMatter(raw);
+            const frontmatter = parsed.data;
             const body = parsed.content;
             const stats = await stat(file);
 

@@ -20,7 +20,6 @@
     "@synaipse/core": "*",
     "@synaipse/vault": "*",
     "@synaipse/vector": "*",
-    "gray-matter": "^4.0.3",
     "ngit": "github:stefanwerfling/ngit#02744ba1caeb0b264bef0ebf46563ff3161505e5"
   }
 }

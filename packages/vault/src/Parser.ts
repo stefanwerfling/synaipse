@@ -1,13 +1,14 @@
 import path from 'node:path';
-import matter from 'gray-matter';
-import {NO_CACHE} from './MatterOptions.js';
-import {extractTags, extractWikilinks, type Frontmatter, type Note} from '@synaipse/core';
+import {createLogger, extractTags, extractWikilinks, type Frontmatter, type Note} from '@synaipse/core';
+import {parseFrontMatter} from './FrontMatter.js';
 import {sha1} from './Hash.js';
 
 // Link/tag primitives live in @synaipse/core so the MariaDB adapter
 // parses exactly like the filesystem vault. Re-exported for callers that
 // historically imported them from here.
 export {extractTags, extractWikilinks} from '@synaipse/core';
+
+const log = createLogger('vault');
 
 const noteIdFor = (vaultRoot: string, absolutePath: string): string => {
     return path.relative(vaultRoot, absolutePath).replaceAll(path.sep, '/');
@@ -35,11 +36,13 @@ export interface ParseInput {
 }
 
 export const parseNote = (input: ParseInput): Note => {
-    // Options object on purpose: without one gray-matter keeps every input
-    // (string + Buffer copy) in a process-wide cache that is never evicted,
-    // so each edited version of every note stayed in memory (plan P4 / A4).
-    const parsed = matter(input.raw, NO_CACHE);
-    const frontmatter = parsed.data as Frontmatter;
+    // Never throws: a block that is not YAML front matter stays in the body,
+    // so one broken note neither stops the vault from loading nor loses text.
+    const parsed = parseFrontMatter(input.raw);
+    if (parsed.error !== undefined) {
+        log.warn('front matter ignored', {path: input.absolutePath, error: parsed.error});
+    }
+    const frontmatter = parsed.data;
     const body = parsed.content;
 
     return {

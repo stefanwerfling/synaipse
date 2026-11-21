@@ -1,12 +1,11 @@
 import {mkdir, readFile, stat, writeFile, rm} from 'node:fs/promises';
 import path from 'node:path';
-import matter from 'gray-matter';
-import {NO_CACHE} from './MatterOptions.js';
 import {access} from 'node:fs/promises';
 import {constants as fsConstants} from 'node:fs';
 import {Repo, type PersonInput} from 'ngit';
 import {createLogger, LinkIndex, NotFoundError, VaultError, validateFrontmatter} from '@synaipse/core';
 import type {Note, NoteId, NoteWriteInput, Frontmatter} from '@synaipse/core';
+import {stringifyFrontMatter} from './FrontMatter.js';
 import {parseNote} from './Parser.js';
 import {walkMarkdown} from './Walker.js';
 import {currentWriteBatch} from './WriteBatch.js';
@@ -355,7 +354,7 @@ export class Vault {
             return content;
         }
 
-        return matter.stringify(content, frontmatter, NO_CACHE);
+        return stringifyFrontMatter(content, frontmatter);
     }
 
     private async ensureRoot(): Promise<void> {

@@ -1,9 +1,8 @@
 import {mkdir} from 'node:fs/promises';
 import {createLogger, type Frontmatter} from '@synaipse/core';
-import matter from 'gray-matter';
 import {ConcurrentUpdateError, Repo} from 'ngit';
 import type {History} from './History.js';
-import {NO_CACHE} from './MatterOptions.js';
+import {stringifyFrontMatter} from './FrontMatter.js';
 
 const log = createLogger('repo-history');
 
@@ -14,7 +13,7 @@ const COMMIT_ATTEMPTS = 8;
 export const toMarkdownFile = (content: string, frontmatter?: Frontmatter): string =>
     frontmatter === undefined || Object.keys(frontmatter).length === 0
         ? content
-        : matter.stringify(content, frontmatter, NO_CACHE);
+        : stringifyFrontMatter(content, frontmatter);
 
 export interface RepoCommit {
     adds: ReadonlyArray<{path: string; content: string}>;
