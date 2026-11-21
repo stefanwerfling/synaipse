@@ -138,6 +138,11 @@ export type JobEvent =
 
 type Listener = (event: JobEvent) => void;
 
+/** What {@link JobManager.onAnyEvent} sees: the per-job events plus a job's start. */
+export type JobFeedEvent = JobEvent | {kind: 'queued'} | {kind: 'started'};
+
+type FeedListener = (job: JobRecord, event: JobFeedEvent) => void;
+
 const MAX_LOG_LINES = 50;
 const MAX_HISTORY = 30;
 /** Progress and log lines are written to the store at most this often. */
@@ -149,6 +154,7 @@ export class JobManager {
     private readonly jobs = new Map<string, JobRecord>();
     private readonly aborts = new Map<string, AbortController>();
     private readonly subscribers = new Map<string, Set<Listener>>();
+    private readonly feedListeners = new Set<FeedListener>();
     /** Waiting job ids per type, in start order. */
     private readonly queues = new Map<JobType, string[]>();
     private readonly dirty = new Set<string>();
@@ -236,10 +242,12 @@ export class JobManager {
             this.queues.set(type, queue);
             job.logs.push(`queued: another ${type} job is running`);
             this.persistNow(job);
+            this.emitFeed(job, {kind: 'queued'});
             return job;
         }
 
         this.persistNow(job);
+        this.emitFeed(job, {kind: 'started'});
         this.run(job);
         return job;
     }
@@ -288,6 +296,7 @@ export class JobManager {
         job.status = 'running';
         job.startedAt = Date.now();
         this.persistNow(job);
+        this.emitFeed(job, {kind: 'started'});
         this.updateProgress(job.id);
         this.run(job);
     }
@@ -334,15 +343,38 @@ export class JobManager {
         return () => set?.delete(listener);
     }
 
+    /**
+     * Every event of every job, for the one event stream per browser tab.
+     * Returns the unsubscribe.
+     */
+    public onAnyEvent(listener: FeedListener): () => void {
+        this.feedListeners.add(listener);
+        return () => {
+            this.feedListeners.delete(listener);
+        };
+    }
+
     private emit(jobId: string, event: JobEvent): void {
         const subs = this.subscribers.get(jobId);
-        if (subs === undefined) return;
 
-        for (const fn of subs) {
+        for (const fn of subs ?? []) {
             try {
                 fn(event);
             } catch (cause) {
                 log.error('subscriber failed', {error: cause});
+            }
+        }
+
+        const job = this.jobs.get(jobId);
+        if (job !== undefined) this.emitFeed(job, event);
+    }
+
+    private emitFeed(job: JobRecord, event: JobFeedEvent): void {
+        for (const fn of this.feedListeners) {
+            try {
+                fn(job, event);
+            } catch (cause) {
+                log.error('job feed listener failed', {error: cause});
             }
         }
     }

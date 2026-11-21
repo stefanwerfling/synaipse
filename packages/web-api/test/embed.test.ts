@@ -159,6 +159,34 @@ describe('startSynaipseEmbed', () => {
         stream.destroy();
     });
 
+    it('job start, progress and end ride on the event stream as `job` events', async () => {
+        handle = startSynaipseEmbed({env: explicitEnv()});
+        const base = await listen(handle);
+        await handle.ready;
+
+        let body = '';
+        const stream = request(`${base}/api/events/stream`, (res) => res.on('data', (c: Buffer) => { body += c.toString(); }));
+        stream.on('error', () => undefined);
+        stream.end();
+        for (let i = 0; i < 100 && !body.includes(':connected'); i++) await new Promise((r) => setTimeout(r, 20));
+
+        const res = await fetch(`${base}/api/jobs`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: 'relink', params: {prefix: ''}})
+        });
+        const job = await res.json() as {id: string};
+        for (let i = 0; i < 200 && !body.includes('"status":"done"'); i++) await new Promise((r) => setTimeout(r, 20));
+
+        const updates = [...body.matchAll(/event: job\ndata: (\{[^\n]*\})/g)].map((m) => JSON.parse(m[1]!) as Record<string, unknown>);
+        expect(updates.every((u) => u.id === job.id)).toBe(true);
+        expect(updates[0]).toMatchObject({type: 'relink', status: 'running'});
+        expect(updates.at(-1)).toMatchObject({status: 'done', summary: expect.any(String)});
+        // The state, not the record: no params or log lines go to every tab.
+        expect(updates.some((u) => 'params' in u || 'logs' in u)).toBe(false);
+        stream.destroy();
+    });
+
     for (const [verb, decision] of [['approve', 'granted'], ['deny', 'denied']] as const) {
         it(`POST /api/consent/:id/${verb} stores "${decision}" (frontmatter and the waiting MCP read)`, async () => {
             await writeFile(path.join(dir, 'Secret.md'), '---\ntitle: Secret\nmcp_consent: pending\n---\nprivate\n', 'utf8');

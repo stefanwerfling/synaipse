@@ -4,9 +4,11 @@ import {
     type JobParams,
     type JobRecord,
     type JobType,
+    type JobUpdate,
     type Schedule
 } from './Api.js';
 import {clear, el, portalHost} from './Dom.js';
+import type {EventStream} from './Events.js';
 import {confirmDialog} from './Dialogs.js';
 import {defineMessages, formatDateTime, tc} from './I18n.js';
 import {toastError} from './Toast.js';
@@ -223,6 +225,8 @@ const formatTime = (ts: number): string => {
 
 export interface JobsPanelOptions {
     onChange?: () => void;
+    /** The page's event stream; job progress arrives on it as `job` events. */
+    events?: EventStream;
 }
 
 interface RowRefs {
@@ -240,9 +244,9 @@ export class JobsPanel {
     private jobs: JobRecord[] = [];
     private mounted = false;
     private modal: HTMLElement | null = null;
-    /** Live SSE streams keyed by the running job id, so we can close them. */
-    private readonly streams = new Map<string, () => void>();
     private readonly rows = new Map<string, RowRefs>();
+    private readonly offEvents: Array<() => void> = [];
+    private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     public constructor(private readonly opts: JobsPanelOptions = {}) {
         this.element = el('div', {class: 'jobs-panel'});
@@ -269,6 +273,17 @@ export class JobsPanel {
 
         this.element.appendChild(this.listHost);
         this.renderList();
+
+        const events = opts.events;
+        if (events !== undefined) {
+            this.offEvents.push(
+                events.subscribeNamed('job', (data) => this.onJobUpdate(data as JobUpdate)),
+                // Updates sent while the stream was down are lost.
+                events.onReconnect(() => {
+                    if (this.mounted) this.refreshSoon();
+                })
+            );
+        }
     }
 
     public async onShow(): Promise<void> {
@@ -279,7 +294,10 @@ export class JobsPanel {
     }
 
     public destroy(): void {
-        this.closeAllStreams();
+        for (const off of this.offEvents) off();
+        this.offEvents.length = 0;
+        if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
         this.closeModal();
     }
 
@@ -304,7 +322,6 @@ export class JobsPanel {
     // ── list ────────────────────────────────────────────────────────────
 
     private renderList(): void {
-        this.closeAllStreams();
         this.rows.clear();
         clear(this.listHost);
 
@@ -412,7 +429,6 @@ export class JobsPanel {
         const running = this.runningJobFor(s.id);
         if (running !== undefined) {
             this.showProgress(refs, running);
-            this.attachStream(running.id, refs);
         }
 
         return row;
@@ -463,50 +479,40 @@ export class JobsPanel {
         refs.currentLabel.textContent = job.progress.current ?? '';
     }
 
-    private attachStream(jobId: string, refs: RowRefs): void {
-        const local: JobRecord = {
-            id: jobId, type: 'relink', params: {prefix: ''}, status: 'running',
-            progress: {done: 0, total: 0, failed: 0}, startedAt: Date.now(), logs: []
-        };
+    /** A `job` event: move the row's bar; at the end, reload the list (last run, next run). */
+    private onJobUpdate(update: JobUpdate): void {
+        // Not shown yet: onShow() loads the list.
+        if (!this.mounted) return;
 
-        const close = jobsApi.stream(jobId, (event) => {
-            if (event.kind === 'snapshot') {
-                Object.assign(local, event.job);
-            } else if (event.kind === 'progress') {
-                local.status = 'running';
-                local.progress = {
-                    done: event.done, total: event.total, failed: event.failed,
-                    ...(event.current !== undefined ? {current: event.current} : {})
-                };
-            } else if (event.kind === 'done') {
-                local.status = 'done';
-                refs.currentLabel.textContent = `✓ ${event.summary}`;
-                this.streams.get(jobId)?.();
-                this.streams.delete(jobId);
-                void this.refresh();
-                return;
-            } else if (event.kind === 'failed') {
-                local.status = 'failed';
-                refs.currentLabel.textContent = `✗ ${event.error}`;
-                this.streams.get(jobId)?.();
-                this.streams.delete(jobId);
-                void this.refresh();
-                return;
-            } else if (event.kind === 'stopped') {
-                this.streams.get(jobId)?.();
-                this.streams.delete(jobId);
-                void this.refresh();
-                return;
-            }
-            this.showProgress(refs, local);
-        });
+        const job = this.jobs.find((j) => j.id === update.id);
+        if (job === undefined) {
+            // A run this list does not hold yet (scheduler tick, another tab).
+            if (update.scheduleId !== undefined) this.refreshSoon();
+            return;
+        }
 
-        this.streams.set(jobId, close);
+        Object.assign(job, update);
+        const refs = job.scheduleId !== undefined ? this.rows.get(job.scheduleId) : undefined;
+
+        if (job.status === 'running' || job.status === 'queued') {
+            if (refs !== undefined) this.showProgress(refs, job);
+            return;
+        }
+
+        if (refs !== undefined) {
+            if (job.status === 'done') refs.currentLabel.textContent = `✓ ${job.summary ?? ''}`;
+            if (job.status === 'failed') refs.currentLabel.textContent = `✗ ${job.error ?? ''}`;
+        }
+        this.refreshSoon();
     }
 
-    private closeAllStreams(): void {
-        for (const close of this.streams.values()) close();
-        this.streams.clear();
+    /** One reload for a burst of reasons. */
+    private refreshSoon(): void {
+        if (this.refreshTimer !== null) return;
+        this.refreshTimer = setTimeout(() => {
+            this.refreshTimer = null;
+            void this.refresh();
+        }, 100);
     }
 
     // ── modal ───────────────────────────────────────────────────────────

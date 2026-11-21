@@ -644,13 +644,11 @@ export interface JobRecord {
     logs: string[];
 }
 
-export type JobEvent =
-    | {kind: 'snapshot'; job: JobRecord}
-    | {kind: 'progress'; done: number; total: number; failed: number; current?: string}
-    | {kind: 'log'; message: string}
-    | {kind: 'done'; summary: string}
-    | {kind: 'failed'; error: string}
-    | {kind: 'stopped'};
+/**
+ * A job change as the `job` event on `/api/events/stream`: the job's state
+ * without params and log. Progress comes a few times a second at most.
+ */
+export type JobUpdate = Pick<JobRecord, 'id' | 'type' | 'status' | 'progress' | 'scheduleId' | 'summary' | 'error'>;
 
 export const jobsApi = {
     list: async (): Promise<JobRecord[]> => json(await fetch(apiUrl('/api/jobs'))),
@@ -665,18 +663,6 @@ export const jobsApi = {
     },
     stop: async (id: string): Promise<void> => {
         await fetch(apiUrl(`/api/jobs/${encodeURIComponent(id)}/stop`), {method: 'POST'});
-    },
-    stream: (id: string, onEvent: (event: JobEvent) => void, onError?: (e: Event) => void): () => void => {
-        const es = new EventSource(apiUrl(`/api/jobs/${encodeURIComponent(id)}/stream`));
-        es.onmessage = (evt) => {
-            try {
-                onEvent(JSON.parse(evt.data) as JobEvent);
-            } catch {
-                // ignore malformed
-            }
-        };
-        if (onError !== undefined) es.onerror = onError;
-        return () => es.close();
     }
 };
 

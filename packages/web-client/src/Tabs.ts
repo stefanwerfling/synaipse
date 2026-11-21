@@ -4,6 +4,7 @@ import type {BenchmarksPanel} from './BenchmarksPanel.js';
 import type {CanvasPanel} from './CanvasPanel.js';
 import type {ChatPanel} from './ChatPanel.js';
 import type {InboxPanel} from './InboxPanel.js';
+import type {EventStream} from './Events.js';
 import type {JobsPanel} from './JobsPanel.js';
 import type {RoadmapPanel} from './RoadmapPanel.js';
 import {defineMessages} from './I18n.js';
@@ -89,6 +90,8 @@ export interface PanelContext {
     notesChanged(): void;
     /** Something a route names changed inside a panel (roadmap project). */
     routeChanged(): void;
+    /** The page's one event stream (named events such as `job`). */
+    readonly events: EventStream;
 }
 
 export interface LazyPanels {
@@ -129,7 +132,7 @@ export const PANEL_FACTORIES: {[K in LazyTab]: (ctx: PanelContext) => Promise<La
             ctx.openNote(noteId);
         }
     }),
-    jobs: async (ctx) => new (await import('./JobsPanel.js')).JobsPanel({onChange: ctx.notesChanged}),
+    jobs: async (ctx) => new (await import('./JobsPanel.js')).JobsPanel({onChange: ctx.notesChanged, events: ctx.events}),
     activity: async (ctx) => new (await import('./ActivityPanel.js')).ActivityPanel({onOpenNote: ctx.openNote}),
     audit: async () => new (await import('./AuditPanel.js')).AuditPanel()
 };

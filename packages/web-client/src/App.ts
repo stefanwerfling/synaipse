@@ -245,7 +245,8 @@ export class App {
                 return target === null ? null : canonicalNoteLink(target);
             },
             notesChanged: () => this.notesChanged(),
-            routeChanged: () => this.routes.record()
+            routeChanged: () => this.routes.record(),
+            events: this.events
         };
     }
 

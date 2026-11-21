@@ -138,6 +138,7 @@ export const createSynaipseEmbed = async (
     const {EventBroadcaster} = await import('./events.js');
     const {GraphDeltaPublisher} = await import('./graph-deltas.js');
     const {JobManager} = await import('./jobs.js');
+    const {relayJobEvents} = await import('./job-events.js');
     const {MemoryJobStore, SqliteJobStore} = await import('./job-store.js');
     const {LocalScheduleStore} = await import('./local-schedule-store.js');
     const {Scheduler} = await import('./scheduler.js');
@@ -229,6 +230,8 @@ export const createSynaipseEmbed = async (
         ? new MemoryJobStore()
         : new SqliteJobStore(config.statePath ?? path.join(config.vaultPath, '.synaipse', 'state.db'));
     const jobs = new JobManager(service, env, jobStore);
+    // Job progress rides on the same stream (see relayJobEvents).
+    const offJobEvents = relayJobEvents(jobs, broadcaster);
 
     const scheduleStore: ScheduleStore = mariaScheduleStore ?? new LocalScheduleStore(config.schedulesPath);
     const scheduler = new Scheduler(scheduleStore, jobs);
@@ -278,6 +281,7 @@ export const createSynaipseEmbed = async (
             offConsentNew();
             offConsentResolved();
             jobs.stopAll();
+            offJobEvents();
             broadcaster.close();
             await mcpHandler.closeAll();
             await scheduleStore.close();

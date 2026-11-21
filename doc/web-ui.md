@@ -46,7 +46,7 @@ The id in `/api/notes/<id>` is the vault-relative path, URL-encoded.
 
 ## Live updates from the MCP server
 
-When the MCP server writes a note it publishes an event to `/api/events` (see [`packages/mcp-server/src/EventPublisher.ts`](../packages/mcp-server/src/EventPublisher.ts)). The UI listens via `/api/events/stream` (SSE) and refreshes affected views without a reload. The same stream carries named events: `graph-delta` / `graph-reset` for the graph and `consent-new` / `consent-resolved` for the Consent Inbox (a new stream first gets every open request as `consent-new`). So each browser tab holds one long-lived connection; with several tabs over HTTP/1.1 that matters, because the browser allows six per host. `/api/consent/stream` still exists for other clients.
+When the MCP server writes a note it publishes an event to `/api/events` (see [`packages/mcp-server/src/EventPublisher.ts`](../packages/mcp-server/src/EventPublisher.ts)). The UI listens via `/api/events/stream` (SSE) and refreshes affected views without a reload. The same stream carries named events: `graph-delta` / `graph-reset` for the graph `consent-new` / `consent-resolved` for the Consent Inbox (a new stream first gets every open request as `consent-new`), and `job` for the Jobs tab: a job's state (id, type, status, progress, schedule, summary or error; no params, no log lines) when it is queued, starts or ends, and its progress at most every 250 ms per job. After a dropped stream the Jobs tab reloads its list. So each browser tab holds one connection, whatever it shows; with several tabs over HTTP/1.1 that matters, because the browser allows six per host. `/api/consent/stream` and `/api/jobs/:id/stream` (with log lines) still exist for other clients.
 
 ## Production build
 
