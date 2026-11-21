@@ -37,6 +37,7 @@ await handle.unmount();     // stops SSE, timers, listeners; removes DOM and ove
 | `onThemeChange` | Called with the active theme once after mount and on every change (the user's toggle, `setTheme`). The host switches its shell tokens along, see below. |
 | `brand` | `false` hides the Synaipse logo and name in the top bar, for a host whose tab already names it. Default `true`. |
 | `authGate` | Standalone only: show the login screen in server mode. A host owns authentication and leaves it off. |
+| `storageNamespace` | Keeps this UI's browser storage apart from other Synaipse UIs on the same origin, for example a second one against another vault. Covers drafts, graph layouts, collapse states, and the theme and language choice. Keys become `synaipse:<namespace>:…` instead of `synaipse.…`. Allowed are letters, digits, `_` and `-`, at most 64; anything else makes `mount()` throw. Default: none, the standalone keys. |
 
 ### Routes
 
@@ -58,7 +59,7 @@ What the host can rely on:
 - **Lazy panels.** Every tab except Notes, Graph and Consent is imported on first open.
 - **Teardown.** `unmount()` closes both SSE streams and a running chat stream. It clears every interval and animation frame and removes global listeners. A fresh `mount()` into the same container afterwards works.
 
-Known limit: the API base and the theme are page-wide. Two Synaipse instances on one page share them, which is fine as long as they talk to one backend.
+Known limit: the API base, the theme and the storage namespace are page-wide; the last `mount()` sets them. Two Synaipse instances on one page share them, which is fine as long as they talk to one backend. Instances on separate pages of one origin (host tabs that remount, two hosts) keep their state apart with different `storageNamespace` values.
 
 ### Build artifact
 

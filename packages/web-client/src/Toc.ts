@@ -1,6 +1,7 @@
 import {clear, el} from './Dom.js';
 import {slugify} from './Wikilinks.js';
 import {defineMessages} from './I18n.js';
+import {readItem, writeItem} from './LocalStore.js';
 
 const t = defineMessages('toc', {
     toggle: 'Toggle outline',
@@ -78,12 +79,8 @@ export class TocPanel {
 
         // Restore prior collapse state. Fail-silent if localStorage is
         // locked down (e.g. private mode) — the panel just starts open.
-        try {
-            if (window.localStorage.getItem(TOC_COLLAPSED_KEY) === '1') {
-                this.setCollapsed(true);
-            }
-        } catch {
-            /* ignore */
+        if (readItem(TOC_COLLAPSED_KEY) === '1') {
+            this.setCollapsed(true);
         }
     }
 
@@ -96,11 +93,7 @@ export class TocPanel {
         this.collapsed = next;
         this.element.classList.toggle('collapsed', next);
         this.head.setAttribute('aria-expanded', next ? 'false' : 'true');
-        try {
-            window.localStorage.setItem(TOC_COLLAPSED_KEY, next ? '1' : '0');
-        } catch {
-            /* ignore */
-        }
+        writeItem(TOC_COLLAPSED_KEY, next ? '1' : '0');
     }
 
     public setEntries(entries: readonly TocEntry[]): void {

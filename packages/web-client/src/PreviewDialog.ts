@@ -1,6 +1,7 @@
 import {el} from './Dom.js';
 import {openModal, type ModalHandle} from './Modal.js';
 import {defineMessages, tc} from './I18n.js';
+import {readItem, writeItem} from './LocalStore.js';
 
 const t = defineMessages('previewDialog', {
     title: 'GDPR preview before sending',
@@ -134,17 +135,9 @@ const SKIP_KEY = 'synaipse-dsgvo-preview-skip';
 
 export const previewSkipFlag = {
     isSet(): boolean {
-        try {
-            return window.localStorage.getItem(SKIP_KEY) === '1';
-        } catch {
-            return false;
-        }
+        return readItem(SKIP_KEY) === '1';
     },
     set(): void {
-        try {
-            window.localStorage.setItem(SKIP_KEY, '1');
-        } catch {
-            // ignore — localStorage disabled / quota
-        }
+        writeItem(SKIP_KEY, '1');
     }
 };

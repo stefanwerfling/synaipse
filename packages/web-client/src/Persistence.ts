@@ -1,3 +1,5 @@
+import {onStorageNamespaceChange, storageArea, storageKey} from './LocalStore.js';
+
 export interface StorageCodec<T> {
     serialize: (value: T) => string;
     deserialize: (raw: string) => T;
@@ -21,13 +23,10 @@ export const setCodec: StorageCodec<ReadonlySet<string>> = {
     }
 };
 
+/** `key` is the stored (already namespaced) key. */
 const readInitial = <T>(key: string, initial: T, codec: StorageCodec<T>): T => {
-    if (typeof localStorage === 'undefined') {
-        return initial;
-    }
-
     try {
-        const raw = localStorage.getItem(key);
+        const raw = storageArea()?.getItem(key) ?? null;
 
         if (raw === null) {
             return initial;
@@ -85,10 +84,13 @@ export class PersistentValue<T> {
     private readonly listeners = new Set<(value: T) => void>();
     private readonly storageHandler: (event: StorageEvent) => void;
     private readonly unloadHandler: (() => void) | null = null;
+    private readonly offNamespace: () => void;
     private persistTimer: number | null = null;
+    /** The stored key: `name` in the current storage namespace (LocalStore). */
+    private key: string;
 
     public constructor(
-        private readonly key: string,
+        private readonly name: string,
         private readonly initial: T,
         private readonly codec: StorageCodec<T> = defaultCodec<T>(),
         /** When > 0, persist() coalesces writes via a leading-edge timer.
@@ -96,10 +98,20 @@ export class PersistentValue<T> {
          * don't JSON-stringify + localStorage.setItem on every call. */
         private readonly persistDebounceMs: number = 0
     ) {
-        this.current = readInitial(key, initial, codec);
+        this.key = storageKey(name);
+        this.current = readInitial(this.key, initial, codec);
+
+        // Module-level values load at import, before mount() sets the
+        // namespace: move over then. A pending write still goes to the old key.
+        this.offNamespace = onStorageNamespaceChange(() => {
+            if (this.persistTimer !== null) this.flush();
+            this.key = storageKey(this.name);
+            this.current = readInitial(this.key, this.initial, this.codec);
+            this.emit();
+        });
 
         this.storageHandler = (event) => {
-            const target = typeof localStorage === 'undefined' ? null : localStorage;
+            const target = storageArea();
             const decision = decodeStorageEvent(event, target, this.key, this.initial, this.codec);
 
             if (decision.kind === 'ignore') {
@@ -154,6 +166,7 @@ export class PersistentValue<T> {
 
     public destroy(): void {
         this.flush();
+        this.offNamespace();
 
         if (typeof window !== 'undefined') {
             window.removeEventListener('storage', this.storageHandler);
@@ -185,12 +198,8 @@ export class PersistentValue<T> {
     }
 
     private persistNow(): void {
-        if (typeof localStorage === 'undefined') {
-            return;
-        }
-
         try {
-            localStorage.setItem(this.key, this.codec.serialize(this.current));
+            storageArea()?.setItem(this.key, this.codec.serialize(this.current));
         } catch {
             // best-effort
         }

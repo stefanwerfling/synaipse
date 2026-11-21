@@ -2,6 +2,7 @@ import './Styles.css';
 import {App} from './App.js';
 import {setApiBase} from './ApiBase.js';
 import {fetchAuthMode} from './Auth.js';
+import {setStorageNamespace} from './LocalStore.js';
 import {getLocale, initLocale, onLocaleChange, setLocale, type Locale} from './I18n.js';
 import {mountHostSignInNotice, mountLoginScreen} from './Login.js';
 import {getTheme, initTheme, onThemeChange, ROOT_CLASS, setTheme, type Theme} from './Theme.js';
@@ -55,6 +56,14 @@ export interface SynaipseMountOptions {
      * Default: the user's stored choice, else English.
      */
     locale?: Locale;
+    /**
+     * Keeps this UI's browser storage (drafts, layouts, collapse states,
+     * theme and language choice) apart from other Synaipse UIs on the same
+     * origin, e.g. a second one against another vault: keys become
+     * `synaipse:<namespace>:…`. Letters, digits, `_`, `-`; at most 64.
+     * Default: none, the standalone keys (`synaipse.…`).
+     */
+    storageNamespace?: string;
 }
 
 export interface SynaipseMountHandle {
@@ -74,6 +83,8 @@ export interface SynaipseMountHandle {
 type Account = {id: number; email: string; isAdmin: boolean; managedByHost?: boolean};
 
 export async function mount(container: HTMLElement, opts: SynaipseMountOptions = {}): Promise<SynaipseMountHandle> {
+    // Before anything reads storage (theme, locale); throws on a bad name.
+    setStorageNamespace(opts.storageNamespace);
     setApiBase(opts.apiBase);
     // Class first: the theme is stamped on every .synaipse-root.
     container.classList.add(ROOT_CLASS);

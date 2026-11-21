@@ -1,5 +1,6 @@
 import hljsDarkCss from 'highlight.js/styles/github-dark.css?inline';
 import hljsLightCss from 'highlight.js/styles/github.css?inline';
+import {readItem, writeItem} from './LocalStore.js';
 
 export type Theme = 'dark' | 'light';
 
@@ -10,30 +11,11 @@ const EVENT_NAME = 'synaipse:theme-change';
 const isTheme = (value: unknown): value is Theme => value === 'dark' || value === 'light';
 
 const readStoredTheme = (): Theme => {
-    if (typeof localStorage === 'undefined') {
-        return 'dark';
-    }
-
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-
-        return isTheme(raw) ? raw : 'dark';
-    } catch {
-        return 'dark';
-    }
+    const raw = readItem(STORAGE_KEY);
+    return isTheme(raw) ? raw : 'dark';
 };
 
-const persistTheme = (theme: Theme): void => {
-    if (typeof localStorage === 'undefined') {
-        return;
-    }
-
-    try {
-        localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-        // ignore — localStorage disabled / quota
-    }
-};
+const persistTheme = (theme: Theme): void => writeItem(STORAGE_KEY, theme);
 
 /** Root class of every Synaipse DOM tree (app container and portal layer). */
 export const ROOT_CLASS = 'synaipse-root';

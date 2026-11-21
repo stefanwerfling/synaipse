@@ -4,6 +4,7 @@ import {clear, el} from './Dom.js';
 import {loadJsNGraph, readGraphTheme, type JsNGraph} from './GraphStyle.js';
 import {defineMessages} from './I18n.js';
 import {buildRoadmapDag, phaseIds, type DagNode} from './RoadmapDag.js';
+import {readItem, writeItem} from './LocalStore.js';
 
 /**
  * Roadmap as a dependency graph (plan P10 / S4): steps as cards in
@@ -219,7 +220,7 @@ export class RoadmapGraph {
     private loadOpen(): Set<string> {
         const key = this.storageKey();
         try {
-            const raw = key === null ? null : window.localStorage.getItem(key);
+            const raw = key === null ? null : readItem(key);
             const parsed: unknown = raw === null ? [] : JSON.parse(raw);
             return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []);
         } catch {
@@ -229,12 +230,8 @@ export class RoadmapGraph {
 
     private saveOpen(): void {
         const key = this.storageKey();
-        if (key === null) return;
-        try {
-            window.localStorage.setItem(key, JSON.stringify([...this.open]));
-        } catch {
-            // private mode: the open phases just are not remembered
-        }
+        // Private mode: the open phases just are not remembered.
+        if (key !== null) writeItem(key, JSON.stringify([...this.open]));
     }
 
     /** Remove the canvas when the panel switches back to the table. */

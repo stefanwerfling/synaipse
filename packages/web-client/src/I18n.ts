@@ -1,3 +1,4 @@
+import {readItem, writeItem} from './LocalStore.js';
 /**
  * UI language (plan P7 / C3). No library. Each module keeps its English
  * messages next to the code under a namespace; the German tables live in
@@ -33,21 +34,12 @@ const STORAGE_KEY = 'synaipse.locale';
 export const isLocale = (value: unknown): value is Locale => value === 'en' || value === 'de';
 
 const readStored = (): Locale | null => {
-    try {
-        const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-        return isLocale(raw) ? raw : null;
-    } catch {
-        return null;
-    }
+    const raw = readItem(STORAGE_KEY);
+    return isLocale(raw) ? raw : null;
 };
 
-const writeStored = (locale: Locale): void => {
-    try {
-        globalThis.localStorage?.setItem(STORAGE_KEY, locale);
-    } catch {
-        // storage blocked: the choice lasts for this page only
-    }
-};
+// Storage blocked: the choice lasts for this page only.
+const writeStored = (locale: Locale): void => writeItem(STORAGE_KEY, locale);
 
 let current: Locale = DEFAULT_LOCALE;
 const listeners = new Set<(locale: Locale) => void>();

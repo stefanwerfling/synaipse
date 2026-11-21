@@ -18,8 +18,8 @@
     const host = document.getElementById('host');
     let handle = null;
     window.__routes = [];
-    window.__mount = async () => {
-        handle = await mount(host, {apiBase: '', theme: 'light', brand: false, onRouteChange: (r) => window.__routes.push(r)});
+    window.__mount = async (extra = {}) => {
+        handle = await mount(host, {apiBase: '', theme: 'light', brand: false, onRouteChange: (r) => window.__routes.push(r), ...extra});
         return true;
     };
     window.__unmount = async () => {

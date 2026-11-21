@@ -1,4 +1,5 @@
 import {defineMessages} from './I18n.js';
+import {keysWithPrefix, readItem, removeItem, writeItem} from './LocalStore.js';
 
 /**
  * Local-only unsaved-edit persistence. When the Editor detects a change
@@ -27,7 +28,7 @@ const key = (noteId: string): string => `${KEY_PREFIX}${noteId}`;
 
 export const readDraft = (noteId: string): EditorDraft | null => {
     try {
-        const raw = window.localStorage.getItem(key(noteId));
+        const raw = readItem(key(noteId));
         if (raw === null) return null;
         const parsed = JSON.parse(raw) as EditorDraft;
         if (typeof parsed.content !== 'string') return null;
@@ -40,38 +41,12 @@ export const readDraft = (noteId: string): EditorDraft | null => {
     }
 };
 
-export const writeDraft = (noteId: string, draft: EditorDraft): void => {
-    try {
-        window.localStorage.setItem(key(noteId), JSON.stringify(draft));
-    } catch {
-        // Quota / corrupted / disabled storage — best-effort, silent.
-    }
-};
+// Quota / disabled storage: best-effort, silent.
+export const writeDraft = (noteId: string, draft: EditorDraft): void => writeItem(key(noteId), JSON.stringify(draft));
 
-export const clearDraft = (noteId: string): void => {
-    try {
-        window.localStorage.removeItem(key(noteId));
-    } catch {
-        // ignore
-    }
-};
+export const clearDraft = (noteId: string): void => removeItem(key(noteId));
 
-export const listDraftIds = (): Set<string> => {
-    const ids = new Set<string>();
-
-    try {
-        for (let i = 0; i < window.localStorage.length; i += 1) {
-            const k = window.localStorage.key(i);
-            if (k !== null && k.startsWith(KEY_PREFIX)) {
-                ids.add(k.slice(KEY_PREFIX.length));
-            }
-        }
-    } catch {
-        // localStorage unavailable — no drafts to advertise.
-    }
-
-    return ids;
-};
+export const listDraftIds = (): Set<string> => new Set(keysWithPrefix(KEY_PREFIX));
 
 /**
  * "3 min ago" / "2h ago" / "yesterday". Deliberately coarse — the user

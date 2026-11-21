@@ -6,6 +6,7 @@ import {confirmDialog, formDialog, promptDialog, validProjectName} from './Dialo
 import {defineMessages, formatDateTime, formatNumber, tc} from './I18n.js';
 import type {RoadmapGraph} from './RoadmapGraph.js';
 import {toast} from './Toast.js';
+import {readItem, writeItem} from './LocalStore.js';
 
 const t = defineMessages('roadmapPanel', {
     a11yProject: 'Project',
@@ -116,20 +117,10 @@ const STATUS_ORDER: RoadmapStatus[] = [
 
 const VIEW_KEY = 'synaipse.rm.view';
 
-const readView = (): 'table' | 'graph' => {
-    try {
-        return window.localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'table';
-    } catch {
-        return 'table';
-    }
-};
+const readView = (): 'table' | 'graph' => (readItem(VIEW_KEY) === 'graph' ? 'graph' : 'table');
 
 const writeView = (view: 'table' | 'graph'): void => {
-    try {
-        window.localStorage.setItem(VIEW_KEY, view);
-    } catch {
-        // private mode: the view just is not remembered
-    }
+    writeItem(VIEW_KEY, view);
 };
 
 const STATUS_LABEL_KEY = {
@@ -448,7 +439,7 @@ export class RoadmapPanel {
         const key = this.collapseKey();
         if (key === null) return new Set();
         try {
-            const raw = window.localStorage.getItem(key);
+            const raw = readItem(key);
             if (raw === null) return new Set();
             const arr = JSON.parse(raw) as unknown;
             return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
@@ -459,12 +450,8 @@ export class RoadmapPanel {
 
     private saveCollapsed(): void {
         const key = this.collapseKey();
-        if (key === null) return;
-        try {
-            window.localStorage.setItem(key, JSON.stringify([...this.collapsed]));
-        } catch {
-            /* storage full/blocked — collapse is a convenience, ignore. */
-        }
+        // Storage full/blocked: collapse is a convenience, ignore.
+        if (key !== null) writeItem(key, JSON.stringify([...this.collapsed]));
     }
 
     private toggleCollapse(id: string): void {

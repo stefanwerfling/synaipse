@@ -69,7 +69,7 @@ test.beforeEach(async ({page}) => {
 interface Leaks {listeners: string[]; intervals: number; openSources: number}
 type Host = {
     __leaks: () => Leaks;
-    __mount: () => Promise<boolean>;
+    __mount: (extra?: Record<string, unknown>) => Promise<boolean>;
     __unmount: () => Promise<boolean>;
     __navigate: (route: string) => Promise<void>;
     __routes: string[];
@@ -115,5 +115,38 @@ test('mount, use and unmount leave nothing behind', async ({page, errors}) => {
     expect(await leaks(page)).toEqual(first);
     await cycle(page);
     expect(await leaks(page)).toEqual(first);
+    expect(errors).toEqual([]);
+});
+
+test('storageNamespace keeps the embed\'s browser storage apart (plan E1)', async ({page, errors}) => {
+    await page.goto('/embed-host.html');
+    await page.waitForFunction(() => (window as unknown as Host).__hostReady === true);
+    // What a standalone Synaipse on the same origin left behind.
+    await page.evaluate(() => {
+        localStorage.clear();
+        localStorage.setItem('synaipse-theme', 'dark');
+        localStorage.setItem('synaipse.notes.groupMode', '"tag"');
+    });
+
+    await expect(page.evaluate(() => (window as unknown as Host).__mount({storageNamespace: 'bad name'}))).rejects.toThrow(/storageNamespace/);
+    expect(await page.locator('#host').evaluate((el) => el.childElementCount)).toBe(0);
+
+    await page.evaluate(() => (window as unknown as Host).__mount({storageNamespace: 'e2e'}));
+    const host = page.locator('#host');
+    // The standalone "group by tag" is not this instance's: it groups by folder.
+    await expect(host.locator('.note-list-item')).toHaveCount(5);
+    await expect(host.locator('.group-mode-btn.active')).toHaveText(/folder/i);
+    await host.locator('.group-mode-btn').filter({hasText: /recent/i}).click();
+    await page.evaluate(() => (window as unknown as Host).__navigate('#/graph'));
+    await expect(host.locator('canvas').first()).toBeVisible();
+    await page.evaluate(() => (window as unknown as Host).__unmount());
+
+    const stored = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])));
+    expect(stored['synaipse:e2e:theme']).toBe('light');
+    expect(stored['synaipse-theme']).toBe('dark');
+    expect(stored['synaipse.notes.groupMode']).toBe('"tag"');
+    expect(stored['synaipse:e2e:notes.groupMode']).toBe('"recent"');
+    const foreign = Object.keys(stored).filter((k) => !k.startsWith('synaipse:e2e:') && k !== 'synaipse-theme' && k !== 'synaipse.notes.groupMode');
+    expect(foreign).toEqual([]);
     expect(errors).toEqual([]);
 });
