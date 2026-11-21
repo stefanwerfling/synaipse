@@ -83,7 +83,10 @@ export const handleConsentRoute = async (
         if (method !== 'POST') { methodNotAllowed(res); return done; }
 
         const id = decisionMatch[1] ?? '';
-        const decision = decisionMatch[2] as ConsentDecision;
+        // The URL says approve/deny; the stored decision (frontmatter, MCP
+        // gate, list filters) is granted/denied. Passing the verb through
+        // made "deny" readable for MCP and "approve" ask again forever.
+        const decision: ConsentDecision = decisionMatch[2] === 'approve' ? 'granted' : 'denied';
         const req_ = await service.resolveConsent(id, decision);
 
         if (req_ === null) {

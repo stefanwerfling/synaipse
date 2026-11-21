@@ -130,6 +130,24 @@ describe('startSynaipseEmbed', () => {
         expect((await fetch(`${base}/api/notes`)).status).toBe(500);
     });
 
+    for (const [verb, decision] of [['approve', 'granted'], ['deny', 'denied']] as const) {
+        it(`POST /api/consent/:id/${verb} stores "${decision}" (frontmatter and the waiting MCP read)`, async () => {
+            await writeFile(path.join(dir, 'Secret.md'), '---\ntitle: Secret\nmcp_consent: pending\n---\nprivate\n', 'utf8');
+            handle = startSynaipseEmbed({env: explicitEnv()});
+            const base = await listen(handle);
+            const {service} = await handle.ready;
+            const consent = service.getConsentStore();
+            const waiting = consent.request('Secret.md', 'tok', 5000);
+            const id = consent.pending()[0]!.id;
+
+            const res = await fetch(`${base}/api/consent/${encodeURIComponent(id)}/${verb}`, {method: 'POST'});
+            expect(res.status).toBe(200);
+            expect(((await res.json()) as {request: {decision: string}}).request.decision).toBe(decision);
+            expect(await waiting).toBe(decision);
+            expect(await readFile(path.join(dir, 'Secret.md'), 'utf8')).toContain(`mcp_consent: ${decision}`);
+        });
+    }
+
     it('close() ends open SSE streams and stops answering', async () => {
         handle = startSynaipseEmbed({env: explicitEnv()});
         const base = await listen(handle);
